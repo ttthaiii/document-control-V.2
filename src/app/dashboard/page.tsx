@@ -43,12 +43,28 @@ function DashboardContent() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {/* Quick Stats */}
-          <div className="bg-white p-6 rounded-lg shadow">
-            <h3 className="text-lg font-semibold text-gray-800 mb-2">📋 RFA Documents</h3>
-            <p className="text-3xl font-bold text-blue-600">0</p>
-            <p className="text-gray-600 text-sm">รอการอนุมัติ</p>
+        {/* Quick Stats */}
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h3 className="text-lg font-semibold text-gray-800 mb-2">📋 RFA Documents</h3>
+          <p className="text-3xl font-bold text-blue-600">0</p>
+          <p className="text-gray-600 text-sm mb-4">รอการอนุมัติ</p>
+          
+          {/* 🚀 เพิ่มปุ่มใหม่ */}
+          <div className="flex space-x-2">
+            <button
+              onClick={() => router.push('/dashboard/rfa/create')}
+              className="flex-1 bg-blue-600 text-white px-3 py-2 rounded text-sm hover:bg-blue-700 transition-colors"
+            >
+              สร้าง RFA
+            </button>
+            <button
+              onClick={() => router.push('/dashboard/rfa')}
+              className="flex-1 bg-gray-100 text-gray-700 px-3 py-2 rounded text-sm hover:bg-gray-200 transition-colors"
+            >
+              ดูทั้งหมด
+            </button>
           </div>
+        </div>
 
           <div className="bg-white p-6 rounded-lg shadow">
             <h3 className="text-lg font-semibold text-gray-800 mb-2">❓ RFI Documents</h3>
@@ -90,7 +106,7 @@ function DashboardContent() {
 
 export default function DashboardPage() {
   return (
-    <AuthGuard requireAuth={true}>
+    <AuthGuard>  {/* ✅ ใช้ default แล้ว */}
       <DashboardContent />
     </AuthGuard>
   );
