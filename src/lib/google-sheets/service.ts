@@ -107,13 +107,19 @@ export class GoogleSheetsService {
         return rowProject.trim() === projectName.trim();
       });
 
-      // ดึงหมวดงานที่ไม่ซ้ำ
-      const categories = Array.from(new Set(
+      // ดึงหมวดงานที่ไม่ซ้ำ และกรองเฉพาะ Shop_ และ AS-Built_
+      const allCategories = Array.from(new Set(
         projectTasks
           .map((row: any) => row['หมวดงาน'] || row['Category'] || '')
           .filter((category: string) => category.trim())
           .map((category: string) => category.trim())
-      )).sort();
+      ));
+
+      // กรองเฉพาะหมวดงานที่ขึ้นต้นด้วย Shop_ หรือ AS-Built_
+      const categories = allCategories.filter((category: string) => {
+        const categoryLower = category.toLowerCase();
+        return categoryLower.startsWith('shop_') || categoryLower.startsWith('as-built_');
+      }).sort();
 
       console.log(`📂 Project "${projectName}" has ${categories.length} categories:`, categories);
       
