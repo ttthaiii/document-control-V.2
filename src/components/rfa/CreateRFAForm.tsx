@@ -3,7 +3,9 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { FileText, Upload, CheckCircle, ChevronRight, ChevronLeft, X, AlertCircle, Clock } from 'lucide-react'
+import { FileText, Upload, CheckCircle, ChevronRight, ChevronLeft, X, AlertCircle, Clock, Building, Layers, FolderOpen } from 'lucide-react'
+import { useGoogleSheets } from '@/lib/hooks/useGoogleSheets'
+import { useAuth } from '@/lib/auth/useAuth' // เพิ่มบรรทัดนี้
 
 // Types
 interface RFAFormData {
@@ -12,11 +14,27 @@ interface RFAFormData {
   title: string
   description: string
   files: File[]
-  googleSheetsTask?: {
-    taskId: string
-    taskName: string
-    category: string
-  }
+  // แทนที่ googleSheetsTask เก่า
+  selectedProject: string
+  selectedCategory: string
+  selectedTask: TaskData | null
+}
+
+interface TaskData {
+  taskCategory: string
+  taskName: string
+  projectName: string
+  taskUid?: string
+  startDate?: string
+  finishDate?: string
+  percentComplete?: number
+}
+
+interface Site {
+  id: string
+  name: string
+  sheetId?: string
+  sheetName?: string
 }
 
 interface Category {
@@ -38,7 +56,10 @@ const INITIAL_FORM_DATA: RFAFormData = {
   categoryId: '',
   title: '',
   description: '',
-  files: []
+  files: [],
+  selectedProject: '',
+  selectedCategory: '',
+  selectedTask: null
 }
 
 const RFA_TYPE_CONFIG = {
@@ -74,20 +95,34 @@ const RFA_TYPE_CONFIG = {
 export default function CreateRFAForm({ 
   onClose, 
   isModal = false,
-  user 
+  userProp // ← เปลี่ยนชื่อจาก user เป็น userProp
 }: { 
   onClose?: () => void
   isModal?: boolean
-  user?: User
+  userProp?: User 
 }) {
   // State
   const [currentStep, setCurrentStep] = useState(1)
-  const [formData, setFormData] = useState<RFAFormData>(INITIAL_FORM_DATA)
+  const [formData, setFormData] = useState<RFAFormData>({
+    ...INITIAL_FORM_DATA,
+    selectedProject: '',
+    selectedCategory: '',
+    selectedTask: null
+  })
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [uploading, setUploading] = useState(false)
   
+
+  const [sites, setSites] = useState<Site[]>([])
+  const [projects, setProjects] = useState<string[]>([])
+  const [sheetCategories, setSheetCategories] = useState<string[]>([])
+  const [tasks, setTasks] = useState<TaskData[]>([])
+  const [selectedSite, setSelectedSite] = useState<string>('')
+  const { user: authUser, firebaseUser, loading: authLoading } = useAuth()
+  const { loading: sheetsLoading, error: sheetsError, getProjects, getCategories, getTasks, clearError } = useGoogleSheets()
+
   // Hooks
   const router = useRouter()
 
@@ -128,41 +163,33 @@ export default function CreateRFAForm({
         } else {
           // Check user role permission
           const config = RFA_TYPE_CONFIG[formData.rfaType]
-          if (user && !config.allowedRoles.includes(user.role)) {
+          if (userProp && !config.allowedRoles.includes(userProp.role)) {
             newErrors.rfaType = `คุณไม่มีสิทธิ์สร้าง ${formData.rfaType} (สำหรับ ${config.allowedRoles.join(', ')} เท่านั้น)`
           }
         }
         break
 
-      case 2: // Basic Information
-        if (!formData.title.trim()) {
-          newErrors.title = 'กรุณาใส่หัวข้อเอกสาร'
-        } else if (formData.title.length < 5) {
-          newErrors.title = 'หัวข้อต้องมีความยาวอย่างน้อย 5 ตัวอักษร'
-        }
-        
-        if (!formData.categoryId) {
-          newErrors.categoryId = 'กรุณาเลือกหมวดหมู่'
-        }
-        
-        if (!formData.description.trim()) {
-          newErrors.description = 'กรุณาใส่รายละเอียด'
-        } else if (formData.description.length < 10) {
-          newErrors.description = 'รายละเอียดต้องมีความยาวอย่างน้อย 10 ตัวอักษร'
-        }
-        break
-
-      case 3: // File Upload
-        if (formData.files.length === 0) {
-          newErrors.files = 'กรุณาเลือกไฟล์อย่างน้อย 1 ไฟล์'
-        }
-        
-        // Validate file sizes
-        const oversizedFiles = formData.files.filter(file => file.size > 100 * 1024 * 1024) // 100MB
-        if (oversizedFiles.length > 0) {
-          newErrors.files = `ไฟล์ ${oversizedFiles.map(f => f.name).join(', ')} มีขนาดใหญ่เกิน 100MB`
-        }
-        break
+        case 2: // Basic Information
+          if (!formData.title.trim()) {
+            newErrors.title = 'กรุณาใส่หัวข้อเอกสาร'
+          } else if (formData.title.length < 5) {
+            newErrors.title = 'หัวข้อต้องมีความยาวอย่างน้อย 5 ตัวอักษร'
+          }
+          
+          if (!selectedSite) {
+            newErrors.site = 'กรุณาเลือกโครงการ'
+          }
+          
+          if (!formData.selectedTask) {
+            newErrors.task = 'กรุณาเลือกงานจาก Google Sheets'
+          }
+          
+          if (!formData.description.trim()) {
+            newErrors.description = 'กรุณาใส่รายละเอียด'
+          } else if (formData.description.length < 10) {
+            newErrors.description = 'รายละเอียดต้องมีความยาวอย่างน้อย 10 ตัวอักษร'
+          }
+          break
     }
 
     setErrors(newErrors)
@@ -239,12 +266,30 @@ export default function CreateRFAForm({
 
     setUploading(true)
     try {
+      if (!firebaseUser) {
+        throw new Error('กรุณาล็อกอินก่อนส่งเอกสาร')
+      }
+      
+      if (!formData.selectedTask) {
+        throw new Error('กรุณาเลือกงานจาก Google Sheets')
+      }
+
+      const token = await firebaseUser.getIdToken()
+
       // Create FormData for file upload
       const submitData = new FormData()
       submitData.append('rfaType', formData.rfaType)
-      submitData.append('categoryId', formData.categoryId)
       submitData.append('title', formData.title)
       submitData.append('description', formData.description)
+      submitData.append('siteId', selectedSite)
+      
+      // Include task data from Google Sheets
+      submitData.append('taskData', JSON.stringify({
+        taskName: formData.selectedTask.taskName,
+        taskCategory: formData.selectedTask.taskCategory,
+        projectName: formData.selectedTask.projectName,
+        taskUid: formData.selectedTask.taskUid
+      }))
       
       // Add files
       formData.files.forEach((file) => {
@@ -253,6 +298,9 @@ export default function CreateRFAForm({
 
       const response = await fetch('/api/rfa/create', {
         method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
         body: submitData
       })
 
@@ -281,10 +329,10 @@ export default function CreateRFAForm({
 
   // Get user role permission for RFA types
   const getAvailableRFATypes = () => {
-    if (!user) return Object.keys(RFA_TYPE_CONFIG)
+    if (!userProp) return Object.keys(RFA_TYPE_CONFIG)
     
     return Object.entries(RFA_TYPE_CONFIG)
-      .filter(([_, config]) => config.allowedRoles.includes(user.role))
+      .filter(([_, config]) => config.allowedRoles.includes(userProp.role))
       .map(([key, _]) => key)
   }
 
@@ -301,6 +349,157 @@ export default function CreateRFAForm({
   ]
 
   const availableRFATypes = getAvailableRFATypes()
+  // Load user's accessible sites
+  useEffect(() => {
+    if (!authUser) return;
+
+    const loadSites = async () => {
+      try {
+        setLoading(true);
+        
+        if (!firebaseUser) {
+          console.error('Firebase user is null');
+          return;
+        }
+        
+        const token = await firebaseUser.getIdToken();
+        
+        const response = await fetch('/api/sites', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setSites(data.sites || []);
+        }
+      } catch (error) {
+        console.error('Error loading sites:', error);
+        setErrors(prev => ({ ...prev, site: 'ไม่สามารถโหลดรายชื่อโครงการได้' }));
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadSites();
+  }, [authUser, firebaseUser]);
+
+  // Handle site change and load projects
+  const handleSiteChange = async (siteId: string) => {
+    setSelectedSite(siteId);
+    setFormData(prev => ({
+      ...prev,
+      selectedProject: '',
+      selectedCategory: '',
+      selectedTask: null
+    }));
+    setProjects([]);
+    setSheetCategories([]);
+    setTasks([]);
+    clearError();
+
+    const selectedSiteData = sites.find(site => site.id === siteId);
+    if (!selectedSiteData) return;
+
+    try {
+      setLoading(true);
+      const GOOGLE_SHEETS_CONFIG = {
+        sheetId: selectedSiteData.sheetId || process.env.NEXT_PUBLIC_GOOGLE_SHEET_ID || 'default_sheet_id',
+        sheetName: selectedSiteData.sheetName || 'DB_TaskOverview'
+      };
+
+      const projectsList = await getProjects(GOOGLE_SHEETS_CONFIG);
+      
+      // Filter projects to match site name
+      const matchingProjects = projectsList.filter(project => 
+        project.toLowerCase().includes(selectedSiteData.name.toLowerCase()) ||
+        selectedSiteData.name.toLowerCase().includes(project.toLowerCase())
+      );
+
+      setProjects(matchingProjects.length > 0 ? matchingProjects : projectsList);
+      
+    } catch (error) {
+      console.error('Error loading projects:', error);
+      setErrors(prev => ({ ...prev, project: 'ไม่สามารถโหลดรายชื่อโครงการจาก Google Sheets ได้' }));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle project change and load categories
+  const handleProjectChange = async (projectName: string) => {
+    setFormData(prev => ({
+      ...prev,
+      selectedProject: projectName,
+      selectedCategory: '',
+      selectedTask: null
+    }));
+    setSheetCategories([]);
+    setTasks([]);
+    clearError();
+
+    const selectedSiteData = sites.find(site => site.id === selectedSite);
+    if (!selectedSiteData) return;
+
+    try {
+      setLoading(true);
+      const GOOGLE_SHEETS_CONFIG = {
+        sheetId: selectedSiteData.sheetId || process.env.NEXT_PUBLIC_GOOGLE_SHEET_ID || 'default_sheet_id',
+        sheetName: selectedSiteData.sheetName || 'DB_TaskOverview'
+      };
+
+      const categoriesList = await getCategories(GOOGLE_SHEETS_CONFIG, projectName);
+      setSheetCategories(categoriesList);
+      
+    } catch (error) {
+      console.error('Error loading categories:', error);
+      setErrors(prev => ({ ...prev, category: 'ไม่สามารถโหลดหมวดงานได้' }));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle category change and load tasks
+  const handleCategoryChange = async (category: string) => {
+    setFormData(prev => ({
+      ...prev,
+      selectedCategory: category,
+      selectedTask: null
+    }));
+    setTasks([]);
+    clearError();
+
+    const selectedSiteData = sites.find(site => site.id === selectedSite);
+    if (!selectedSiteData) return;
+
+    try {
+      setLoading(true);
+      const GOOGLE_SHEETS_CONFIG = {
+        sheetId: selectedSiteData.sheetId || process.env.NEXT_PUBLIC_GOOGLE_SHEET_ID || 'default_sheet_id',
+        sheetName: selectedSiteData.sheetName || 'DB_TaskOverview'
+      };
+
+      const tasksList = await getTasks(GOOGLE_SHEETS_CONFIG, formData.selectedProject, category);
+      setTasks(tasksList);
+      
+    } catch (error) {
+      console.error('Error loading tasks:', error);
+      setErrors(prev => ({ ...prev, task: 'ไม่สามารถโหลดรายชื่องานได้' }));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle task selection
+  const handleTaskSelect = (task: TaskData) => {
+    setFormData(prev => ({
+      ...prev,
+      selectedTask: task,
+      // Auto-fill title if empty
+      title: prev.title || `${task.taskName} - RFA`
+    }));
+  };
 
   return (
     <div className={`${isModal ? 'max-w-4xl mx-auto' : 'min-h-screen'} bg-white ${isModal ? 'rounded-lg shadow-lg' : ''}`}>
@@ -309,7 +508,7 @@ export default function CreateRFAForm({
         <div>
           <h2 className="text-2xl font-bold text-gray-900">สร้าง RFA Document</h2>
           <p className="text-sm text-gray-600 mt-1">
-            {user && `สวัสดี ${user.email} (${user.role})`}
+            {userProp && `สวัสดี ${userProp.email} (${userProp.role})`}
           </p>
         </div>
         {onClose && (
@@ -469,121 +668,185 @@ export default function CreateRFAForm({
           </div>
         )}
 
-        {/* Step 2: Basic Information */}
+        {/* Step 2: Basic Information with Google Sheets */}
         {currentStep === 2 && (
           <div className="space-y-6 max-w-2xl mx-auto">
             <div className="text-center mb-8">
-              <h3 className="text-xl font-semibold mb-2">ข้อมูลพื้นฐานของเอกสาร</h3>
+              <h3 className="text-xl font-semibold mb-2">ข้อมูลเอกสาร</h3>
               <p className="text-gray-600">
-                กรอกรายละเอียดของเอกสาร {formData.rfaType ? RFA_TYPE_CONFIG[formData.rfaType]?.title : 'RFA'}
+                เลือกโครงการและงานจาก Google Sheets พร้อมกรอกรายละเอียดเอกสาร
               </p>
             </div>
 
-            {/* Category Selection */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                หมวดหมู่ <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={formData.categoryId}
-                onChange={(e) => updateFormData({ categoryId: e.target.value })}
-                className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
-                  errors.categoryId ? 'border-red-500' : 'border-gray-300'
-                }`}
-                disabled={loading || filteredCategories.length === 0}
-              >
-                <option value="">
-                  {loading ? 'กำลังโหลด...' : 'เลือกหมวดหมู่'}
-                </option>
-                {filteredCategories.map(cat => (
-                  <option key={cat.id} value={cat.id}>
-                    {cat.categoryCode} - {cat.categoryName}
-                  </option>
-                ))}
-              </select>
-              {errors.categoryId && (
-                <p className="text-red-600 text-sm mt-1">{errors.categoryId}</p>
+            <div className="space-y-6">
+              {/* Site Selection */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <Building className="w-4 h-4 inline mr-2" />
+                  เลือกโครงการ (Site)
+                </label>
+                <select
+                  value={selectedSite}
+                  onChange={(e) => handleSiteChange(e.target.value)}
+                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  disabled={loading || sheetsLoading}
+                >
+                  <option value="">-- เลือกโครงการ --</option>
+                  {sites.map(site => (
+                    <option key={site.id} value={site.id}>
+                      {site.name}
+                    </option>
+                  ))}
+                </select>
+                {errors.site && <p className="text-red-600 text-sm mt-1">{errors.site}</p>}
+              </div>
+
+              {/* Project Selection from Google Sheets */}
+              {selectedSite && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <FolderOpen className="w-4 h-4 inline mr-2" />
+                    เลือกโครงการใน Google Sheets
+                  </label>
+                  <select
+                    value={formData.selectedProject}
+                    onChange={(e) => handleProjectChange(e.target.value)}
+                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    disabled={loading || sheetsLoading || !projects.length}
+                  >
+                    <option value="">-- เลือกโครงการ --</option>
+                    {projects.map(project => (
+                      <option key={project} value={project}>
+                        {project}
+                      </option>
+                    ))}
+                  </select>
+                  {loading && <p className="text-blue-600 text-sm mt-1">🔄 กำลังโหลดรายชื่อโครงการ...</p>}
+                  {sheetsError && <p className="text-red-600 text-sm mt-1">{sheetsError}</p>}
+                </div>
               )}
-              {filteredCategories.length === 0 && !loading && (
-                <p className="text-amber-600 text-sm mt-1">
-                  ไม่พบหมวดหมู่สำหรับ {formData.rfaType}
-                </p>
+
+              {/* Category Selection from Google Sheets */}
+              {formData.selectedProject && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <Layers className="w-4 h-4 inline mr-2" />
+                    เลือกหมวดงาน
+                  </label>
+                  <select
+                    value={formData.selectedCategory}
+                    onChange={(e) => handleCategoryChange(e.target.value)}
+                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    disabled={loading || sheetsLoading || !sheetCategories.length}
+                  >
+                    <option value="">-- เลือกหมวดงาน --</option>
+                    {sheetCategories.map(category => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                  {loading && <p className="text-blue-600 text-sm mt-1">🔄 กำลังโหลดหมวดงาน...</p>}
+                </div>
               )}
-            </div>
 
-            {/* Title */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                หัวข้อเอกสาร <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={formData.title}
-                onChange={(e) => updateFormData({ title: e.target.value })}
-                className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
-                  errors.title ? 'border-red-500' : 'border-gray-300'
-                }`}
-                placeholder="เช่น: Shop Drawing สำหรับโครงสร้างชั้น 2"
-                maxLength={200}
-              />
-              <div className="flex justify-between items-center mt-1">
-                {errors.title ? (
-                  <p className="text-red-600 text-sm">{errors.title}</p>
-                ) : (
-                  <span></span>
-                )}
-                <span className="text-xs text-gray-500">
-                  {formData.title.length}/200
-                </span>
+              {/* Task Selection from Google Sheets */}
+              {formData.selectedCategory && tasks.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <FileText className="w-4 h-4 inline mr-2" />
+                    เลือกชื่องาน
+                  </label>
+                  <div className="space-y-2 max-h-64 overflow-y-auto border rounded-lg p-2">
+                    {tasks.map((task, index) => (
+                      <div
+                        key={index}
+                        onClick={() => handleTaskSelect(task)}
+                        className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                          formData.selectedTask?.taskName === task.taskName
+                            ? 'border-blue-500 bg-blue-50'
+                            : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        <div className="font-medium text-gray-900">{task.taskName}</div>
+                        <div className="text-sm text-gray-600">
+                          หมวดงาน: {task.taskCategory}
+                          {task.taskUid && <span className="ml-2">รหัส: {task.taskUid}</span>}
+                        </div>
+                        {task.percentComplete !== undefined && (
+                          <div className="text-xs text-gray-500 mt-1">
+                            ความคืบหน้า: {task.percentComplete}%
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {loading && <p className="text-blue-600 text-sm mt-1">🔄 กำลังโหลดรายชื่องาน...</p>}
+                </div>
+              )}
+
+              {/* Selected Task Preview */}
+              {formData.selectedTask && (
+                <div className="p-4 bg-green-50 rounded-lg border border-green-200">
+                  <h4 className="font-medium text-green-800 mb-2">งานที่เลือก</h4>
+                  <div className="text-sm text-green-700">
+                    <p><strong>ชื่องาน:</strong> {formData.selectedTask.taskName}</p>
+                    <p><strong>หมวดงาน:</strong> {formData.selectedTask.taskCategory}</p>
+                    <p><strong>โครงการ:</strong> {formData.selectedTask.projectName}</p>
+                    {formData.selectedTask.taskUid && (
+                      <p><strong>รหัสงาน:</strong> {formData.selectedTask.taskUid}</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Title */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  หัวข้อเอกสาร *
+                </label>
+                <input
+                  type="text"
+                  value={formData.title}
+                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                  placeholder={formData.selectedTask?.taskName ? `${formData.selectedTask.taskName} - RFA` : "กรุณาระบุหัวข้อเอกสาร"}
+                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  required
+                />
+                {errors.title && <p className="text-red-600 text-sm mt-1">{errors.title}</p>}
               </div>
-            </div>
 
-            {/* Description */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                รายละเอียด <span className="text-red-500">*</span>
-              </label>
-              <textarea
-                value={formData.description}
-                onChange={(e) => updateFormData({ description: e.target.value })}
-                rows={4}
-                className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
-                  errors.description ? 'border-red-500' : 'border-gray-300'
-                }`}
-                placeholder="อธิบายรายละเอียดของเอกสาร, วัตถุประสงค์, และข้อมูลสำคัญอื่นๆ"
-                maxLength={1000}
-              />
-              <div className="flex justify-between items-center mt-1">
-                {errors.description ? (
-                  <p className="text-red-600 text-sm">{errors.description}</p>
-                ) : (
-                  <span></span>
-                )}
-                <span className="text-xs text-gray-500">
-                  {formData.description.length}/1000
-                </span>
+              {/* Description */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  รายละเอียดเอกสาร
+                </label>
+                <textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  placeholder="กรุณาระบุรายละเอียดเพิ่มเติม"
+                  rows={4}
+                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
               </div>
-            </div>
 
-            {/* Preview */}
-            {formData.title && formData.categoryId && (
-              <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-                <h4 className="font-medium text-gray-800 mb-2">ตัวอย่างหมายเลขเอกสาร:</h4>
-                <p className="text-sm text-gray-600">
-                  {(() => {
-                    const category = filteredCategories.find(c => c.id === formData.categoryId)
-                    const prefix = formData.rfaType === 'RFA-SHOP' ? 'RFS' :
-                                  formData.rfaType === 'RFA-GEN' ? 'RFG' : 'RFM'
-                    return `${prefix}-001 (${category?.categoryCode})`
-                  })()}
+              {/* Info Box */}
+              <div className="p-4 bg-blue-50 rounded-lg">
+                <h4 className="font-medium text-blue-800 mb-2">ข้อมูลจาก Google Sheets</h4>
+                <p className="text-sm text-blue-700">
+                  ระบบจะดึงข้อมูลหมวดงานและชื่องานจาก Google Sheets โดยอัตโนมัติ 
+                  เมื่อคุณเลือกโครงการที่ต้องการ
                 </p>
-                <p className="text-xs text-gray-500 mt-1">
-                  หมายเลขจริงจะถูกสร้างอัตโนมัติเมื่อส่งเอกสาร
-                </p>
+                {formData.selectedTask && (
+                  <p className="text-sm text-blue-700 mt-2">
+                    ✅ เลือกงาน: {formData.selectedTask.taskName}
+                  </p>
+                )}
               </div>
-            )}
+            </div>
           </div>
         )}
+
 
         {/* Step 3: File Upload */}
         {currentStep === 3 && (
@@ -702,12 +965,18 @@ export default function CreateRFAForm({
                 <h4 className="font-medium text-gray-800 mb-3">ข้อมูลเอกสาร</h4>
                 <div className="space-y-3">
                   <div>
-                    <p className="text-sm text-gray-600">หมวดหมู่:</p>
+                    <p className="text-sm text-gray-600">งานที่เลือก:</p>
                     <p className="font-medium">
-                      {(() => {
-                        const category = filteredCategories.find(c => c.id === formData.categoryId)
-                        return category ? `${category.categoryCode} - ${category.categoryName}` : 'ไม่ระบุ'
-                      })()}
+                      {formData.selectedTask 
+                        ? `${formData.selectedTask.taskName} (${formData.selectedTask.taskCategory})`
+                        : 'ไม่ได้เลือกงาน'
+                      }
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600">โครงการ:</p>
+                    <p className="font-medium">
+                      {formData.selectedProject || 'ไม่ได้เลือกโครงการ'}
                     </p>
                   </div>
                   <div>

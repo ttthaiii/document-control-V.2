@@ -1,0 +1,228 @@
+{
+  "users": [
+    {
+      "id": "ZKuORdwvoKJej1R2Ia1J",
+      "email": "admin@bannsansiri.com",
+      "role": "Admin",
+      "sites": [
+        "O4GN2NuHj72uq2Z8WKp4"
+      ],
+      "status": "ACTIVE",
+      "createdAt": "2025-08-24T06:43:44.100Z",
+      "createdFromInvitation": false
+    },
+    {
+      "id": "bPmWllxOkgA7BjMm7Hsj",
+      "email": "admin@bannsansiri.com",
+      "role": "Admin",
+      "sites": [
+        "dQ9j9oLhfFybJROOb9Yn"
+      ],
+      "status": "ACTIVE",
+      "createdAt": "2025-08-24T06:42:00.513Z",
+      "createdFromInvitation": false
+    },
+    {
+      "id": "q82uGlLOYcRaadwhlhST5omSoMp2",
+      "email": "ttthaiii30@gmail.com",
+      "role": "BIM",
+      "sites": [
+        "dQ9j9oLhfFybJROOb9Yn",
+        "O4GN2NuHj72uq2Z8WKp4"
+      ],
+      "status": "ACTIVE",
+      "createdAt": null,
+      "createdFromInvitation": true
+    },
+    {
+      "id": "vUffX1OTzL5PSijDcydy",
+      "email": "admin@bannsansiri.com",
+      "role": "Admin",
+      "sites": [
+        "r7gRO1yb21YFS0r7OyaR",
+        "dQ9j9oLhfFybJROOb9Yn",
+        "O4GN2NuHj72uq2Z8WKp4"
+      ],
+      "status": "ACTIVE",
+      "createdAt": "2025-08-24T06:34:42.810Z",
+      "createdFromInvitation": false
+    }
+  ],
+  "sites": [
+    {
+      "id": "O4GN2NuHj72uq2Z8WKp4",
+      "name": "Bannsansiri Construction Project",
+      "description": "Main construction project for Bannsansiri development",
+      "members": [
+        {
+          "userId": "ZKuORdwvoKJej1R2Ia1J",
+          "role": "Admin",
+          "joinedAt": {
+            "_seconds": 1756017826,
+            "_nanoseconds": 778000000
+          }
+        },
+        {
+          "userId": "q82uGlLOYcRaadwhlhST5omSoMp2",
+          "role": "BIM",
+          "joinedAt": {
+            "_seconds": 1756017826,
+            "_nanoseconds": 957000000
+          }
+        },
+        {
+          "userId": "vUffX1OTzL5PSijDcydy",
+          "role": "Admin",
+          "joinedAt": {
+            "_seconds": 1756017827,
+            "_nanoseconds": 105000000
+          }
+        }
+      ],
+      "status": "ACTIVE",
+      "createdAt": "2025-08-24T06:43:44.014Z",
+      "settings": {
+        "enabledSystems": [
+          "RFA",
+          "RFI",
+          "CONSTRUCTION_INFO",
+          "WORK_REQUESTS"
+        ],
+        "googleSheetsConfig": {
+          "spreadsheetId": "",
+          "sheetName": "DB_TaskOverview"
+        }
+      },
+      "categories": [
+        {
+          "id": "6cZkeKFtoopI5MKFYcv0",
+          "categoryCode": "GEN_01",
+          "categoryName": "General Submission",
+          "active": true,
+          "rfaTypes": [],
+          "createdAt": "2025-08-24T06:43:44.676Z"
+        },
+        {
+          "id": "A3Z7nAR8YM5RsaG2pPMS",
+          "categoryCode": "SHOP_01",
+          "categoryName": "Shop Drawing - Structural",
+          "active": true,
+          "rfaTypes": [],
+          "createdAt": "2025-08-24T06:43:44.557Z"
+        },
+        {
+          "id": "mFZgR8UFf24prXg3zosF",
+          "categoryCode": "SHOP_02",
+          "categoryName": "Shop Drawing - MEP",
+          "active": true,
+          "rfaTypes": [],
+          "createdAt": "2025-08-24T06:43:44.616Z"
+        },
+        {
+          "id": "uOxewqpRYPmj0dCPSdPq",
+          "categoryCode": "MAT_01",
+          "categoryName": "Material Approval",
+          "active": true,
+          "rfaTypes": [],
+          "createdAt": "2025-08-24T06:43:44.733Z"
+        }
+      ]
+    },
+    {
+      "id": "dQ9j9oLhfFybJROOb9Yn",
+      "name": "Bannsansiri Construction Project",
+      "description": "Main construction project for Bannsansiri development",
+      "members": [],
+      "status": "ACTIVE",
+      "createdAt": "2025-08-24T06:42:00.418Z",
+      "settings": {
+        "enabledSystems": [
+          "RFA",
+          "RFI",
+          "CONSTRUCTION_INFO",
+          "WORK_REQUESTS"
+        ],
+        "googleSheetsConfig": {
+          "spreadsheetId": "",
+          "sheetName": "DB_TaskOverview"
+        }
+      },
+      "categories": []
+    },
+    {
+      "id": "r7gRO1yb21YFS0r7OyaR",
+      "name": "Bannsansiri Construction Project",
+      "description": "Main construction project for Bannsansiri development",
+      "members": [],
+      "status": "ACTIVE",
+      "createdAt": "2025-08-24T06:34:42.697Z",
+      "settings": {
+        "enabledSystems": [
+          "RFA",
+          "RFI",
+          "CONSTRUCTION_INFO",
+          "WORK_REQUESTS"
+        ],
+        "googleSheetsConfig": {
+          "spreadsheetId": "",
+          "sheetName": "DB_TaskOverview"
+        },
+        "workflowSettings": {
+          "rfaApprovalLevels": 3,
+          "rfiResponseTimeHours": 48,
+          "autoAssignCM": true
+        }
+      },
+      "categories": []
+    }
+  ],
+  "categories": [],
+  "counters": [
+    {
+      "id": "O4GN2NuHj72uq2Z8WKp4_RFA-GEN",
+      "siteId": "O4GN2NuHj72uq2Z8WKp4",
+      "documentType": "RFA-GEN",
+      "prefix": "RFG",
+      "currentNumber": 0,
+      "createdAt": "2025-08-24T06:43:44.854Z"
+    },
+    {
+      "id": "O4GN2NuHj72uq2Z8WKp4_RFA-MAT",
+      "siteId": "O4GN2NuHj72uq2Z8WKp4",
+      "documentType": "RFA-MAT",
+      "prefix": "RFM",
+      "currentNumber": 0,
+      "createdAt": "2025-08-24T06:43:44.910Z"
+    },
+    {
+      "id": "O4GN2NuHj72uq2Z8WKp4_RFA-SHOP",
+      "siteId": "O4GN2NuHj72uq2Z8WKp4",
+      "documentType": "RFA-SHOP",
+      "prefix": "RFS",
+      "currentNumber": 0,
+      "createdAt": "2025-08-24T06:43:44.799Z"
+    },
+    {
+      "id": "O4GN2NuHj72uq2Z8WKp4_RFI-INTERNAL",
+      "siteId": "O4GN2NuHj72uq2Z8WKp4",
+      "documentType": "RFI-INTERNAL",
+      "prefix": "RFI",
+      "currentNumber": 0,
+      "createdAt": "2025-08-24T06:43:44.970Z"
+    }
+  ],
+  "rfaDocuments": [],
+  "rfiDocuments": [],
+  "invitations": [
+    {
+      "id": "eae3d8ea9adfe787c2142e1d6bf3952898cee1f1537b586d33534a2a444335d8",
+      "email": "ttthaiii30@gmail.com",
+      "role": "BIM",
+      "sites": "ฺBannsansiri",
+      "status": "ACCEPTED",
+      "createdAt": "2025-08-23T16:03:39.722Z",
+      "expiresAt": "2025-08-30T16:03:39.722Z",
+      "acceptedAt": "2025-08-23T16:04:06.252Z"
+    }
+  ]
+}
