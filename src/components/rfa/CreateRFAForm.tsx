@@ -11,10 +11,10 @@ import { useAuth } from '@/lib/auth/useAuth' // เพิ่มบรรทั�
 interface RFAFormData {
   rfaType: 'RFA-SHOP' | 'RFA-GEN' | 'RFA-MAT' | ''
   categoryId: string
+  documentNumber: string  // ← เพิ่มบรรทัดนี้
   title: string
   description: string
   files: File[]
-  // แทนที่ googleSheetsTask เก่า
   selectedProject: string
   selectedCategory: string
   selectedTask: TaskData | null
@@ -54,6 +54,7 @@ interface User {
 const INITIAL_FORM_DATA: RFAFormData = {
   rfaType: '',
   categoryId: '',
+  documentNumber: '',  // ← เพิ่มบรรทัดนี้
   title: '',
   description: '',
   files: [],
@@ -95,11 +96,13 @@ const RFA_TYPE_CONFIG = {
 export default function CreateRFAForm({ 
   onClose, 
   isModal = false,
-  userProp // ← เปลี่ยนชื่อจาก user เป็น userProp
+  userProp,
+  presetRfaType  // ← เพิ่มบรรทัดนี้
 }: { 
   onClose?: () => void
   isModal?: boolean
   userProp?: User 
+  presetRfaType?: 'RFA-SHOP' | 'RFA-GEN' | 'RFA-MAT'  // ← เพิ่มบรรทัดนี้
 }) {
   // State
   const [currentStep, setCurrentStep] = useState(1)
@@ -129,15 +132,27 @@ export default function CreateRFAForm({
 
   // Load categories when RFA type changes
   useEffect(() => {
-    if (formData.rfaType) {
+    if (formData.rfaType && firebaseUser) {  // ← เพิ่มเงื่อนไข firebaseUser
       fetchCategories(formData.rfaType)
     }
-  }, [formData.rfaType])
+  }, [formData.rfaType, firebaseUser])  // ← เพิ่ม dependency
 
   const fetchCategories = async (rfaType: string) => {
     try {
       setLoading(true)
-      const response = await fetch(`/api/rfa/categories?rfaType=${rfaType}`)
+      
+      if (!firebaseUser) {
+        console.error('User not authenticated')
+        setErrors({ general: 'กรุณาเข้าสู่ระบบก่อน' })
+        return
+      }
+      
+      const token = await firebaseUser.getIdToken()
+      const response = await fetch(`/api/rfa/categories?rfaType=${rfaType}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
       const data = await response.json()
       
       if (data.success) {
@@ -177,6 +192,10 @@ export default function CreateRFAForm({
             newErrors.title = 'หัวข้อต้องมีความยาวอย่างน้อย 5 ตัวอักษร'
           }
           
+          if (!formData.documentNumber.trim()) {  // ← เพิ่มการ validate
+            newErrors.documentNumber = 'กรุณาใส่เลขที่เอกสาร'
+          }
+          
           if (!selectedSite) {
             newErrors.site = 'กรุณาเลือกโครงการ'
           }
@@ -185,11 +204,7 @@ export default function CreateRFAForm({
             newErrors.task = 'กรุณาเลือกงานจาก Google Sheets'
           }
           
-          if (!formData.description.trim()) {
-            newErrors.description = 'กรุณาใส่รายละเอียด'
-          } else if (formData.description.length < 10) {
-            newErrors.description = 'รายละเอียดต้องมีความยาวอย่างน้อย 10 ตัวอักษร'
-          }
+          // ลบการ validate description ออก (ไม่บังคับ)
           break
     }
 
@@ -199,9 +214,15 @@ export default function CreateRFAForm({
 
   // Step navigation
   const nextStep = () => {
-    if (validateStep(currentStep)) {
-      setCurrentStep(prev => Math.min(prev + 1, 4))
+    if (!validateStep(currentStep)) {
+      // แสดง error modal หรือ alert
+      const errorMessages = Object.values(errors).filter(msg => msg)
+      if (errorMessages.length > 0) {
+        alert(`กรุณาแก้ไขข้อมูลต่อไปนี้:\n\n${errorMessages.join('\n')}`)
+      }
+      return
     }
+    setCurrentStep(prev => Math.min(prev + 1, 4))
   }
 
   const prevStep = () => {
@@ -347,12 +368,19 @@ export default function CreateRFAForm({
     cat.rfaTypes.includes(formData.rfaType)
   )
 
-  const steps = [
-    { number: 1, title: 'เลือกประเภท', icon: FileText, description: 'เลือกประเภท RFA ที่ต้องการสร้าง' },
-    { number: 2, title: 'ข้อมูลพื้นฐาน', icon: FileText, description: 'กรอกรายละเอียดเอกสาร' },
-    { number: 3, title: 'แนบไฟล์', icon: Upload, description: 'อัปโหลดไฟล์เอกสาร' },
-    { number: 4, title: 'ตรวจสอบ', icon: CheckCircle, description: 'ตรวจสอบข้อมูลก่อนส่ง' }
-  ]
+  const steps = presetRfaType 
+    ? [
+        // ข้าม Step 1 ถ้ามี preset
+        { number: 2, title: 'ข้อมูลพื้นฐาน', icon: Building },
+        { number: 3, title: 'ไฟล์แนบ', icon: Upload },
+        { number: 4, title: 'ตรวจสอบ', icon: CheckCircle }
+      ]
+    : [
+        { number: 1, title: 'เลือกประเภท', icon: FileText },
+        { number: 2, title: 'ข้อมูลพื้นฐาน', icon: Building },
+        { number: 3, title: 'ไฟล์แนบ', icon: Upload },
+        { number: 4, title: 'ตรวจสอบ', icon: CheckCircle }
+      ]
 
   const availableRFATypes = getAvailableRFATypes()
   // Load user's accessible sites
@@ -390,6 +418,16 @@ export default function CreateRFAForm({
 
     loadSites();
   }, [authUser, firebaseUser]);
+
+  useEffect(() => {
+    if (presetRfaType) {
+      setFormData(prev => ({
+        ...prev,
+        rfaType: presetRfaType
+      }))
+      setCurrentStep(2) // ข้ามไป Step 2 เลย
+    }
+  }, [presetRfaType])
 
   // Handle site change and load projects
   const handleSiteChange = async (siteId: string) => {
@@ -915,10 +953,26 @@ export default function CreateRFAForm({
                 </div>
               )}*/}
 
+              {/* Document Number */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  เลขที่เอกสาร <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={formData.documentNumber}
+                  onChange={(e) => setFormData({ ...formData, documentNumber: e.target.value })}
+                  placeholder="เช่น AS-LS-001"
+                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  required
+                />
+                {errors.documentNumber && <p className="text-red-600 text-sm mt-1">{errors.documentNumber}</p>}
+              </div>
+
               {/* Title */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  หัวข้อเอกสาร *
+                  หัวข้อเอกสาร <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"

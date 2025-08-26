@@ -5,7 +5,7 @@ import React, { useState, useEffect, useContext, createContext } from 'react'
 import { User, onAuthStateChanged } from 'firebase/auth'
 import { doc, getDoc } from 'firebase/firestore'
 import { auth, db } from '@/lib/firebase/client'
-
+import { signOut } from 'firebase/auth'
 
 // User interface for our app
 interface AppUser {
@@ -26,6 +26,7 @@ interface AuthContextType {
   loading: boolean
   error: string | null
   refetch: () => Promise<void>
+  logout: () => Promise<void>  // ← เพิ่มบรรทัดนี้
 }
 
 // Create context with default value
@@ -34,7 +35,8 @@ const AuthContext = createContext<AuthContextType>({
   firebaseUser: null,
   loading: true,
   error: null,
-  refetch: async () => {}
+  refetch: async () => {},
+  logout: async () => {}  // ← เพิ่มบรรทัดนี้
 })
 
 // Auth Provider component
@@ -101,12 +103,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => unsubscribe()
   }, [])
 
+  const logout = async () => {
+    try {
+      await signOut(auth)
+      setUser(null)
+      setFirebaseUser(null)
+      setError(null)
+    } catch (err) {
+      console.error('Logout error:', err)
+      throw err
+    }
+  }
+
   const value: AuthContextType = {
     user,
     firebaseUser,
     loading,
     error,
-    refetch
+    refetch,
+    logout  // ← เพิ่มบรรทัดนี้
   }
 
   return React.createElement(

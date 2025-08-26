@@ -2,22 +2,20 @@
 import { AuthGuard } from '@/lib/components/shared/AuthGuard';
 import Layout from '@/components/layout/Layout';
 import CreateRFAForm from '@/components/rfa/CreateRFAForm';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth/useAuth';
 
-function RFACreateContent() {
+function RFAGeneralCreateContent() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { user: appUser } = useAuth();
-  const preselectedType = searchParams.get('type');
 
   const handleSuccess = (data: any) => {
-    console.log('RFA created successfully:', data);
-    router.push('/dashboard/rfa');
+    console.log('RFA-GEN created successfully:', data);
+    router.push('/dashboard');
   };
 
   const handleCancel = () => {
-    router.back();
+    router.push('/dashboard');
   };
 
   // Convert AppUser to User format for CreateRFAForm
@@ -33,30 +31,28 @@ function RFACreateContent() {
       <div className="max-w-4xl mx-auto">
         {/* Page Header */}
         <div className="mb-6">
-          <div className="flex items-center space-x-4 mb-2">
-            <button
-              onClick={handleCancel}
-              className="text-gray-600 hover:text-gray-900 transition-colors text-sm"
-            >
-              ← กลับ
-            </button>
+          <div className="flex items-center space-x-2 mb-2">
+            <span className="text-2xl">📋</span>
             <h1 className="text-2xl font-bold text-gray-900">
-              📋 สร้างเอกสาร RFA
+              General Submission - RFA
             </h1>
           </div>
           <p className="text-gray-600">
-            กรุณากรอกข้อมูลเอกสารให้ครบถ้วนก่อนส่งเพื่อขออนุมัติ
+            สร้างเอกสารส่งทั่วไป • BIM/Site Admin → CM
           </p>
+          <div className="mt-2 inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+            RFA-GEN
+          </div>
         </div>
         
         {/* Form Container */}
         <div className="bg-white rounded-lg shadow-sm border">
-          <div className="p-6 border-b">
-            <h2 className="text-xl font-semibold text-gray-800">
-              Request for Approval (RFA)
+          <div className="p-6 border-b bg-green-50">
+            <h2 className="text-xl font-semibold text-green-900 mb-2">
+              Request for Approval - General Submission
             </h2>
-            <p className="text-gray-600 mt-1">
-              {preselectedType && `ประเภท: ${preselectedType}`}
+            <p className="text-green-700 text-sm">
+              📄 เอกสารทั่วไปที่ต้องการการอนุมัติหรือการตรวจสอบ
             </p>
           </div>
           
@@ -65,6 +61,7 @@ function RFACreateContent() {
               onClose={handleCancel}
               isModal={false}
               userProp={user}
+              presetRfaType="RFA-GEN"  // 🎯 Preset type - ข้าม Step 1
             />
           </div>
         </div>
@@ -73,10 +70,10 @@ function RFACreateContent() {
   );
 }
 
-export default function RFACreatePage() {
+export default function RFAGeneralCreatePage() {
   return (
-    <AuthGuard>
-      <RFACreateContent />
+    <AuthGuard requiredRoles={['BIM', 'Site Admin', 'Admin']}>
+      <RFAGeneralCreateContent />
     </AuthGuard>
   );
 }

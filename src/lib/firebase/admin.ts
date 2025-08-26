@@ -20,8 +20,9 @@ const firebaseAdminConfig = {
 };
 
 // Initialize admin app (singleton pattern)
-export const adminApp = getApps().find(app => app.name === 'admin') || 
-  initializeApp(firebaseAdminConfig, 'admin');
+export const adminApp = getApps().length > 0 
+  ? getApps()[0] 
+  : initializeApp(firebaseAdminConfig); // ลบ 'admin' name ให้เป็น default app
 
 // Export admin services
 export const adminAuth = getAuth(adminApp);
