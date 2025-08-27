@@ -1,31 +1,20 @@
-import { config } from 'dotenv';
-import { resolve } from 'path';
+import admin from "firebase-admin";
 
-// ✅ โหลด env ทันทีที่เข้าไฟล์นี้
-config({ path: resolve(process.cwd(), '.env.local') });
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+    }),
+    // ใช้ bucket ดีฟอลต์ของโปรเจ็กต์
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+    // ถ้าอยากซ่อนค่าฝั่ง server เท่านั้น ให้ใช้ตัวแปรเช่น FIREBASE_STORAGE_BUCKET แทน
+    // แล้วเปลี่ยนเป็น: storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+  });
+}
 
-import { initializeApp, getApps, cert } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
-import { getFirestore } from 'firebase-admin/firestore';
-
-// Debug: แสดงว่า env ถูกโหลดหรือไม่
-console.log('🔧 Firebase Admin loading with PROJECT_ID:', process.env.FIREBASE_PROJECT_ID ? 'LOADED' : 'MISSING');
-
-const firebaseAdminConfig = {
-  credential: cert({
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-  }),
-};
-
-// Initialize admin app (singleton pattern)
-export const adminApp = getApps().length > 0 
-  ? getApps()[0] 
-  : initializeApp(firebaseAdminConfig); // ลบ 'admin' name ให้เป็น default app
-
-// Export admin services
-export const adminAuth = getAuth(adminApp);
-export const adminDb = getFirestore(adminApp);
-
-export default adminApp;
+export const adminDb = admin.firestore();
+export const adminAuth = admin.auth();
+// export bucket instance ที่พร้อมใช้งานเลย
+export const adminBucket = admin.storage().bucket();

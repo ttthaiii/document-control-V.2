@@ -309,8 +309,14 @@ export default function CreateRFAForm({
       submitData.append('title', formData.title)
       submitData.append('description', formData.description)
       submitData.append('siteId', selectedSite)
+
       
-      // Include task data from Google Sheets
+      // ✅ ส่ง categoryId ให้ API (ใช้ taskCategory จาก Google Sheets)
+      if (formData.selectedTask?.taskCategory) {
+        submitData.append('categoryId', formData.selectedTask.taskCategory)
+      }
+
+// Include task data from Google Sheets
       submitData.append('taskData', JSON.stringify({
         taskName: formData.selectedTask.taskName,
         taskCategory: formData.selectedTask.taskCategory,
