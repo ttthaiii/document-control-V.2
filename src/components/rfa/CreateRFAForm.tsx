@@ -3,11 +3,26 @@
 
 import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { FileText, Upload, CheckCircle, ChevronRight, ChevronLeft, X, AlertCircle, Clock, Building, Layers, FolderOpen, Search } from 'lucide-react'
+import { FileText, Upload, CheckCircle, ChevronRight, ChevronLeft, X, AlertCircle, Clock, Building, Layers, FolderOpen, Search, RefreshCw, Loader2 } from 'lucide-react'
 import { useGoogleSheets } from '@/lib/hooks/useGoogleSheets'
-import { useAuth } from '@/lib/auth/useAuth' // เพิ่มบรรทัดนี้
+import { useAuth } from '@/lib/auth/useAuth'
 
 // Types
+interface UploadedFile {
+  id: string; // Unique ID for list rendering
+  file: File;
+  status: 'pending' | 'uploading' | 'success' | 'error';
+  progress: number;
+  uploadedData?: {
+    fileName: string;
+    fileUrl: string;
+    filePath: string;
+    size: number;
+    contentType: string;
+  };
+  error?: string;
+}
+
 interface RFAFormData {
   rfaType: 'RFA-SHOP' | 'RFA-GEN' | 'RFA-MAT' | ''
   categoryId: string

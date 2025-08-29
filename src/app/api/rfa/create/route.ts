@@ -1,212 +1,149 @@
-// app/api/rfa/create/route.ts
+// src/app/api/rfa/create/route.ts
 import { NextResponse } from "next/server";
-import { adminDb, adminBucket } from "@/lib/firebase/admin"; // ปรับ path ให้ตรงโปรเจกต์
+import { adminDb, adminBucket } from "@/lib/firebase/admin";
 import { getAuth } from "firebase-admin/auth";
+import { FieldValue } from 'firebase-admin/firestore';
 
-// -------------------- Utils --------------------
+// (Helper functions toSlugId, ensureCategory, verifyIdTokenFromHeader ไม่มีการเปลี่ยนแปลง)
+
 function toSlugId(input: string): string {
-  // ทำเป็น ID ที่ปลอดภัยสำหรับ docId (UPPER_SNAKE_CASE)
-  return input
-    .trim()
-    .replace(/[^\p{L}\p{N}]+/gu, "_") // เว้นวรรค/เครื่องหมาย → _
-    .replace(/^_+|_+$/g, "")
-    .toUpperCase();
+  return input.trim().replace(/[^\p{L}\p{N}]+/gu, "_").replace(/^_+|_+$/g, "").toUpperCase();
 }
 
-async function ensureCategory(
-  siteId: string,
-  categoryIdOrName: string,
-  defaults?: Partial<{
-    name: string;
-    description: string;
-    createdBy: string;
-    rfaType: string; // ใช้ประกอบเมตาดาต้า เช่น "RFA-SHOP"
-  }>
-): Promise<{ id: string; created: boolean }> {
-  // แปลงชื่อ/คีย์จาก taskCategory เป็น docId ที่ปลอดภัย
-  const docId = toSlugId(categoryIdOrName);
-  const ref = adminDb.doc(`sites/${siteId}/categories/${docId}`);
-  const snap = await ref.get();
-
-  if (snap.exists) {
-    return { id: docId, created: false };
-  }
-
-  // ถ้าไม่มี สร้างด้วยค่าเริ่มต้นบางอย่าง
-  const now = new Date();
-  await ref.set({
-    name: defaults?.name ?? categoryIdOrName,
-    description: defaults?.description ?? "",
-    rfaType: defaults?.rfaType ?? null,
-    createdAt: now.toISOString(),
-    createdBy: defaults?.createdBy ?? null,
-    // คุณจะใส่สิทธิ์/role matrix ต่อได้ตามที่ใช้จริง เช่น allowedRoles: [...]
-  });
-
-  return { id: docId, created: true };
-}
-
-// อ่าน request ได้ทั้ง FormData และ JSON (ยืดหยุ่น)
-async function readRequest(req: Request): Promise<{
-  isFormData: boolean;
-  payload: any;
-  files: File[];
-}> {
-  const contentType = req.headers.get("content-type") || "";
-  if (contentType.includes("multipart/form-data")) {
-    const form = await req.formData();
-
-    const jsonOr = (v: FormDataEntryValue | null) => {
-      if (typeof v === "string") {
-        try { return JSON.parse(v); } catch { return v; }
-      }
-      return v;
-    };
-
-    const files: File[] = [];
-    (form.getAll("files") || []).forEach((f) => {
-      if (f instanceof File) files.push(f);
+async function ensureCategory(siteId: string, categoryIdOrName: string, defaults?: Partial<{ name: string; description: string; createdBy: string; rfaType: string; }>): Promise<{ id: string; created: boolean }> {
+    const docId = toSlugId(categoryIdOrName);
+    const ref = adminDb.doc(`sites/${siteId}/categories/${docId}`);
+    const snap = await ref.get();
+    if (snap.exists) {
+        return { id: docId, created: false };
+    }
+    await ref.set({
+        name: defaults?.name ?? categoryIdOrName,
+        description: defaults?.description ?? "",
+        rfaTypes: defaults?.rfaType ? [defaults.rfaType] : [],
+        active: true,
+        createdAt: FieldValue.serverTimestamp(),
+        createdBy: defaults?.createdBy ?? "SYSTEM",
     });
-
-    const payload = {
-      rfaType: form.get("rfaType") as string | null,
-      siteId: form.get("siteId") as string | null,
-      categoryId: form.get("categoryId") as string | null, // อาจไม่มี
-      title: form.get("title") as string | null,
-      description: form.get("description") as string | null,
-      taskData: jsonOr(form.get("taskData")) as any, // อาจเป็น object หรือ string
-    };
-
-    return { isFormData: true, payload, files };
-  } else {
-    const body = await req.json().catch(() => ({}));
-    return { isFormData: false, payload: body, files: body.files ?? [] };
-  }
+    return { id: docId, created: true };
 }
 
 async function verifyIdTokenFromHeader(req: Request): Promise<string | null> {
-  const authHeader = req.headers.get("authorization") || "";
-  const m = authHeader.match(/^Bearer (.+)$/i);
-  if (!m) return null;
-  try {
-    const decoded = await getAuth().verifyIdToken(m[1]);
-    return decoded.uid;
-  } catch {
-    return null;
-  }
+    const authHeader = req.headers.get("authorization") || "";
+    const match = authHeader.match(/^Bearer (.+)$/i);
+    if (!match) return null;
+    try {
+        const decoded = await getAuth().verifyIdToken(match[1]);
+        return decoded.uid;
+    } catch {
+        return null;
+    }
 }
 
-// -------------------- Handler --------------------
+
+// ✅ ปรับแก้ `readRequest` ให้รับเฉพาะ JSON
+async function readRequest(req: Request): Promise<{ payload: any }> {
+    const body = await req.json().catch(() => ({}));
+    return { payload: body };
+}
+
 export async function POST(req: Request) {
+  const uid = await verifyIdTokenFromHeader(req);
+  if (!uid) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  let docId: string | null = null;
+  const tempFilePathsToDelete: string[] = [];
+
   try {
-    const uid = await verifyIdTokenFromHeader(req); // แนะนำให้ใช้ header เสมอ
-    const { isFormData, payload, files } = await readRequest(req);
+    const userDoc = await adminDb.collection('users').doc(uid).get();
+    if (!userDoc.exists) {
+        return NextResponse.json({ error: 'User not found' }, { status: 403 });
+    }
+    const userData = userDoc.data();
 
-    const {
-      rfaType,        // "RFA-SHOP" | "RFA-GEN" | "RFA-MAT"
-      siteId,         // "O4GN2NuHj72uq2Z8WKp4"
-      categoryId,     // อาจว่าง ถ้าอยากให้ derive จาก taskData
-      title,
-      description,
-      taskData,       // { taskCategory?: "...", ... }
-    } = payload || {};
+    // ✅ รับข้อมูลเป็น JSON เท่านั้น
+    const { payload } = await readRequest(req);
+    const { rfaType, siteId, categoryId, title, description, taskData, documentNumber, uploadedFiles } = payload || {};
 
-    // ---------- Validate ขั้นต้น ----------
+    // --- Validation ---
     const missing: string[] = [];
     if (!rfaType) missing.push("rfaType");
     if (!siteId) missing.push("siteId");
     if (!title) missing.push("title");
-    if (!description) missing.push("description");
-    if (!uid) missing.push("authToken/uid");
-    // ถ้าบังคับต้องมีไฟล์:
-    if (!files || files.length === 0) missing.push("files");
-
-    if (missing.length) {
-      return NextResponse.json({ error: "Missing required fields", missing }, { status: 400 });
+    if (!documentNumber) missing.push("documentNumber");
+    if (!uploadedFiles || !Array.isArray(uploadedFiles) || uploadedFiles.length === 0) {
+        missing.push("uploadedFiles");
     }
-
-    // ---------- ตัดสินใจ category ----------
-    // 1) ใช้ค่าที่ client ส่งมาก่อน (ถ้ามี)
-    // 2) ถ้าไม่มี ให้ลองหยิบจาก taskData.taskCategory
-    // 3) ถ้ายังไม่มี สุดท้าย fallback เป็น rfaType (เช่น "RFA-SHOP") เพื่อไม่ให้ตกหล่น
-    const rawCategoryKey: string =
-      categoryId ||
-      (taskData?.taskCategory as string | undefined) ||
-      rfaType;
-
-    // ✅ ขั้นตอนสำคัญ: upsert category อัตโนมัติ
-    const { id: finalCategoryId, created: categoryCreated } = await ensureCategory(siteId, rawCategoryKey, {
-      name: rawCategoryKey,
-      description: taskData?.taskName || "",
-      createdBy: uid ?? undefined,
-      rfaType, // เก็บไว้เป็นเมตาดาต้า
-    });
-
-    // ---------- (ตัวอย่าง) อัปโหลดไฟล์ไป Firebase Storage ----------
-    // เก็บไฟล์ใต้ path: rfa/<siteId>/<docId>/<filename>
-    // ระดับนี้ยังไม่รู้ docId (ต้องสร้างเอกสารก่อน) — คุณอาจ:
-    //   A) อัปโหลดด้วย tempId แล้วค่อย patch path หลังสร้าง doc
-    //   B) หรือสร้าง doc ก่อนเอา docId มาใช้ path
-    // ด้านล่างนี้ตัวอย่างแบบสร้าง doc ก่อน (แนะนำ)
-
-    // ---------- สร้างเอกสาร RFA ก่อน ----------
-    const countersRef = adminDb.doc(`counters/${siteId}_RFA-${rfaType.split("RFA-")[1]}`);
-    // ดึง running number (อย่างง่าย)
-    await adminDb.runTransaction(async (tx) => {
-      const snap = await tx.get(countersRef);
-      const num = (snap.exists ? (snap.data()?.value ?? 0) : 0) + 1;
-      tx.set(countersRef, { value: num, prefix: rfaType === "RFA-SHOP" ? "RFS" : rfaType === "RFA-GEN" ? "RFG" : "RFM" }, { merge: true });
-    });
-
-    const counterSnap = await countersRef.get();
-    const currentNum: number = counterSnap.data()?.value ?? 1;
-    const prefix: string = counterSnap.data()?.prefix ?? "RFA";
-
-    const docNumber = `${prefix}-${String(currentNum).padStart(3, "0")}`;
-    const rfaRef = adminDb.collection("rfaDocuments").doc();
-    const docId = rfaRef.id;
-
-    await rfaRef.set({
-      siteId,
-      rfaType,
-      categoryId: finalCategoryId,
-      title,
-      description,
-      taskData: taskData ?? null,
-      number: docNumber,
-      status: "DRAFT",
+    if (missing.length > 0) {
+        return NextResponse.json({ error: "Missing required fields", missing }, { status: 400 });
+    }
+    
+    // --- Category Handling ---
+    const rawCategoryKey = categoryId || taskData?.taskCategory || rfaType;
+    const { id: finalCategoryId } = await ensureCategory(siteId, rawCategoryKey, {
+      name: taskData?.taskCategory || rfaType,
       createdBy: uid,
-      createdAt: new Date().toISOString(),
+      rfaType,
     });
+    
+    // --- ✅ Logic ใหม่: ย้ายไฟล์จาก temp ไปยัง path ถาวร ---
+    const finalFilesData = [];
+    const cdnUrlBase = "https://ttsdoc-cdn.ttthaiii30.workers.dev";
 
-    // ---------- อัปโหลดไฟล์ (ตัวอย่างแบบง่าย) ----------
-    const uploaded: Array<{ name: string; path: string; size: number; contentType: string }> = [];
+    for (const tempFile of uploadedFiles) {
+        const sourcePath = tempFile.filePath;
+        if (!sourcePath || !sourcePath.startsWith(`temp/${uid}/`)) {
+            console.warn(`Skipping invalid or unauthorized file path: ${sourcePath}`);
+            continue;
+        }
+        
+        // เพิ่ม path เข้าไปใน list ที่จะลบทีหลัง
+        tempFilePathsToDelete.push(sourcePath);
 
-    for (const f of files as File[]) {
-      const arrayBuf = await f.arrayBuffer();
-      const buffer = Buffer.from(arrayBuf);
-      const name = f.name || "file";
-      const contentType = f.type || "application/octet-stream";
-      const path = `rfa/${siteId}/${docId}/${name}`;
-      const file = adminBucket.file(path);
+        const originalName = tempFile.fileName;
+        const timestamp = Date.now();
+        const destinationPath = `sites/${siteId}/rfa/${documentNumber}/${timestamp}_${originalName}`;
 
-      await file.save(buffer, { contentType, resumable: false, public: false });
-      // ถ้าอยาก set metadata/cache headers เพิ่ม เรียกผ่าน storage-metadata.ts ของคุณได้
-      uploaded.push({ name, path, size: buffer.length, contentType });
+        await adminBucket.file(sourcePath).move(destinationPath);
+
+        finalFilesData.push({
+            ...tempFile,
+            fileUrl: `${cdnUrlBase}/${destinationPath}`,
+            filePath: destinationPath,
+            uploadedAt: FieldValue.serverTimestamp(),
+            uploadedBy: uid,
+        });
     }
-
-    // ---------- อัปเดตเอกสาร RFA ให้มีรายการไฟล์ ----------
-    await rfaRef.update({
-      files: uploaded,
-      categoryAutoCreated: categoryCreated, // บอก client ว่าสร้าง category ให้ใหม่ด้วยไหม
+    
+    // --- สร้างเอกสาร RFA พร้อมข้อมูลไฟล์ที่สมบูรณ์ ---
+    const rfaRef = adminDb.collection("rfaDocuments").doc();
+    docId = rfaRef.id;
+    
+    await rfaRef.set({
+      siteId, rfaType, categoryId: finalCategoryId, title, description: description || "",
+      taskData: taskData ?? null, documentNumber, status: "DRAFT", createdBy: uid,
+      createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+      workflow: [{
+          action: 'CREATE', status: 'DRAFT', userId: uid,
+          userName: userData?.email, role: userData?.role,
+          timestamp: FieldValue.serverTimestamp(),
+      }],
+      files: finalFilesData,
     });
+    
+    return NextResponse.json({ success: true, id: docId, documentNumber }, { status: 201 });
 
-    return NextResponse.json(
-      { ok: true, id: docId, number: docNumber, categoryId: finalCategoryId, categoryAutoCreated: categoryCreated },
-      { status: 201 }
-    );
-  } catch (err) {
-    console.error("RFA Create Error:", err);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+  } catch (err: any) {
+    console.error("RFA Create Finalization Error:", err);
+    
+    // ✅ Cleanup: ถ้าการสร้างเอกสารล้มเหลว แต่ไฟล์ถูกย้ายไปแล้ว ให้พยายามย้ายกลับไปที่ temp
+    // (เป็น Best-effort cleanup)
+    if (docId) {
+        await adminDb.collection("rfaDocuments").doc(docId).delete().catch(e => console.error("Cleanup failed for doc:", e));
+    }
+    
+    return NextResponse.json({ error: "Internal Server Error", details: err.message }, { status: 500 });
   }
 }
