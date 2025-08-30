@@ -9,9 +9,9 @@ import { useAuth } from '@/lib/auth/useAuth'
 
 // Types
 interface UploadedFile {
-  id: string; // Unique ID for list rendering
+  id: string;
   file: File;
-  status: 'pending' | 'uploading' | 'success' | 'error';
+  status: 'pending' | 'uploading' | 'success' | 'error' | 'retrying';
   progress: number;
   uploadedData?: {
     fileName: string;
@@ -21,15 +21,16 @@ interface UploadedFile {
     contentType: string;
   };
   error?: string;
+  retryCount: number;  // ← ลบ ? ออก ทำให้เป็น required
 }
 
 interface RFAFormData {
   rfaType: 'RFA-SHOP' | 'RFA-GEN' | 'RFA-MAT' | ''
   categoryId: string
-  documentNumber: string  // ← เพิ่มบรรทัดนี้
+  documentNumber: string
   title: string
   description: string
-  files: File[]
+  uploadedFiles: UploadedFile[]  // ← เปลี่ยนจาก files เป็น uploadedFiles
   selectedProject: string
   selectedCategory: string
   selectedTask: TaskData | null
@@ -69,10 +70,10 @@ interface User {
 const INITIAL_FORM_DATA: RFAFormData = {
   rfaType: '',
   categoryId: '',
-  documentNumber: '',  // ← เพิ่มบรรทัดนี้
+  documentNumber: '',
   title: '',
   description: '',
-  files: [],
+  uploadedFiles: [],  // ← เปลี่ยนเป็น uploadedFiles
   selectedProject: '',
   selectedCategory: '',
   selectedTask: null
@@ -131,8 +132,6 @@ export default function CreateRFAForm({
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [uploading, setUploading] = useState(false)
-  
-
   const [sites, setSites] = useState<Site[]>([])
   const [projects, setProjects] = useState<string[]>([])
   const [sheetCategories, setSheetCategories] = useState<string[]>([])
@@ -141,6 +140,7 @@ export default function CreateRFAForm({
   const { user: authUser, firebaseUser, loading: authLoading } = useAuth()
   const { loading: sheetsLoading, error: sheetsError, getProjects, getCategories, getTasks, clearError } = useGoogleSheets()
   const [taskSearchQuery, setTaskSearchQuery] = useState('')
+  const [isUploading, setIsUploading] = useState(false)
 
   // Hooks
   const router = useRouter()
@@ -221,10 +221,113 @@ export default function CreateRFAForm({
           
           // ลบการ validate description ออก (ไม่บังคับ)
           break
+
+        case 3: // Final step - check if we have successful uploads
+          const successfulFiles = formData.uploadedFiles.filter(f => f.status === 'success')
+          if (successfulFiles.length === 0) {
+            newErrors.files = 'กรุณาอัปโหลดไฟล์ให้สำเร็จก่อน'
+          }
+          break
     }
 
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0
+  }
+
+  const uploadTempFile = async (file: File): Promise<UploadedFile> => {
+    const tempFile: UploadedFile = {
+      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+      file,
+      status: 'uploading',
+      progress: 0,
+      retryCount: 0
+    }
+
+    try {
+      if (!firebaseUser) {
+        throw new Error('กรุณาล็อกอินก่อนอัปโหลดไฟล์')
+      }
+
+      const token = await firebaseUser.getIdToken()
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const response = await fetch('/api/rfa/upload-temp-file', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        return {
+          ...tempFile,
+          status: 'success',
+          progress: 100,
+          uploadedData: result.fileData,
+          retryCount: 0
+        }
+      } else {
+        throw new Error(result.error || 'อัปโหลดล้มเหลว')
+      }
+    } catch (err) {
+      return {
+        ...tempFile,
+        status: 'error',
+        progress: 0,
+        error: err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการอัปโหลด',
+        retryCount: 0
+      }
+    }
+  }
+
+  // Helper function สำหรับ delete temp file
+  const deleteTempFile = async (filePath: string): Promise<boolean> => {
+    try {
+      if (!firebaseUser) return false
+
+      const token = await firebaseUser.getIdToken()
+      const response = await fetch('/api/rfa/delete-temp-file', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ filePath })
+      })
+
+      const result = await response.json()
+      return result.success
+    } catch (err) {
+      console.error('Error deleting temp file:', err)
+      return false
+    }
+  }
+
+  // Helper function สำหรับ retry upload
+  const retryUpload = async (fileIndex: number) => {
+    const currentFile = formData.uploadedFiles[fileIndex]
+    if (!currentFile || currentFile.retryCount >= 3) return
+
+    const updatedFiles = [...formData.uploadedFiles]
+    updatedFiles[fileIndex] = {
+      ...currentFile,
+      status: 'retrying',
+      progress: 0,
+      retryCount: currentFile.retryCount + 1
+    }
+    updateFormData({ uploadedFiles: updatedFiles })
+
+    const result = await uploadTempFile(currentFile.file)
+    
+    updatedFiles[fileIndex] = {
+      ...result,
+      retryCount: updatedFiles[fileIndex].retryCount
+    }
+    updateFormData({ uploadedFiles: updatedFiles })
   }
 
   // Step navigation
@@ -262,7 +365,8 @@ export default function CreateRFAForm({
     setErrors(newErrors)
   }
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    setIsUploading(true)
     const files = event.target.files
     if (!files) return
     
@@ -270,14 +374,13 @@ export default function CreateRFAForm({
     const validFiles: File[] = []
     const invalidFiles: string[] = []
     
+    // Validate files first
     fileArray.forEach(file => {
-      // File size validation (max 100MB for now)
       if (file.size > 100 * 1024 * 1024) {
         invalidFiles.push(`${file.name} (ขนาดใหญ่เกิน 100MB)`)
         return
       }
       
-      // File type validation
       const allowedExtensions = ['.dwg', '.pdf', '.jpg', '.jpeg', '.png', '.xlsx', '.docx', '.zip']
       const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase()
       if (!allowedExtensions.includes(fileExtension)) {
@@ -293,13 +396,59 @@ export default function CreateRFAForm({
     }
 
     if (validFiles.length > 0) {
-      updateFormData({ files: [...formData.files, ...validFiles] })
+      // Create UploadedFile objects in pending state
+      const newUploadedFiles: UploadedFile[] = validFiles.map(file => ({
+        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+        file,
+        status: 'pending',
+        progress: 0,
+        retryCount: 0  // ← เปลี่ยนจาก undefined เป็น 0
+      }))
+
+      // Add to form data immediately
+      updateFormData({ uploadedFiles: [...formData.uploadedFiles, ...newUploadedFiles] })
+
+      // Start uploading each file
+      newUploadedFiles.forEach(async (fileObj, i) => {
+        const currentIndex = formData.uploadedFiles.length + i
+        
+        // Update status to uploading
+        setTimeout(() => {
+          setFormData(prev => {
+            const updatedFiles = [...prev.uploadedFiles]
+            updatedFiles[currentIndex] = { ...fileObj, status: 'uploading' }
+            return { ...prev, uploadedFiles: updatedFiles }
+          })
+        }, 100)
+
+        // Upload file
+        const result = await uploadTempFile(fileObj.file)
+        
+        // Update with result
+        setFormData(prev => {
+          const updatedFiles = [...prev.uploadedFiles]
+          updatedFiles[currentIndex] = result
+          return { ...prev, uploadedFiles: updatedFiles }
+        })
+      })
     }
+
+    // Clear the input
+    event.target.value = ''
+    setIsUploading(false)
   }
 
-  const removeFile = (index: number) => {
-    const newFiles = formData.files.filter((_, i) => i !== index)
-    updateFormData({ files: newFiles })
+  const removeFile = async (index: number) => {
+    const fileToRemove = formData.uploadedFiles[index]
+    
+    // Delete from temp storage if uploaded
+    if (fileToRemove.uploadedData?.filePath) {
+      await deleteTempFile(fileToRemove.uploadedData.filePath)
+    }
+
+    // Remove from UI
+    const newFiles = formData.uploadedFiles.filter((_, i) => i !== index)
+    updateFormData({ uploadedFiles: newFiles })
   }
 
   // Submit form
@@ -316,40 +465,38 @@ export default function CreateRFAForm({
         throw new Error('กรุณาเลือกงานจาก Google Sheets')
       }
 
-      const token = await firebaseUser.getIdToken()
-
-      // Create FormData for file upload
-      const submitData = new FormData()
-      submitData.append('rfaType', formData.rfaType)
-      submitData.append('title', formData.title)
-      submitData.append('description', formData.description)
-      submitData.append('siteId', selectedSite)
-
-      
-      // ✅ ส่ง categoryId ให้ API (ใช้ taskCategory จาก Google Sheets)
-      if (formData.selectedTask?.taskCategory) {
-        submitData.append('categoryId', formData.selectedTask.taskCategory)
+      // ตรวจสอบว่ามีไฟล์ที่อัปโหลดสำเร็จแล้วหรือไม่
+      const successfulFiles = formData.uploadedFiles.filter(f => f.status === 'success')
+      if (successfulFiles.length === 0) {
+        throw new Error('กรุณาอัปโหลดไฟล์ให้สำเร็จก่อนส่งเอกสาร')
       }
 
-// Include task data from Google Sheets
-      submitData.append('taskData', JSON.stringify({
-        taskName: formData.selectedTask.taskName,
-        taskCategory: formData.selectedTask.taskCategory,
-        projectName: formData.selectedTask.projectName,
-        taskUid: formData.selectedTask.taskUid
-      }))
-      
-      // Add files
-      formData.files.forEach((file) => {
-        submitData.append('files', file)
-      })
+      const token = await firebaseUser.getIdToken()
+
+      // ส่งข้อมูลเป็น JSON แทน FormData
+      const submitData = {
+        rfaType: formData.rfaType,
+        title: formData.title,
+        description: formData.description,
+        siteId: selectedSite,
+        documentNumber: formData.documentNumber,  // ← เพิ่มบรรทัดนี้
+        categoryId: formData.selectedTask?.taskCategory,
+        taskData: {
+          taskName: formData.selectedTask.taskName,
+          taskCategory: formData.selectedTask.taskCategory,
+          projectName: formData.selectedTask.projectName,
+          taskUid: formData.selectedTask.taskUid
+        },
+        uploadedFiles: successfulFiles.map(f => f.uploadedData)
+      }
 
       const response = await fetch('/api/rfa/create', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
         },
-        body: submitData
+        body: JSON.stringify(submitData)
       })
 
       const result = await response.json()
@@ -362,14 +509,14 @@ export default function CreateRFAForm({
           router.push('/dashboard')
         }
         
-        // Show success message (you might want to use a toast library)
+        // Show success message
         alert(`สร้าง RFA สำเร็จ! หมายเลขเอกสาร: ${result.documentNumber}`)
       } else {
         throw new Error(result.error || 'เกิดข้อผิดพลาด')
       }
     } catch (error) {
       console.error('Error creating RFA:', error)
-      setErrors({ general: error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการสร้าง RFA' })
+      setErrors({ general: error instanceof Error ? error.message : 'เกิดข้อผิดพลาด' })
     } finally {
       setUploading(false)
     }
@@ -598,19 +745,26 @@ export default function CreateRFAForm({
   }
 
   const resetAllSelections = () => {
-    setSelectedSite('')
-    setFormData(prev => ({
-      ...prev,
-      selectedProject: '',
-      selectedCategory: '',
-      selectedTask: null,
-      title: '' // เพิ่ม reset title
-    }))
-    setSheetCategories([])
-    setTasks([])
-    setTaskSearchQuery('')
-    clearError()
+    setFormData(INITIAL_FORM_DATA)
+    // เพิ่มการลบ temp files
+    formData.uploadedFiles.forEach(async (fileObj) => {
+      if (fileObj.uploadedData?.filePath) {
+        await deleteTempFile(fileObj.uploadedData.filePath)
+      }
+    })
   }
+
+  // Cleanup temp files when component unmounts or form is closed
+  useEffect(() => {
+    return () => {
+      // Cleanup temp files when component unmounts
+      formData.uploadedFiles.forEach(async (fileObj) => {
+        if (fileObj.status === 'success' && fileObj.uploadedData?.filePath) {
+          await deleteTempFile(fileObj.uploadedData.filePath)
+        }
+      })
+    }
+  }, [])
 
   return (
     <div className={`${isModal ? 'max-w-4xl mx-auto' : 'min-h-screen'} bg-white ${isModal ? 'rounded-lg shadow-lg' : ''}`}>
@@ -1067,37 +1221,88 @@ export default function CreateRFAForm({
               />
               <label
                 htmlFor="file-upload"
-                className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer transition-colors"
+                className={`inline-flex items-center px-4 py-2 text-white rounded-lg cursor-pointer transition-colors ${
+                  isUploading ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+                }`}
               >
-                <Upload className="w-4 h-4 mr-2" />
-                เลือกไฟล์
+                {isUploading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    กำลังอัปโหลด...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-4 h-4 mr-2" />
+                    เลือกไฟล์
+                  </>
+                )}
               </label>
             </div>
 
             {/* File List */}
-            {formData.files.length > 0 && (
+            {formData.uploadedFiles.length > 0 && (
               <div className="space-y-3">
-                <h4 className="font-medium text-gray-900">ไฟล์ที่เลือก ({formData.files.length} ไฟล์)</h4>
-                {formData.files.map((file, index) => (
-                  <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <h4 className="font-medium text-gray-900">ไฟล์ที่อัปโหลด ({formData.uploadedFiles.length} ไฟล์)</h4>
+                {formData.uploadedFiles.map((fileObj, index) => (
+                  <div key={fileObj.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                     <div className="flex items-center space-x-3">
                       <div className="w-8 h-8 bg-blue-100 rounded flex items-center justify-center">
-                        <FileText className="w-4 h-4 text-blue-600" />
+                        {fileObj.status === 'success' && <CheckCircle className="w-4 h-4 text-green-600" />}
+                        {fileObj.status === 'uploading' && <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />}
+                        {fileObj.status === 'error' && <AlertCircle className="w-4 h-4 text-red-600" />}
+                        {fileObj.status === 'pending' && <Clock className="w-4 h-4 text-gray-400" />}
+                        {fileObj.status === 'retrying' && <RefreshCw className="w-4 h-4 text-orange-600 animate-spin" />}
                       </div>
-                      <div>
-                        <p className="text-sm font-medium text-gray-900">{file.name}</p>
-                        <p className="text-xs text-gray-500">
-                          {(file.size / (1024 * 1024)).toFixed(2)} MB
-                        </p>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-gray-900">{fileObj.file.name}</p>
+                        <div className="flex items-center space-x-2 text-xs text-gray-500">
+                          <span>{(fileObj.file.size / (1024 * 1024)).toFixed(2)} MB</span>
+                          <span>•</span>
+                          <span className={
+                            fileObj.status === 'success' ? 'text-green-600' :
+                            fileObj.status === 'error' ? 'text-red-600' :
+                            fileObj.status === 'uploading' || fileObj.status === 'retrying' ? 'text-blue-600' :
+                            'text-gray-500'
+                          }>
+                            {fileObj.status === 'success' && 'อัปโหลดสำเร็จ'}
+                            {fileObj.status === 'uploading' && `กำลังอัปโหลด ${fileObj.progress}%`}
+                            {fileObj.status === 'error' && 'อัปโหลดล้มเหลว'}
+                            {fileObj.status === 'pending' && 'รอการอัปโหลด'}
+                            {fileObj.status === 'retrying' && 'กำลังลองใหม่...'}
+                          </span>
+                        </div>
+                        {fileObj.error && (
+                          <p className="text-xs text-red-500 mt-1">{fileObj.error}</p>
+                        )}
+                        {(fileObj.status === 'uploading' || fileObj.status === 'retrying') && (
+                          <div className="w-full bg-gray-200 rounded-full h-1.5 mt-2">
+                            <div 
+                              className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
+                              style={{ width: `${fileObj.progress}%` }}
+                            />
+                          </div>
+                        )}
                       </div>
                     </div>
-                    <button
-                      onClick={() => removeFile(index)}
-                      className="text-red-600 hover:text-red-800 p-1"
-                      disabled={uploading}
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center space-x-2">
+                      {fileObj.status === 'error' && (fileObj.retryCount ?? 0) < 3 && (
+                        <button
+                          onClick={() => retryUpload(index)}
+                          className="text-blue-600 hover:text-blue-800 p-1"
+                          title="ลองอัปโหลดใหม่"
+                        >
+                          <RefreshCw className="w-4 h-4" />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => removeFile(index)}
+                        className="text-red-600 hover:text-red-800 p-1"
+                        disabled={fileObj.status === 'uploading' || fileObj.status === 'retrying'}
+                        title="ลบไฟล์"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1109,6 +1314,16 @@ export default function CreateRFAForm({
               </div>
             )}
 
+            {formData.uploadedFiles.length > 0 && (
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-blue-600 text-sm">
+                  สถานะการอัปโหลด: {formData.uploadedFiles.filter(f => f.status === 'success').length} สำเร็จ, {' '}
+                  {formData.uploadedFiles.filter(f => f.status === 'uploading' || f.status === 'retrying').length} กำลังดำเนินการ, {' '}
+                  {formData.uploadedFiles.filter(f => f.status === 'error').length} ล้มเหลว
+                </p>
+              </div>
+            )}
+            
             {/* File Guidelines */}
             <div className="p-4 bg-blue-50 rounded-lg">
               <h4 className="font-medium text-blue-800 mb-2">คำแนะนำการอัปโหลดไฟล์:</h4>
@@ -1182,21 +1397,21 @@ export default function CreateRFAForm({
 
               {/* Files */}
               <div className="p-4 bg-gray-50 rounded-lg">
-                <h4 className="font-medium text-gray-800 mb-3">ไฟล์แนบ ({formData.files.length} ไฟล์)</h4>
-                {formData.files.length > 0 ? (
+                <h4 className="font-medium text-gray-800 mb-3">ไฟล์แนบ ({formData.uploadedFiles.filter(f => f.status === 'success').length} ไฟล์)</h4>
+                {formData.uploadedFiles.filter(f => f.status === 'success').length > 0 ? (
                   <div className="space-y-2">
-                    {formData.files.map((file, index) => (
+                    {formData.uploadedFiles.filter(f => f.status === 'success').map((fileObj, index) => (
                       <div key={index} className="flex items-center space-x-3 text-sm">
                         <FileText className="w-4 h-4 text-gray-500" />
-                        <span className="flex-1">{file.name}</span>
+                        <span className="flex-1">{fileObj.file.name}</span>
                         <span className="text-gray-500">
-                          {(file.size / (1024 * 1024)).toFixed(2)} MB
+                          {(fileObj.file.size / (1024 * 1024)).toFixed(2)} MB
                         </span>
                       </div>
                     ))}
                     <div className="mt-2 pt-2 border-t border-gray-200">
                       <p className="text-xs text-gray-600">
-                        ขนาดรวม: {(formData.files.reduce((sum, file) => sum + file.size, 0) / (1024 * 1024)).toFixed(2)} MB
+                        ขนาดรวม: {(formData.uploadedFiles.filter(f => f.status === 'success').reduce((sum, fileObj) => sum + fileObj.file.size, 0) / (1024 * 1024)).toFixed(2)} MB
                       </p>
                     </div>
                   </div>

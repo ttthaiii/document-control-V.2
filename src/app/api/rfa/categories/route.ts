@@ -52,26 +52,34 @@ export async function GET(request: NextRequest) {
 
     // Get categories from user's sites
     const categories: any[] = []
-    
+
     for (const siteId of userSites) {
       const categoriesSnapshot = await adminDb
         .collection('sites')
         .doc(siteId)
         .collection('categories')
         .where('active', '==', true)
-        .where('rfaTypes', 'array-contains', rfaType)
-        .get()
+        .get() // ลบ where rfaTypes ออก
 
       categoriesSnapshot.forEach(doc => {
         const data = doc.data()
-        categories.push({
-          id: doc.id,
-          siteId: siteId,
-          categoryCode: data.categoryCode,
-          categoryName: data.categoryName,
-          rfaTypes: data.rfaTypes,
-          sequence: data.sequence || 0
-        })
+        console.log(`Debug category data for ${doc.id}:`, data) // Debug log
+        
+        // รองรับทั้งสอง schema
+        const matchesRfaType = 
+          (data.rfaTypes && Array.isArray(data.rfaTypes) && data.rfaTypes.includes(rfaType)) ||
+          (data.documentType === rfaType)
+        
+        if (matchesRfaType) {
+          categories.push({
+            id: doc.id,
+            siteId: siteId,
+            categoryCode: data.categoryCode,
+            categoryName: data.categoryName || data.name,
+            rfaTypes: data.rfaTypes || [data.documentType],
+            sequence: data.sequence || 0
+          })
+        }
       })
     }
 

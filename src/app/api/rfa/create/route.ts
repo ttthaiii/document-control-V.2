@@ -83,9 +83,9 @@ export async function POST(req: Request) {
     // --- Category Handling ---
     const rawCategoryKey = categoryId || taskData?.taskCategory || rfaType;
     const { id: finalCategoryId } = await ensureCategory(siteId, rawCategoryKey, {
-      name: taskData?.taskCategory || rfaType,
-      createdBy: uid,
-      rfaType,
+    name: taskData?.taskCategory || rfaType,
+    createdBy: uid,
+    rfaType,
     });
     
     // --- ✅ Logic ใหม่: ย้ายไฟล์จาก temp ไปยัง path ถาวร ---
@@ -120,19 +120,30 @@ export async function POST(req: Request) {
     // --- สร้างเอกสาร RFA พร้อมข้อมูลไฟล์ที่สมบูรณ์ ---
     const rfaRef = adminDb.collection("rfaDocuments").doc();
     docId = rfaRef.id;
-    
+
     await rfaRef.set({
-      siteId, rfaType, categoryId: finalCategoryId, title, description: description || "",
-      taskData: taskData ?? null, documentNumber, status: "DRAFT", createdBy: uid,
-      createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
-      workflow: [{
-          action: 'CREATE', status: 'DRAFT', userId: uid,
-          userName: userData?.email, role: userData?.role,
-          timestamp: FieldValue.serverTimestamp(),
-      }],
-      files: finalFilesData,
+    siteId, 
+    rfaType, 
+    categoryId: finalCategoryId, 
+    title, 
+    description: description || "",
+    taskData: taskData || null, 
+    documentNumber, 
+    status: "DRAFT", 
+    createdBy: uid,
+    createdAt: FieldValue.serverTimestamp(), 
+    updatedAt: FieldValue.serverTimestamp(),
+    workflow: [{
+        action: 'CREATE', 
+        status: 'DRAFT', 
+        userId: uid,
+        userName: userData?.email, 
+        role: userData?.role,
+        timestamp: FieldValue.serverTimestamp(),
+    }],
+    files: finalFilesData,
     });
-    
+
     return NextResponse.json({ success: true, id: docId, documentNumber }, { status: 201 });
 
   } catch (err: any) {
