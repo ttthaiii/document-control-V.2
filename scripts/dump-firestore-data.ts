@@ -2,9 +2,17 @@
 import { config } from 'dotenv';
 import { resolve } from 'path';
 
-// Load environment variables
+// Load environment variables FIRST
 config({ path: resolve(process.cwd(), '.env.local') });
 
+// Add debug to verify loading
+console.log('ENV CHECK:', {
+  projectId: process.env.FIREBASE_PROJECT_ID ? 'SET' : 'MISSING',
+  clientEmail: process.env.FIREBASE_CLIENT_EMAIL ? 'SET' : 'MISSING',
+  privateKey: process.env.FIREBASE_PRIVATE_KEY ? 'SET' : 'MISSING'
+});
+
+// Import Firebase AFTER env vars loaded
 import { adminDb } from '../src/lib/firebase/admin';
 
 interface DataDump {

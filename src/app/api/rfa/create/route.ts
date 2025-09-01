@@ -112,7 +112,7 @@ export async function POST(req: Request) {
             ...tempFile,
             fileUrl: `${cdnUrlBase}/${destinationPath}`,
             filePath: destinationPath,
-            uploadedAt: FieldValue.serverTimestamp(),
+            uploadedAt: new Date().toISOString(),  // ← ใช้ new Date() แทน
             uploadedBy: uid,
         });
     }
@@ -139,7 +139,7 @@ export async function POST(req: Request) {
         userId: uid,
         userName: userData?.email, 
         role: userData?.role,
-        timestamp: FieldValue.serverTimestamp(),
+        timestamp: new Date().toISOString(),  // ← ใช้ ISO string
     }],
     files: finalFilesData,
     });

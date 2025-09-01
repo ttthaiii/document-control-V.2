@@ -59,24 +59,20 @@ export async function GET(request: NextRequest) {
         .doc(siteId)
         .collection('categories')
         .where('active', '==', true)
-        .get() // ลบ where rfaTypes ออก
+        .where('rfaTypes', 'array-contains', rfaType)  // ใช้ได้แล้วหลัง migration
+        .get()
 
       categoriesSnapshot.forEach(doc => {
         const data = doc.data()
-        console.log(`Debug category data for ${doc.id}:`, data) // Debug log
         
-        // รองรับทั้งสอง schema
-        const matchesRfaType = 
-          (data.rfaTypes && Array.isArray(data.rfaTypes) && data.rfaTypes.includes(rfaType)) ||
-          (data.documentType === rfaType)
-        
-        if (matchesRfaType) {
+        // ใช้ array เท่านั้น (หลัง migration)
+        if (data.rfaTypes && Array.isArray(data.rfaTypes) && data.rfaTypes.includes(rfaType)) {
           categories.push({
             id: doc.id,
             siteId: siteId,
-            categoryCode: data.categoryCode,
-            categoryName: data.categoryName || data.name,
-            rfaTypes: data.rfaTypes || [data.documentType],
+            categoryCode: data.categoryCode || 'UNKNOWN',
+            categoryName: data.categoryName || 'Unknown Category',
+            rfaTypes: data.rfaTypes,
             sequence: data.sequence || 0
           })
         }

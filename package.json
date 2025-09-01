@@ -12,7 +12,8 @@
     "test:admin": "tsx scripts/test-admin.ts",
     "test:firebase": "tsx scripts/test-firebase.ts",
     "seed": "tsx scripts/seed-data.ts",
-    "invite:user": "tsx scripts/invite-user.ts"
+    "invite:user": "tsx scripts/invite-user.ts",
+    "dump-data": "npx tsx scripts/dump-firestore-data.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.1",
