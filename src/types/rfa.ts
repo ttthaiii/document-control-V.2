@@ -1,0 +1,120 @@
+// src/types/rfa.ts
+export interface RFAFile {
+  fileName: string
+  fileUrl: string
+  filePath: string
+  size: number
+  contentType: string
+  uploadedAt: string
+  uploadedBy: string
+}
+
+export interface RFAWorkflowStep {
+  step: string
+  status: string
+  userId: string
+  userRole: string
+  timestamp: string
+  comments?: string
+}
+
+export interface RFAPermissions {
+  canView: boolean
+  canEdit: boolean
+  canApprove: boolean
+  canReject: boolean
+  canForward: boolean
+  canAddFiles: boolean
+  canDownloadFiles: boolean
+}
+
+export interface RFACurrentUser {
+  id: string
+  role: string
+  isCreator: boolean
+  isAssigned: boolean
+}
+
+export interface RFASite {
+  id: string
+  name: string
+}
+
+export interface RFACategory {
+  id: string
+  categoryCode: string
+  categoryName: string
+}
+
+export interface RFAUserInfo {
+  email: string
+  role: string
+  profile?: {
+    name?: string
+    avatar?: string
+  }
+}
+
+export interface RFADocument {
+  id: string
+  documentNumber: string
+  rfaType: 'RFA-SHOP' | 'RFA-GEN' | 'RFA-MAT'
+  title: string
+  description: string
+  status: string
+  currentStep: string
+  revisionNumber?: string
+  createdAt: Date
+  updatedAt: Date
+  createdBy: string
+  assignedTo?: string
+  filesCount: number
+  totalFileSize: number
+  files: RFAFile[]
+  site: RFASite
+  category: RFACategory
+  createdByInfo: RFAUserInfo
+  assignedUserInfo?: RFAUserInfo
+  workflow: RFAWorkflowStep[]
+  permissions: RFAPermissions
+  currentUser: RFACurrentUser
+  metadata?: {
+    [key: string]: any
+  }
+}
+
+export interface RFAFilters {
+  rfaType: 'ALL' | 'RFA-SHOP' | 'RFA-GEN' | 'RFA-MAT'
+  status: 'ALL' | 'DRAFT' | 'PENDING_SITE_ADMIN' | 'PENDING_CM' | 'APPROVED' | 'REJECTED'
+  assignedToMe: boolean
+  createdByMe: boolean
+  siteId: string | 'ALL'
+}
+
+export interface RFAStats {
+  total: number
+  pending: number
+  approved: number
+  draft: number
+  assignedToMe: number
+  byType: {
+    'RFA-SHOP': number
+    'RFA-GEN': number
+    'RFA-MAT': number
+  }
+  byStatus: {
+    DRAFT: number
+    PENDING_SITE_ADMIN: number
+    PENDING_CM: number
+    APPROVED: number
+    REJECTED: number
+  }
+}
+
+// User type for CreateRFAForm compatibility
+export interface CreateRFAUser {
+  id: string
+  email: string
+  role: 'BIM' | 'Site Admin' | 'CM' | 'Admin'
+  sites: string[]
+}

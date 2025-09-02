@@ -197,7 +197,7 @@ export async function GET(
       documentNumber: rfaData.documentNumber,
       rfaType: rfaData.rfaType,
       title: rfaData.title,
-      description: rfaData.description,
+      description: rfaData.description || '', // เพิ่ม default value
       status: rfaData.status,
       currentStep: rfaData.currentStep,
       revisionNumber: rfaData.revisionNumber,
@@ -209,15 +209,32 @@ export async function GET(
       // Users
       createdBy: rfaData.createdBy,
       assignedTo: rfaData.assignedTo,
+      createdByInfo: usersInfo[rfaData.createdBy] || { email: 'Unknown', role: 'Unknown' },
+      assignedUserInfo: rfaData.assignedTo ? usersInfo[rfaData.assignedTo] : null,
       usersInfo: usersInfo,
       
-      // Files
-      files: rfaData.files || [],
+      // Files - เพิ่มการแปลง format
+      files: rfaData.files?.map((file: any) => ({
+        fileName: file.fileName,
+        fileUrl: file.fileUrl,
+        filePath: file.filePath,
+        size: file.size,
+        contentType: file.contentType,
+        uploadedAt: file.uploadedAt,
+        uploadedBy: file.uploadedBy
+      })) || [],
       filesCount: rfaData.files?.length || 0,
       totalFileSize: rfaData.metadata?.totalFileSize || 0,
       
-      // Workflow
-      workflow: rfaData.workflow || [],
+      // Workflow - เพิ่มการแปลง format
+      workflow: rfaData.workflow?.map((step: any) => ({
+        step: step.action || step.step,
+        status: step.status,
+        userId: step.userId,
+        userRole: step.role || step.userRole,
+        timestamp: step.timestamp,
+        comments: step.comments
+      })) || [],
       
       // Timestamps
       createdAt: rfaData.createdAt,
@@ -285,7 +302,8 @@ export async function PUT(
 
     // Parse request body
     const body = await request.json()
-    const { action, remarks, newAssignee } = body
+    const { action, comments, remarks, newAssignee } = body
+    const finalRemarks = comments || remarks || '' // Support both comments and remarks
 
     if (!action) {
       return NextResponse.json(
@@ -418,7 +436,7 @@ export async function PUT(
       userRole: userRole,
       timestamp: FieldValue.serverTimestamp(),
       action: action,
-      remarks: remarks || ''
+      comments: finalRemarks
     }
 
     const updateData = {
@@ -432,19 +450,28 @@ export async function PUT(
 
     await rfaDocRef.update(updateData)
 
-    // Create notification for new assignee (if changed and not the same as current user)
-    if (newAssignedTo && newAssignedTo !== userId && newAssignedTo !== documentData.assignedTo) {
-      await createNotification({
-        type: `RFA_${action.toUpperCase()}`,
-        recipientId: newAssignedTo,
-        documentId: params.id,
-        documentNumber: documentData.documentNumber,
-        rfaType: documentData.rfaType,
-        title: documentData.title,
-        actionBy: userId,
-        siteId: documentData.siteId,
-        remarks: remarks
-      })
+    // Send notifications based on status change
+    if (newStatus !== documentData.status) {
+      try {
+        console.log(`Status changed from ${documentData.status} to ${newStatus}`)
+        
+        // Create notification for new assignee (if changed and not the same as current user)
+        if (newAssignedTo && newAssignedTo !== userId && newAssignedTo !== documentData.assignedTo) {
+          await createNotification({
+            type: `RFA_${action.toUpperCase()}`,
+            recipientId: newAssignedTo,
+            documentId: params.id,
+            documentNumber: documentData.documentNumber,
+            rfaType: documentData.rfaType,
+            title: documentData.title,
+            actionBy: userId,
+            siteId: documentData.siteId,
+            remarks: finalRemarks
+          })
+        }
+      } catch (notificationError) {
+        console.error('Notification failed:', notificationError)
+      }
     }
 
     return NextResponse.json({

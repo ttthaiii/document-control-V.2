@@ -30,18 +30,18 @@ function DashboardContent() {
             <p className="text-gray-600 text-sm mb-4">รอการอนุมัติ</p>
             
             <div className="flex space-x-2">
-              <button
-                onClick={() => router.push('/dashboard/rfa/create')}
-                className="flex-1 bg-blue-600 text-white px-3 py-2 rounded text-sm hover:bg-blue-700 transition-colors"
-              >
-                สร้าง RFA
-              </button>
-              <button
-                onClick={() => router.push('/dashboard/rfa')}
-                className="flex-1 bg-gray-100 text-gray-700 px-3 py-2 rounded text-sm hover:bg-gray-200 transition-colors"
-              >
-                ดูทั้งหมด
-              </button>
+            <button
+              onClick={() => router.push('/dashboard/rfa/create')}
+              className="flex-1 bg-blue-600 text-white px-3 py-2 rounded text-sm hover:bg-blue-700 transition-colors"
+            >
+              สร้าง RFA
+            </button>
+            <button
+              onClick={() => router.push('/dashboard/rfa')}
+              className="flex-1 bg-gray-100 text-gray-700 px-3 py-2 rounded text-sm hover:bg-gray-200 transition-colors"
+            >
+              ดูทั้งหมด
+            </button>
             </div>
           </div>
 

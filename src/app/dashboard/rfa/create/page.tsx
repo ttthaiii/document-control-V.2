@@ -1,82 +1,67 @@
-'use client';
-import { AuthGuard } from '@/lib/components/shared/AuthGuard';
-import Layout from '@/components/layout/Layout';
-import CreateRFAForm from '@/components/rfa/CreateRFAForm';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { useAuth } from '@/lib/auth/useAuth';
+// src/app/dashboard/rfa/create/page.tsx
+'use client'
 
-function RFACreateContent() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const { user: appUser } = useAuth();
-  const preselectedType = searchParams.get('type');
+import { AuthGuard } from '@/lib/components/shared/AuthGuard'
+import Layout from '@/components/layout/Layout'
+import CreateRFAForm from '@/components/rfa/CreateRFAForm'
+import { useRouter } from 'next/navigation'
+import { useAuth } from '@/lib/auth/useAuth'
 
-  const handleSuccess = (data: any) => {
-    console.log('RFA created successfully:', data);
-    router.push('/dashboard/rfa');
-  };
+export default function CreateRFAPage() {
+  const router = useRouter()
+  const { user } = useAuth()
 
-  const handleCancel = () => {
-    router.back();
-  };
-
-  // Convert AppUser to User format for CreateRFAForm
-  const user = appUser ? {
-    id: appUser.id,
-    email: appUser.email,
-    role: appUser.role,
-    sites: appUser.sites || []
-  } : undefined;
+  const handleClose = () => {
+    router.push('/dashboard/rfa')
+  }
 
   return (
-    <Layout>
-      <div className="max-w-4xl mx-auto">
-        {/* Page Header */}
-        <div className="mb-6">
-          <div className="flex items-center space-x-4 mb-2">
-            <button
-              onClick={handleCancel}
-              className="text-gray-600 hover:text-gray-900 transition-colors text-sm"
-            >
-              ← กลับ
-            </button>
-            <h1 className="text-2xl font-bold text-gray-900">
+    <AuthGuard>
+      <Layout>
+        <div className="max-w-7xl mx-auto">
+          {/* Page Header */}
+          <div className="mb-6">
+            <div className="flex items-center space-x-2 text-sm text-gray-500 mb-4">
+              <span 
+                onClick={() => router.push('/dashboard')}
+                className="hover:text-blue-600 cursor-pointer"
+              >
+                Dashboard
+              </span>
+              <span>›</span>
+              <span 
+                onClick={() => router.push('/dashboard/rfa')}
+                className="hover:text-blue-600 cursor-pointer"
+              >
+                RFA Documents
+              </span>
+              <span>›</span>
+              <span className="text-gray-700">สร้างเอกสารใหม่</span>
+            </div>
+
+            <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">
               📋 สร้างเอกสาร RFA
             </h1>
-          </div>
-          <p className="text-gray-600">
-            กรุณากรอกข้อมูลเอกสารให้ครบถ้วนก่อนส่งเพื่อขออนุมัติ
-          </p>
-        </div>
-        
-        {/* Form Container */}
-        <div className="bg-white rounded-lg shadow-sm border">
-          <div className="p-6 border-b">
-            <h2 className="text-xl font-semibold text-gray-800">
-              Request for Approval (RFA)
-            </h2>
-            <p className="text-gray-600 mt-1">
-              {preselectedType && `ประเภท: ${preselectedType}`}
+            <p className="text-gray-600 mt-2">
+              สร้างเอกสาร Request for Approval ใหม่
             </p>
           </div>
-          
-          <div className="p-6">
+
+          {/* Form Container */}
+          <div className="bg-white rounded-lg shadow">
             <CreateRFAForm
-              onClose={handleCancel}
+              onClose={handleClose}
               isModal={false}
-              userProp={user}
+              userProp={user ? {
+                id: user.id,
+                email: user.email,
+                role: user.role,
+                sites: user.sites || []
+              } : undefined}
             />
           </div>
         </div>
-      </div>
-    </Layout>
-  );
-}
-
-export default function RFACreatePage() {
-  return (
-    <AuthGuard>
-      <RFACreateContent />
+      </Layout>
     </AuthGuard>
-  );
+  )
 }

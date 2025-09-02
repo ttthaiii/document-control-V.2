@@ -50,9 +50,8 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '50')
     const offset = parseInt(searchParams.get('offset') || '0')
 
-    // Build query - Fix TypeScript Query type issue
-    const baseQuery = adminDb.collection('rfaDocuments')
-    let firestoreQuery: FirebaseFirestore.Query<FirebaseFirestore.DocumentData> = baseQuery
+    // Build query with proper typing
+    let firestoreQuery: any = adminDb.collection('rfaDocuments')
 
     // Filter by site (user must have access)
     if (siteId) {
@@ -88,7 +87,6 @@ export async function GET(request: NextRequest) {
       firestoreQuery = firestoreQuery.where('createdBy', '==', userId)
     } else {
       // Show documents user has access to based on role and current step
-      // This is a simplified version - you might want more complex logic
       switch (userRole) {
         case 'BIM':
           // BIM can see their own documents and approved documents
@@ -103,57 +101,51 @@ export async function GET(request: NextRequest) {
           // For simplicity, we'll fetch all and filter later
           break
         case 'Admin':
-          // Admin can see all documents (no additional filter)
+          // Admin can see all documents
           break
       }
     }
 
-    // Order by creation date (newest first)
-    firestoreQuery = firestoreQuery.orderBy('createdAt', 'desc')
-
-    // Apply limit
-    if (limit && limit > 0) {
-      firestoreQuery = firestoreQuery.limit(Math.min(limit, 100)) // Max 100 per request
-    }
+    // Add ordering and pagination
+    firestoreQuery = firestoreQuery
+      .orderBy('updatedAt', 'desc')
+      .limit(limit)
+      .offset(offset)
 
     // Execute query
-    const snapshot = await firestoreQuery.get()
+    const documentsSnapshot = await firestoreQuery.get()
     const documents: any[] = []
 
-    // Process documents
-    for (const doc of snapshot.docs) {
+    // Process each document
+    for (const doc of documentsSnapshot.docs) {
       const documentData = doc.data()
       
-      // Additional role-based filtering
-      let canView = false
-      
-      switch (userRole) {
-        case 'BIM':
-          canView = documentData.createdBy === userId || 
-                   ['APPROVED', 'REJECTED'].includes(documentData.status)
-          break
-        case 'Site Admin':
-          canView = documentData.assignedTo === userId ||
-                   documentData.createdBy === userId ||
-                   ['SITE_ADMIN_REVIEW', 'PENDING_SITE_ADMIN'].includes(documentData.currentStep) ||
-                   documentData.rfaType === 'RFA-MAT'
-          break
-        case 'CM':
-          canView = documentData.assignedTo === userId ||
-                   ['CM_APPROVAL', 'PENDING_CM'].includes(documentData.currentStep) ||
-                   ['APPROVED', 'REJECTED'].includes(documentData.status)
-          break
-        case 'Admin':
-          canView = true
-          break
-        default:
-          canView = false
+      // Get site information
+      let siteInfo: any = { id: documentData.siteId, name: 'Unknown Site' }
+      try {
+        const siteDoc = await adminDb.collection('sites').doc(documentData.siteId).get()
+        if (siteDoc.exists) {
+          const siteData = siteDoc.data()
+          siteInfo = {
+            id: siteDoc.id,
+            name: siteData?.name || 'Unknown Site',
+            description: siteData?.description
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching site:', error)
       }
 
-      if (canView) {
-        // Get category information
-        let categoryInfo = null
-        try {
+      // Get category information
+      let categoryInfo: any = { 
+        id: documentData.categoryId || '', 
+        categoryCode: 'Unknown', 
+        categoryName: 'Unknown Category',
+        rfaTypes: []
+      }
+
+      try {
+        if (documentData.categoryId) {
           const categoryDoc = await adminDb
             .collection('sites')
             .doc(documentData.siteId)
@@ -164,67 +156,112 @@ export async function GET(request: NextRequest) {
           if (categoryDoc.exists) {
             const catData = categoryDoc.data()
             categoryInfo = {
-              categoryCode: catData?.categoryCode,
-              categoryName: catData?.categoryName
+              id: categoryDoc.id,
+              categoryCode: catData?.categoryCode || 'Unknown',
+              categoryName: catData?.categoryName || 'Unknown Category',
+              rfaTypes: catData?.rfaTypes || []
             }
           }
-        } catch (error) {
-          console.error('Error fetching category:', error)
         }
+      } catch (error) {
+        console.error('Error fetching category:', error)
+      }
 
-        // Get creator information
-        let creatorInfo = null
-        try {
+      // Get creator information
+      let creatorInfo: any = { email: 'Unknown', role: 'Unknown' }
+      try {
+        if (documentData.createdBy) {
           const creatorDoc = await adminDb.collection('users').doc(documentData.createdBy).get()
           if (creatorDoc.exists) {
             const creatorData = creatorDoc.data()
             creatorInfo = {
-              email: creatorData?.email,
-              role: creatorData?.role
+              email: creatorData?.email || 'Unknown',
+              role: creatorData?.role || 'Unknown'
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching creator:', error)
+      }
+
+      // Get assigned user information
+      let assignedUserInfo: any = null
+      if (documentData.assignedTo) {
+        try {
+          const assignedDoc = await adminDb.collection('users').doc(documentData.assignedTo).get()
+          if (assignedDoc.exists) {
+            const assignedData = assignedDoc.data()
+            assignedUserInfo = {
+              email: assignedData?.email || 'Unknown',
+              role: assignedData?.role || 'Unknown'
             }
           }
         } catch (error) {
-          console.error('Error fetching creator:', error)
+          console.error('Error fetching assigned user:', error)
         }
+      }
 
-        // Get assigned user information
-        let assignedUserInfo = null
-        if (documentData.assignedTo && documentData.assignedTo !== documentData.createdBy) {
-          try {
-            const assignedDoc = await adminDb.collection('users').doc(documentData.assignedTo).get()
-            if (assignedDoc.exists) {
-              const assignedData = assignedDoc.data()
-              assignedUserInfo = {
-                email: assignedData?.email,
-                role: assignedData?.role
-              }
-            }
-          } catch (error) {
-            console.error('Error fetching assigned user:', error)
-          }
-        }
+      // Role-based filtering for complex permissions
+      let shouldInclude = true
+      switch (userRole) {
+        case 'BIM':
+          shouldInclude = documentData.createdBy === userId || 
+                         ['APPROVED', 'REJECTED'].includes(documentData.status)
+          break
+        case 'Site Admin':
+          shouldInclude = documentData.assignedTo === userId ||
+                         documentData.createdBy === userId ||
+                         ['SITE_ADMIN_REVIEW', 'PENDING_SITE_ADMIN'].includes(documentData.currentStep) ||
+                         documentData.rfaType === 'RFA-MAT'
+          break
+        case 'CM':
+          shouldInclude = documentData.assignedTo === userId ||
+                         ['CM_APPROVAL', 'PENDING_CM'].includes(documentData.currentStep) ||
+                         ['APPROVED', 'REJECTED'].includes(documentData.status)
+          break
+        case 'Admin':
+          shouldInclude = true
+          break
+      }
 
+      if (shouldInclude) {
+        // Add document to results
         documents.push({
           id: doc.id,
-          documentNumber: documentData.documentNumber,
-          rfaType: documentData.rfaType,
-          title: documentData.title,
-          description: documentData.description,
-          status: documentData.status,
-          currentStep: documentData.currentStep,
+          documentNumber: documentData.documentNumber || '',
+          rfaType: documentData.rfaType || '',
+          title: documentData.title || '',
+          description: documentData.description || '',
+          status: documentData.status || 'DRAFT',
+          currentStep: documentData.currentStep || '',
           revisionNumber: documentData.revisionNumber,
+          site: siteInfo,
           category: categoryInfo,
-          createdBy: documentData.createdBy,
+          createdBy: documentData.createdBy || '',
           createdByInfo: creatorInfo,
           assignedTo: documentData.assignedTo,
           assignedUserInfo: assignedUserInfo,
+          files: documentData.files?.map((file: any) => ({
+            fileName: file.fileName || '',
+            fileUrl: file.fileUrl || '',
+            filePath: file.filePath || '',
+            size: file.size || 0,
+            contentType: file.contentType || '',
+            uploadedAt: file.uploadedAt || '',
+            uploadedBy: file.uploadedBy || ''
+          })) || [],
           filesCount: documentData.files?.length || 0,
           totalFileSize: documentData.metadata?.totalFileSize || 0,
           createdAt: documentData.createdAt,
           updatedAt: documentData.updatedAt,
-          // Include workflow for detailed view
-          workflow: documentData.workflow || [],
-          // User permissions for this document
+          workflow: documentData.workflow?.map((step: any) => ({
+            step: step.action || step.step || '',
+            status: step.status || '',
+            userId: step.userId || '',
+            userRole: step.role || step.userRole || '',
+            timestamp: step.timestamp || '',
+            comments: step.comments || ''
+          })) || [],
           permissions: {
             canView: true,
             canEdit: documentData.createdBy === userId && ['DRAFT', 'PENDING_SITE_ADMIN'].includes(documentData.status),
@@ -235,7 +272,20 @@ export async function GET(request: NextRequest) {
             canReject: (
               (userRole === 'Site Admin' && documentData.currentStep === 'SITE_ADMIN_REVIEW') ||
               (userRole === 'CM' && documentData.currentStep === 'CM_APPROVAL')
-            )
+            ),
+            canForward: (
+              (userRole === 'Site Admin' && documentData.currentStep === 'SITE_ADMIN_REVIEW') ||
+              userRole === 'Admin'
+            ),
+            canAddFiles: documentData.createdBy === userId && 
+                         ['DRAFT', 'PENDING_SITE_ADMIN'].includes(documentData.status),
+            canDownloadFiles: true
+          },
+          currentUser: {
+            id: userId,
+            role: userRole,
+            isCreator: documentData.createdBy === userId,
+            isAssigned: documentData.assignedTo === userId
           }
         })
       }
