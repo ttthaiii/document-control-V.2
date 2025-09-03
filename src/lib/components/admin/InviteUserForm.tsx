@@ -1,6 +1,7 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
+import { useAuth } from '@/lib/auth/useAuth'; // <-- 1. เพิ่ม import useAuth
 
 interface InviteUserFormData {
   email: string;
@@ -8,15 +9,55 @@ interface InviteUserFormData {
   sites: string[];
 }
 
+interface Site {
+  id: string;
+  name: string;
+}
+
 export function InviteUserForm() {
+  const { firebaseUser } = useAuth(); // <-- 2. เรียกใช้ useAuth เพื่อเอา firebaseUser
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{
     success: boolean;
     invitationUrl?: string;
     error?: string;
   } | null>(null);
+  
+  const [availableSites, setAvailableSites] = useState<Site[]>([]);
+  const [sitesLoading, setSitesLoading] = useState(true);
 
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<InviteUserFormData>();
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<InviteUserFormData>({
+    defaultValues: {
+        sites: []
+    }
+  });
+
+  // เพิ่ม: ดึงข้อมูล Sites เมื่อ Component โหลด
+  useEffect(() => {
+    const fetchSites = async () => {
+      if (!firebaseUser) return; // รอจนกว่า firebaseUser จะพร้อม
+
+      try {
+        const token = await firebaseUser.getIdToken(); // <-- 4. ดึง Token
+        const response = await fetch('/api/sites', {
+          headers: {
+            'Authorization': `Bearer ${token}` // <-- 5. เพิ่ม Authorization Header
+          }
+        });
+        const data = await response.json();
+        if (data.success) {
+          setAvailableSites(data.sites);
+        }
+      } catch (error) {
+        console.error("Failed to fetch sites", error);
+      } finally {
+        setSitesLoading(false);
+      }
+    };
+    
+    fetchSites();
+  }, [firebaseUser]);
+
 
   const onSubmit = async (data: InviteUserFormData) => {
     setLoading(true);
@@ -28,22 +69,20 @@ export function InviteUserForm() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       });
-
-      const result = await response.json();
+      const resultData = await response.json();
       
-      if (result.success) {
+      if (resultData.success) {
         setResult({
           success: true,
-          invitationUrl: result.invitationUrl,
+          invitationUrl: resultData.invitationUrl,
         });
         reset(); // Clear form
       } else {
         setResult({
           success: false,
-          error: result.error || 'Failed to create invitation',
+          error: resultData.error || 'Failed to create invitation',
         });
       }
-
     } catch (error) {
       setResult({
         success: false,
@@ -59,7 +98,6 @@ export function InviteUserForm() {
       <h2 className="text-2xl font-bold mb-6 text-center text-gray-800">
         เชิญผู้ใช้ใหม่
       </h2>
-
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         {/* Email */}
         <div>
@@ -96,31 +134,35 @@ export function InviteUserForm() {
           )}
         </div>
 
-        {/* Sites (simplified for now) */}
+        {/* แก้ไข: เปลี่ยนจาก Input เป็น Checkbox group */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            โครงการ (Site IDs)
-          </label>
-          <input
-            type="text"
-            {...register('sites')}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="site1,site2"
-            onChange={(e) => {
-              // Convert comma-separated string to array
-              const siteArray = e.target.value.split(',').map(s => s.trim()).filter(s => s);
-              e.target.value = siteArray.join(',');
-            }}
-          />
-          <p className="text-gray-500 text-xs mt-1">
-            ใส่ Site ID คั่นด้วยเครื่องหมายจุลภาค (เช่น site1,site2)
-          </p>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+                โครงการที่ให้เข้าถึง
+            </label>
+            {sitesLoading ? <p className="text-sm text-gray-500">Loading sites...</p> : (
+                <div className="mt-2 p-3 border border-gray-200 rounded-md space-y-2 max-h-40 overflow-y-auto">
+                    {availableSites.map(site => (
+                        <label key={site.id} className="flex items-center">
+                            <input
+                                type="checkbox"
+                                {...register('sites', { required: 'กรุณาเลือกอย่างน้อย 1 โครงการ' })}
+                                value={site.id}
+                                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="ml-2 text-sm text-gray-700">{site.name}</span>
+                        </label>
+                    ))}
+                </div>
+            )}
+            {errors.sites && (
+                <p className="text-red-500 text-sm mt-1">{errors.sites.message}</p>
+            )}
         </div>
 
         {/* Submit Button */}
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || sitesLoading}
           className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed transition-colors"
         >
           {loading ? 'กำลังสร้างคำเชิญ...' : 'สร้างคำเชิญ'}

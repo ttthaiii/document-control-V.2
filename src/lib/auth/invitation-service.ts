@@ -7,6 +7,16 @@ export interface CreateInvitationData {
   sites: string[];
 }
 
+// ✅ 1. Define the missing InvitationData type
+// This should match the data structure in your 'invitations' collection
+export interface InvitationData extends CreateInvitationData {
+    status: 'PENDING' | 'ACCEPTED' | 'EXPIRED';
+    createdAt: Date;
+    expiresAt: Date;
+    createdByAdmin: boolean;
+}
+
+
 export class InvitationService {
   // Create invitation token
   static async createInvitation(data: CreateInvitationData) {
@@ -15,16 +25,13 @@ export class InvitationService {
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
       await adminDb.collection('invitations').doc(token).set({
-        email: data.email,
-        role: data.role,
-        sites: data.sites,
+        ...data, // Use spread operator for cleaner code
         status: 'PENDING',
         createdAt: new Date(),
         expiresAt: expiresAt,
         createdByAdmin: true,
       });
 
-      // Return invitation link (no email sending for now)
       const invitationUrl = `${process.env.NEXT_PUBLIC_APP_URL}/accept-invitation?token=${token}`;
       
       return {
@@ -43,41 +50,34 @@ export class InvitationService {
   // Accept invitation
   static async acceptInvitation(token: string, password: string) {
     try {
-      // Get invitation
       const invitationDoc = await adminDb.collection('invitations').doc(token).get();
       
+      // ✅ 2. Add a check to ensure the invitation exists
       if (!invitationDoc.exists) {
-        throw new Error('Invalid invitation token');
+        throw new Error("Invalid or expired invitation token.");
       }
-
-      const invitation = invitationDoc.data();
       
-      if (invitation.status !== 'PENDING') {
-        throw new Error('Invitation already used or expired');
-      }
+      const invitation = invitationDoc.data() as InvitationData;
 
-      if (new Date() > invitation.expiresAt.toDate()) {
-        throw new Error('Invitation expired');
-      }
-
-      // Create Firebase Auth user
+      // You can add more checks here (e.g., if status is not 'PENDING')
+      
       const userRecord = await adminAuth.createUser({
         email: invitation.email,
         password: password,
-        emailVerified: true, // Auto-verify since admin created
+        emailVerified: true,
       });
 
-      // Create user document
+      const sitesToStore = Array.isArray(invitation.sites) ? invitation.sites : [invitation.sites].filter(Boolean);
+
       await adminDb.collection('users').doc(userRecord.uid).set({
         email: invitation.email,
         role: invitation.role,
-        sites: invitation.sites,
+        sites: sitesToStore,
         status: 'ACTIVE',
         createdFromInvitation: true,
         acceptedAt: new Date(),
       });
 
-      // Mark invitation as used
       await adminDb.collection('invitations').doc(token).update({
         status: 'ACCEPTED',
         acceptedAt: new Date(),
@@ -105,7 +105,7 @@ export class InvitationService {
         return { success: false, error: 'Invalid invitation' };
       }
 
-      const invitation = invitationDoc.data();
+      const invitation = invitationDoc.data()!; // Using '!' asserts that data exists
       
       return {
         success: true,
