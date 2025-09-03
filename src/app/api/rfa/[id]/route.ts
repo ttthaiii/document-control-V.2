@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { adminDb } from '@/lib/firebase/admin'
 import { getAuth } from 'firebase-admin/auth'
 import { FieldValue } from 'firebase-admin/firestore'
+import { REVIEWER_ROLES, APPROVER_ROLES, STATUSES } from '@/lib/config/workflow';
 
 // GET - Get RFA document details
 export async function GET(
@@ -10,7 +11,6 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    // Get auth token from header
     const authHeader = request.headers.get('authorization')
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json(
@@ -23,43 +23,22 @@ export async function GET(
     const decodedToken = await getAuth().verifyIdToken(token)
     const userId = decodedToken.uid
 
-    // Get user data
     const userDoc = await adminDb.collection('users').doc(userId).get()
     if (!userDoc.exists) {
-      return NextResponse.json(
-        { success: false, error: 'User not found' },
-        { status: 404 }
-      )
+      return NextResponse.json({ success: false, error: 'User not found' }, { status: 404 })
     }
+    const userData = userDoc.data()!
+    const userRole = userData.role
+    const userSites = userData.sites || []
 
-    const userData = userDoc.data()
-    const userRole = userData?.role
-    const userSites = userData?.sites || []
-
-    // Get RFA document
     const rfaDoc = await adminDb.collection('rfaDocuments').doc(params.id).get()
-    
     if (!rfaDoc.exists) {
-      return NextResponse.json(
-        { success: false, error: 'RFA document not found' },
-        { status: 404 }
-      )
+      return NextResponse.json({ success: false, error: 'RFA document not found' }, { status: 404 })
     }
+    const rfaData = rfaDoc.data()!
 
-    const rfaData = rfaDoc.data()
-    if (!rfaData) {
-      return NextResponse.json(
-        { success: false, error: 'Document data not found' },
-        { status: 404 }
-      )
-    }
-
-    // Check if user has access to this site
     if (!userSites.includes(rfaData.siteId)) {
-      return NextResponse.json(
-        { success: false, error: 'No access to this document' },
-        { status: 403 }
-      )
+      return NextResponse.json({ success: false, error: 'Access denied to this site' }, { status: 403 })
     }
 
     // Check role-based permissions
@@ -166,22 +145,15 @@ export async function GET(
     // Calculate user permissions
     const permissions = {
       canView: true,
-      canEdit: rfaData.createdBy === userId && 
-               ['DRAFT'].includes(rfaData.status) &&
-               userRole !== 'CM', // CM cannot edit documents
+      canEdit: rfaData.createdBy === userId && rfaData.status === STATUSES.REVISION_REQUIRED,
+      canSendToCm: REVIEWER_ROLES.includes(userRole) && rfaData.status === STATUSES.PENDING_REVIEW,
+      canRequestRevision: REVIEWER_ROLES.includes(userRole) && rfaData.status === STATUSES.PENDING_REVIEW,
+
       canDelete: rfaData.createdBy === userId && 
                  rfaData.status === 'DRAFT' &&
                  userRole === 'Admin',
-      canApprove: (
-        (userRole === 'Site Admin' && rfaData.currentStep === 'SITE_ADMIN_REVIEW') ||
-        (userRole === 'CM' && rfaData.currentStep === 'CM_APPROVAL') ||
-        userRole === 'Admin'
-      ),
-      canReject: (
-        (userRole === 'Site Admin' && rfaData.currentStep === 'SITE_ADMIN_REVIEW') ||
-        (userRole === 'CM' && rfaData.currentStep === 'CM_APPROVAL') ||
-        userRole === 'Admin'
-      ),
+      canApprove: APPROVER_ROLES.includes(userRole) && rfaData.status === STATUSES.PENDING_CM_APPROVAL,
+      canReject: APPROVER_ROLES.includes(userRole) && rfaData.status === STATUSES.PENDING_CM_APPROVAL,
       canForward: (
         (userRole === 'Site Admin' && rfaData.currentStep === 'SITE_ADMIN_REVIEW') ||
         userRole === 'Admin'
@@ -194,80 +166,18 @@ export async function GET(
     // Prepare response data
     const responseData = {
       id: rfaDoc.id,
-      documentNumber: rfaData.documentNumber,
-      rfaType: rfaData.rfaType,
-      title: rfaData.title,
-      description: rfaData.description || '', // เพิ่ม default value
-      status: rfaData.status,
-      currentStep: rfaData.currentStep,
-      revisionNumber: rfaData.revisionNumber,
-      
-      // Related information
-      site: siteInfo,
-      category: categoryInfo,
-      
-      // Users
-      createdBy: rfaData.createdBy,
-      assignedTo: rfaData.assignedTo,
-      createdByInfo: usersInfo[rfaData.createdBy] || { email: 'Unknown', role: 'Unknown' },
-      assignedUserInfo: rfaData.assignedTo ? usersInfo[rfaData.assignedTo] : null,
-      usersInfo: usersInfo,
-      
-      // Files - เพิ่มการแปลง format
-      files: rfaData.files?.map((file: any) => ({
-        fileName: file.fileName,
-        fileUrl: file.fileUrl,
-        filePath: file.filePath,
-        size: file.size,
-        contentType: file.contentType,
-        uploadedAt: file.uploadedAt,
-        uploadedBy: file.uploadedBy
-      })) || [],
-      filesCount: rfaData.files?.length || 0,
-      totalFileSize: rfaData.metadata?.totalFileSize || 0,
-      
-      // Workflow - เพิ่มการแปลง format
-      workflow: rfaData.workflow?.map((step: any) => ({
-        step: step.action || step.step,
-        status: step.status,
-        userId: step.userId,
-        userRole: step.role || step.userRole,
-        timestamp: step.timestamp,
-        comments: step.comments
-      })) || [],
-      
-      // Timestamps
-      createdAt: rfaData.createdAt,
-      updatedAt: rfaData.updatedAt,
-      
-      // Metadata
-      metadata: rfaData.metadata || {},
-      
-      // Permissions for current user
-      permissions: permissions,
-      
-      // Current user context
-      currentUser: {
-        id: userId,
-        role: userRole,
-        isCreator: rfaData.createdBy === userId,
-        isAssigned: rfaData.assignedTo === userId
-      }
-    }
+      ...rfaData,
+      permissions
+    };
 
-    return NextResponse.json({
-      success: true,
-      document: responseData
-    })
+    return NextResponse.json({ success: true, document: responseData })
 
   } catch (error) {
     console.error('Error fetching RFA document:', error)
-    return NextResponse.json(
-      { success: false, error: 'Internal server error' },
-      { status: 500 }
-    )
+    return NextResponse.json({ success: false, error: 'Internal server error' }, { status: 500 })
   }
 }
+
 
 // PUT - Update RFA document (status, workflow, etc.)
 export async function PUT(
@@ -275,219 +185,128 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
-    // Get auth token from header
     const authHeader = request.headers.get('authorization')
     if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json(
-        { success: false, error: 'Missing or invalid authorization header' },
-        { status: 401 }
-      )
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const token = authHeader.split('Bearer ')[1]
-    const decodedToken = await getAuth().verifyIdToken(token)
-    const userId = decodedToken.uid
+    const token = authHeader.split('Bearer ')[1];
+    const decodedToken = await getAuth().verifyIdToken(token);
+    const userId = decodedToken.uid;
 
-    // Get user data
-    const userDoc = await adminDb.collection('users').doc(userId).get()
+    const userDoc = await adminDb.collection('users').doc(userId).get();
     if (!userDoc.exists) {
-      return NextResponse.json(
-        { success: false, error: 'User not found' },
-        { status: 404 }
-      )
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
+    const userData = userDoc.data()!;
+    const userRole = userData.role;
 
-    const userData = userDoc.data()
-    const userRole = userData?.role
-
-    // Parse request body
-    const body = await request.json()
-    const { action, comments, remarks, newAssignee } = body
-    const finalRemarks = comments || remarks || '' // Support both comments and remarks
+    const body = await request.json();
+    const { action, comments } = body;
 
     if (!action) {
-      return NextResponse.json(
-        { success: false, error: 'Action is required' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Action is required' }, { status: 400 });
     }
 
-    // Get RFA document
-    const rfaDocRef = adminDb.collection('rfaDocuments').doc(params.id)
-    const rfaDoc = await rfaDocRef.get()
-    
+    const rfaDocRef = adminDb.collection('rfaDocuments').doc(params.id);
+    const rfaDoc = await rfaDocRef.get();
+
     if (!rfaDoc.exists) {
-      return NextResponse.json(
-        { success: false, error: 'RFA document not found' },
-        { status: 404 }
-      )
+      return NextResponse.json({ error: 'RFA document not found' }, { status: 404 });
     }
+    const docData = rfaDoc.data()!;
 
-    const documentData = rfaDoc.data()
-    if (!documentData) {
-      return NextResponse.json(
-        { success: false, error: 'Document data not found' },
-        { status: 404 }
-      )
-    }
+    let newStatus = docData.status;
+    let newAssignedTo = docData.assignedTo; // ยังไม่มี logic หาคน assign จริงจัง
+    let canPerformAction = false;
 
-    // Check permissions based on action
-    let canPerformAction = false
-    let newStatus = documentData.status
-    let newCurrentStep = documentData.currentStep
-    let newAssignedTo = documentData.assignedTo
-
+    // Workflow Logic
     switch (action) {
-      case 'approve':
-        canPerformAction = (
-          (userRole === 'Site Admin' && documentData.currentStep === 'SITE_ADMIN_REVIEW') ||
-          (userRole === 'CM' && documentData.currentStep === 'CM_APPROVAL') ||
-          userRole === 'Admin'
-        )
-        
+      case 'SEND_TO_CM':
+        canPerformAction = REVIEWER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_REVIEW;
         if (canPerformAction) {
-          if (documentData.currentStep === 'SITE_ADMIN_REVIEW') {
-            newStatus = 'PENDING_CM'
-            newCurrentStep = 'CM_APPROVAL'
-            // Find CM user to assign (simplified - keep current assignee for now)
-          } else if (documentData.currentStep === 'CM_APPROVAL') {
-            newStatus = 'APPROVED'
-            newCurrentStep = 'APPROVED'
-            newAssignedTo = documentData.createdBy // Return to creator
-          }
+          newStatus = STATUSES.PENDING_CM_APPROVAL;
+          // TODO: Implement logic to find and assign to a CM user
         }
-        break
+        break;
 
-      case 'reject':
-        canPerformAction = (
-          (userRole === 'Site Admin' && documentData.currentStep === 'SITE_ADMIN_REVIEW') ||
-          (userRole === 'CM' && documentData.currentStep === 'CM_APPROVAL') ||
-          userRole === 'Admin'
-        )
-        
+      case 'REQUEST_REVISION':
+        canPerformAction = (REVIEWER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_REVIEW) || 
+                           (APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL);
         if (canPerformAction) {
-          newStatus = 'REJECTED'
-          newCurrentStep = 'REJECTED'
-          newAssignedTo = documentData.createdBy // Return to creator
+          newStatus = STATUSES.REVISION_REQUIRED;
+          newAssignedTo = docData.createdBy; // ส่งกลับไปให้ผู้สร้าง
         }
-        break
+        break;
 
-      case 'submit':
-        canPerformAction = (
-          documentData.createdBy === userId && 
-          documentData.status === 'DRAFT'
-        )
-        
+      case 'SUBMIT_REVISION':
+        canPerformAction = docData.createdBy === userId && docData.status === STATUSES.REVISION_REQUIRED;
         if (canPerformAction) {
-          // Determine next step based on RFA type
-          switch (documentData.rfaType) {
-            case 'RFA-SHOP':
-              newStatus = 'PENDING_SITE_ADMIN'
-              newCurrentStep = 'SITE_ADMIN_REVIEW'
-              // Find Site Admin to assign
-              break
-            case 'RFA-GEN':
-              newStatus = 'PENDING_CM'
-              newCurrentStep = 'CM_APPROVAL'
-              // Find CM to assign
-              break
-            case 'RFA-MAT':
-              newStatus = 'PENDING_CM'
-              newCurrentStep = 'CM_APPROVAL'
-              // Find CM to assign
-              break
-          }
+            newStatus = STATUSES.PENDING_REVIEW; // กลับไปให้ Reviewer ตรวจสอบอีกครั้ง
+            // TODO: Implement logic to assign back to a Reviewer
         }
-        break
+        break;
+        
+      case 'APPROVE':
+        canPerformAction = APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL;
+        if (canPerformAction) newStatus = STATUSES.APPROVED;
+        break;
 
-      case 'return_to_creator':
-        canPerformAction = (
-          (userRole === 'Site Admin' && documentData.currentStep === 'SITE_ADMIN_REVIEW') ||
-          (userRole === 'CM' && documentData.currentStep === 'CM_APPROVAL') ||
-          userRole === 'Admin'
-        )
+      case 'REJECT':
+        canPerformAction = APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL;
+        if (canPerformAction) newStatus = STATUSES.REJECTED;
+        break;
+      
+      case 'APPROVE_WITH_COMMENTS':
+        canPerformAction = APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL;
+        if (canPerformAction) newStatus = STATUSES.APPROVED_WITH_COMMENTS;
+        break;
         
+      case 'APPROVE_REVISION_REQUIRED':
+        canPerformAction = APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL;
         if (canPerformAction) {
-          newStatus = 'DRAFT'
-          newCurrentStep = 'BIM_DRAFT'
-          newAssignedTo = documentData.createdBy
+            newStatus = STATUSES.APPROVED_REVISION_REQUIRED;
+            newAssignedTo = docData.createdBy; // ส่งกลับไปให้ผู้สร้าง
         }
-        break
+        break;
 
       default:
-        return NextResponse.json(
-          { success: false, error: 'Invalid action' },
-          { status: 400 }
-        )
+        return NextResponse.json({ success: false, error: 'Invalid action' }, { status: 400 });
     }
 
     if (!canPerformAction) {
-      return NextResponse.json(
-        { success: false, error: 'No permission to perform this action' },
-        { status: 403 }
-      )
+      return NextResponse.json({ success: false, error: 'Permission denied for this action' }, { status: 403 });
     }
 
     // Update document
     const workflowEntry = {
-      step: newCurrentStep,
+      action,
       status: newStatus,
-      userId: userId,
-      userRole: userRole,
-      timestamp: FieldValue.serverTimestamp(),
-      action: action,
-      comments: finalRemarks
-    }
+      userId,
+      userName: userData.email,
+      role: userRole,
+      timestamp: new Date().toISOString(),
+      comments: comments || '',
+    };
 
-    const updateData = {
+    await rfaDocRef.update({
       status: newStatus,
-      currentStep: newCurrentStep,
+      currentStep: newStatus, // ใช้ status เป็น step ไปก่อนเพื่อความง่าย
       assignedTo: newAssignedTo,
       workflow: FieldValue.arrayUnion(workflowEntry),
-      'metadata.lastModifiedBy': userId,
-      updatedAt: FieldValue.serverTimestamp()
-    }
-
-    await rfaDocRef.update(updateData)
-
-    // Send notifications based on status change
-    if (newStatus !== documentData.status) {
-      try {
-        console.log(`Status changed from ${documentData.status} to ${newStatus}`)
-        
-        // Create notification for new assignee (if changed and not the same as current user)
-        if (newAssignedTo && newAssignedTo !== userId && newAssignedTo !== documentData.assignedTo) {
-          await createNotification({
-            type: `RFA_${action.toUpperCase()}`,
-            recipientId: newAssignedTo,
-            documentId: params.id,
-            documentNumber: documentData.documentNumber,
-            rfaType: documentData.rfaType,
-            title: documentData.title,
-            actionBy: userId,
-            siteId: documentData.siteId,
-            remarks: finalRemarks
-          })
-        }
-      } catch (notificationError) {
-        console.error('Notification failed:', notificationError)
-      }
-    }
+      updatedAt: FieldValue.serverTimestamp(),
+    });
 
     return NextResponse.json({
       success: true,
-      message: `RFA ${action} completed successfully`,
-      newStatus: newStatus,
-      newCurrentStep: newCurrentStep,
-      newAssignedTo: newAssignedTo
-    })
+      message: `Action [${action}] completed successfully`,
+      newStatus,
+    });
 
   } catch (error) {
-    console.error('Error updating RFA document:', error)
-    return NextResponse.json(
-      { success: false, error: 'Internal server error' },
-      { status: 500 }
-    )
+    console.error('Error updating RFA document:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Internal server error';
+    return NextResponse.json({ success: false, error: errorMessage }, { status: 500 });
   }
 }
 

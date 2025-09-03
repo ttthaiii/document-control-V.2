@@ -1,8 +1,9 @@
+// src/components/layout/Sidebar.tsx (แก้ไขแล้ว)
 'use client'
 
 import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { usePathname, useRouter, useSearchParams } from 'next/navigation' // แก้ไข: เพิ่ม useSearchParams
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth/useAuth'
 import { 
   FileText, 
@@ -16,6 +17,9 @@ import {
   Menu,
   X
 } from 'lucide-react'
+// --- 1. Import ค่าคงที่ ROLES จาก workflow.ts ---
+import { CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES } from '@/lib/config/workflow'
+
 
 interface SidebarProps {
   isOpen: boolean
@@ -30,17 +34,26 @@ interface SiteData {
 const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
   const pathname = usePathname()
   const router = useRouter()
-  const searchParams = useSearchParams() // แก้ไข: เรียกใช้ hook
+  const searchParams = useSearchParams()
   const { user, logout } = useAuth()
   
   const [showRfaDropdown, setShowRfaDropdown] = useState(false)
   const [userSites, setUserSites] = useState<SiteData[]>([])
   
+  // --- 2. ปรับปรุง Logic การเช็คสิทธิ์ให้ใช้ค่าจากไฟล์ Config ---
   const isRFAAuthorized = () => {
-    const authorizedRoles = ['BIM', 'Site Admin', 'CM', 'Admin']
-    return authorizedRoles.includes(user?.role || '')
+    if (!user) return false;
+    // รวมทุก Role ที่มีสิทธิ์เข้าถึง RFA/RFI จากไฟล์ Config
+    const authorizedRoles = [
+      ...CREATOR_ROLES, 
+      ...REVIEWER_ROLES, 
+      ...APPROVER_ROLES, 
+      'Admin' // Admin มีสิทธิ์เสมอ
+    ];
+    return authorizedRoles.includes(user.role);
   }
 
+  // (ส่วนที่เหลือของไฟล์ไม่ต้องแก้ไข)
   useEffect(() => {
     const fetchUserSites = async () => {
       if (!user?.sites || user.sites.length === 0) return
@@ -62,7 +75,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
   }, [user])
 
   useEffect(() => {
-    if (pathname.includes('/rfa')) {
+    if (pathname.includes('/rfa') || pathname.includes('/dashboard/rfa')) {
       setShowRfaDropdown(true)
     }
   }, [pathname])

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { adminDb, adminBucket } from "@/lib/firebase/admin";
 import { getAuth } from "firebase-admin/auth";
 import { FieldValue } from 'firebase-admin/firestore';
+// --- ✅ 1. Import ค่าคงที่ทั้งหมดที่ต้องใช้ ---
 import { REVIEWER_ROLES, STATUSES } from '@/lib/config/workflow';
 
 // (Helper functions toSlugId, ensureCategory, verifyIdTokenFromHeader, readRequest ไม่มีการเปลี่ยนแปลง)
@@ -61,7 +62,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: 'User not found' }, { status: 403 });
     }
     const userData = userDoc.data();
-    const userRole = userData?.role; // 2. ดึง Role ของผู้สร้าง
+    const userRole = userData?.role;
 
     const { payload } = await readRequest(req);
     const { rfaType, siteId, categoryId, title, description, taskData, documentNumber, uploadedFiles } = payload || {};
@@ -115,14 +116,16 @@ export async function POST(req: Request) {
         });
     }
     
-    let initialStatus = "PENDING_REVIEW"; // สถานะปกติคือ "รอตรวจสอบ"
+    // --- ✅ 2. ปรับปรุง Logic การกำหนดสถานะเริ่มต้นโดยใช้ค่าคงที่ ---
+    let initialStatus = STATUSES.PENDING_REVIEW; // สถานะปกติคือ "รอตรวจสอบ"
     let initialAction = "CREATE";
 
     const isReviewer = REVIEWER_ROLES.includes(userRole);
     const isMatOrGen = ['RFA-MAT', 'RFA-GEN'].includes(rfaType);
 
+    // Shortcut Flow Logic
     if (isReviewer && isMatOrGen) {
-      initialStatus = "PENDING_CM_APPROVAL"; // ข้ามไปที่ "ส่ง CM"
+      initialStatus = STATUSES.PENDING_CM_APPROVAL; // ข้ามไปที่ "ส่ง CM"
       initialAction = "CREATE_AND_SUBMIT";
     }        
 
@@ -136,8 +139,8 @@ export async function POST(req: Request) {
       description: description || "",
       taskData: taskData || null, 
       documentNumber, 
-      status: initialStatus, // <-- 4. ใช้สถานะใหม่
-      currentStep: initialStatus, // เพิ่ม field นี้เพื่อ tracking
+      status: initialStatus,
+      currentStep: initialStatus, // ใช้ status เป็น step ไปก่อนเพื่อความง่าย
       createdBy: uid,
       createdAt: FieldValue.serverTimestamp(), 
       updatedAt: FieldValue.serverTimestamp(),

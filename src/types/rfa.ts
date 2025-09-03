@@ -16,6 +16,7 @@ export interface RFAWorkflowStep {
   userRole: string
   timestamp: string
   comments?: string
+  action?: string // <-- ✅ 3. เพิ่ม 'action' (เป็น optional)
 }
 
 export interface RFAPermissions {
@@ -23,9 +24,15 @@ export interface RFAPermissions {
   canEdit: boolean
   canApprove: boolean
   canReject: boolean
-  canForward: boolean
+  canForward: boolean // อันนี้อาจจะไม่ได้ใช้แล้ว แต่เก็บไว้ก่อนได้
   canAddFiles: boolean
   canDownloadFiles: boolean
+  // --- ✅ 1. เพิ่ม Permissions สำหรับ Workflow ใหม่ ---
+  canSendToCm?: boolean 
+  canRequestRevision?: boolean
+  canSubmitRevision?: boolean
+  canApproveWithComments?: boolean
+  canApproveRevisionRequired?: boolean
 }
 
 export interface RFACurrentUser {
@@ -64,8 +71,8 @@ export interface RFADocument {
   status: string
   currentStep: string
   revisionNumber?: string
-  createdAt: Date
-  updatedAt: Date
+  createdAt: any // ใช้ any เพื่อความยืดหยุ่นกับ Timestamp ของ Firebase
+  updatedAt: any // ใช้ any เพื่อความยืดหยุ่นกับ Timestamp ของ Firebase
   createdBy: string
   assignedTo?: string
   filesCount: number
@@ -81,8 +88,10 @@ export interface RFADocument {
   metadata?: {
     [key: string]: any
   }
+  usersInfo: Record<string, RFAUserInfo> // <-- ✅ 4. เพิ่ม usersInfo
 }
 
+// (ส่วนที่เหลือของไฟล์ไม่ต้องแก้ไข)
 export interface RFAFilters {
   rfaType: 'ALL' | 'RFA-SHOP' | 'RFA-GEN' | 'RFA-MAT'
   status: 'ALL' | 'DRAFT' | 'PENDING_SITE_ADMIN' | 'PENDING_CM' | 'APPROVED' | 'REJECTED'
@@ -111,7 +120,6 @@ export interface RFAStats {
   }
 }
 
-// User type for CreateRFAForm compatibility
 export interface CreateRFAUser {
   id: string
   email: string

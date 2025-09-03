@@ -15,10 +15,15 @@ import {
   Clock,
   ArrowRight,
   MessageSquare,
-  Upload
+  Upload,
+  Send,
+  CornerUpLeft
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth/useAuth'
 import { RFADocument } from '@/types/rfa'
+// --- 1. Import ค่าคงที่ STATUSES และ ROLES ---
+import { STATUSES, REVIEWER_ROLES, APPROVER_ROLES } from '@/lib/config/workflow'
+
 
 interface RFADetailModalProps {
   document: RFADocument
@@ -27,13 +32,14 @@ interface RFADetailModalProps {
 }
 
 export default function RFADetailModal({ document: rfaDocument, onClose, onUpdate }: RFADetailModalProps) {
-  const { user } = useAuth()
+  const { user, firebaseUser } = useAuth() // เพิ่ม firebaseUser
   const [activeTab, setActiveTab] = useState<'details' | 'files' | 'workflow'>('details')
   const [isProcessing, setIsProcessing] = useState(false)
   const [comments, setComments] = useState('')
-  const [showApprovalSection, setShowApprovalSection] = useState(false)
+  const [showActionSection, setShowActionSection] = useState(false)
+  const [currentAction, setCurrentAction] = useState<string | null>(null)
 
-  // Helper functions
+  // (Helper functions downloadFile, formatDate, formatFileSize ไม่เปลี่ยนแปลง)
   const downloadFile = (file: any) => {
     const downloadUrl = file.fileUrl
     const link = window.document.createElement('a')
@@ -44,17 +50,9 @@ export default function RFADetailModal({ document: rfaDocument, onClose, onUpdat
     link.click()
     window.document.body.removeChild(link)
   }
-
-  const getWorkflowStepText = (step: string) => {
-    switch (step) {
-      case 'BIM_DRAFT': return 'สร้างเอกสาร'
-      case 'SITE_ADMIN_REVIEW': return 'ตรวจสอบโดย Site Admin'
-      case 'CM_APPROVAL': return 'อนุมัติโดย CM'
-      default: return step
-    }
-  }
-
+  
   const formatDate = (date: Date | string) => {
+    if (!date) return 'N/A';
     const d = new Date(date)
     return d.toLocaleDateString('th-TH', {
       day: '2-digit',
@@ -64,7 +62,7 @@ export default function RFADetailModal({ document: rfaDocument, onClose, onUpdat
       minute: '2-digit'
     })
   }
-
+  
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return '0 B'
     const k = 1024
@@ -73,89 +71,196 @@ export default function RFADetailModal({ document: rfaDocument, onClose, onUpdat
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
   }
 
+  // --- 2. ปรับปรุงการแสดงผล Status และ Step ให้ใช้ค่าจาก workflow.ts ---
+  const getStatusText = (status: string) => {
+    return Object.keys(STATUSES).find(key => STATUSES[key as keyof typeof STATUSES] === status) || status;
+  }
+
+  const getWorkflowStepText = (step: string) => {
+     switch (step) {
+      case 'CREATE': return 'สร้างเอกสาร'
+      case 'CREATE_AND_SUBMIT': return 'สร้างและส่งถึง CM'
+      case 'SEND_TO_CM': return 'ส่งต่อให้ CM'
+      case 'REQUEST_REVISION': return 'ตีกลับเพื่อแก้ไข'
+      case 'SUBMIT_REVISION': return 'ส่งกลับหลังแก้ไข'
+      case 'APPROVE': return 'อนุมัติ'
+      case 'REJECT': return 'ไม่อนุมัติ'
+      case 'APPROVE_WITH_COMMENTS': 'อนุมัติตามคอมเมนต์'
+      case 'APPROVE_REVISION_REQUIRED': 'อนุมัติและต้องแก้ไข'
+      default: return getStatusText(step)
+    }
+  }
+
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'APPROVED': return 'text-green-600 bg-green-50 border-green-200'
-      case 'REJECTED': return 'text-red-600 bg-red-50 border-red-200'
-      case 'PENDING_CM': return 'text-orange-600 bg-orange-50 border-orange-200'
-      case 'PENDING_SITE_ADMIN': return 'text-blue-600 bg-blue-50 border-blue-200'
-      case 'DRAFT': return 'text-gray-600 bg-gray-50 border-gray-200'
+      case STATUSES.APPROVED:
+      case STATUSES.APPROVED_WITH_COMMENTS:
+      case STATUSES.APPROVED_REVISION_REQUIRED:
+        return 'text-green-600 bg-green-50 border-green-200'
+      case STATUSES.REJECTED:
+        return 'text-red-600 bg-red-50 border-red-200'
+      case STATUSES.PENDING_CM_APPROVAL:
+        return 'text-orange-600 bg-orange-50 border-orange-200'
+      case STATUSES.PENDING_REVIEW:
+        return 'text-blue-600 bg-blue-50 border-blue-200'
+      case STATUSES.REVISION_REQUIRED:
+          return 'text-yellow-600 bg-yellow-50 border-yellow-200'
       default: return 'text-gray-600 bg-gray-50 border-gray-200'
     }
   }
-
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case 'APPROVED': return 'อนุมัติแล้ว'
-      case 'REJECTED': return 'ไม่อนุมัติ'
-      case 'PENDING_CM': return 'รออนุมัติ CM'
-      case 'PENDING_SITE_ADMIN': return 'รออนุมัติ Site Admin'
-      case 'DRAFT': return 'ร่าง'
-      default: return status
+  
+  // --- 3. ยกเครื่องฟังก์ชัน handleAction ให้รองรับ action และ comments ---
+  const handleAction = async (action: string) => {
+    if (!firebaseUser) {
+        alert('กรุณาเข้าสู่ระบบ');
+        return;
     }
-  }
 
-  const handleAction = async (action: 'approve' | 'reject' | 'forward' | 'return_to_creator', comments?: string) => {
+    setIsProcessing(true);
     try {
-      setIsProcessing(true)
-
+      const token = await firebaseUser.getIdToken();
       const response = await fetch(`/api/rfa/${rfaDocument.id}`, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({
-          action,
-          comments: comments || undefined
-        })
-      })
+        body: JSON.stringify({ action, comments }),
+      });
 
-      const data = await response.json()
+      const data = await response.json();
 
       if (data.success) {
-        // Refresh document data
-        const updatedResponse = await fetch(`/api/rfa/${rfaDocument.id}`)
-        const updatedData = await updatedResponse.json()
+        const updatedResponse = await fetch(`/api/rfa/${rfaDocument.id}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const updatedData = await updatedResponse.json();
         
         if (updatedData.success) {
-          onUpdate(updatedData.document)
+          onUpdate(updatedData.document); // ส่งข้อมูลล่าสุดกลับไปอัปเดต state ของหน้า List
         }
         
-        setComments('')
-        setShowApprovalSection(false)
+        // Reset state
+        setComments('');
+        setShowActionSection(false);
+        setCurrentAction(null);
       } else {
-        alert('เกิดข้อผิดพลาด: ' + (data.error || 'ไม่สามารถดำเนินการได้'))
+        alert('เกิดข้อผิดพลาด: ' + (data.error || 'ไม่สามารถดำเนินการได้'));
       }
     } catch (error) {
-      console.error('Error processing action:', error)
-      alert('เกิดข้อผิดพลาดในการดำเนินการ')
+      console.error('Error processing action:', error);
+      alert('เกิดข้อผิดพลาดในการเชื่อมต่อ');
     } finally {
-      setIsProcessing(false)
+      setIsProcessing(false);
     }
   }
+  
+  const startAction = (action: string) => {
+      setCurrentAction(action);
+      setShowActionSection(true);
+  }
+
+  // --- 4. สร้าง Action Buttons แบบ Dynamic ตาม Permissions ---
+  const renderActionButtons = () => {
+    const { permissions } = rfaDocument;
+    const buttons = [];
+
+    // Creator Actions
+    if (permissions.canEdit) { // สถานะ "แก้ไข"
+      buttons.push(
+        <button key="submit_revision" onClick={() => startAction('SUBMIT_REVISION')} className="bg-blue-600 text-white">
+          <Send className="w-4 h-4 mr-2" /> ส่งกลับไปตรวจสอบ
+        </button>
+      );
+    }
+
+    // Reviewer Actions
+    if (permissions.canSendToCm) {
+      buttons.push(
+        <button key="send_to_cm" onClick={() => startAction('SEND_TO_CM')} className="bg-green-600 text-white">
+          <Send className="w-4 h-4 mr-2" /> ส่งต่อให้ CM
+        </button>
+      );
+    }
+    if (permissions.canRequestRevision && rfaDocument.status === STATUSES.PENDING_REVIEW) {
+        buttons.push(
+            <button key="request_revision_reviewer" onClick={() => startAction('REQUEST_REVISION')} className="bg-yellow-500 text-white">
+                <CornerUpLeft className="w-4 h-4 mr-2" /> ตีกลับให้แก้ไข
+            </button>
+        );
+    }
+
+    // Approver Actions (CM)
+    if (permissions.canApprove) {
+        buttons.push(
+            <button key="approve" onClick={() => startAction('APPROVE')} className="bg-green-600 text-white">
+                <CheckCircle className="w-4 h-4 mr-2" /> อนุมัติ
+            </button>,
+            <button key="approve_with_comments" onClick={() => startAction('APPROVE_WITH_COMMENTS')} className="bg-teal-600 text-white">
+                <CheckCircle className="w-4 h-4 mr-2" /> อนุมัติตามคอมเมนต์
+            </button>,
+             <button key="approve_revision_required" onClick={() => startAction('APPROVE_REVISION_REQUIRED')} className="bg-yellow-500 text-white">
+                <CornerUpLeft className="w-4 h-4 mr-2" /> อนุมัติ (ต้องแก้ไข)
+            </button>
+        );
+    }
+     if (permissions.canReject) {
+        buttons.push(
+             <button key="reject" onClick={() => startAction('REJECT')} className="bg-red-600 text-white">
+                <XCircle className="w-4 h-4 mr-2" /> ไม่อนุมัติ
+            </button>
+        );
+    }
+
+
+    if (buttons.length === 0) return null;
+
+    return (
+        <div className="space-y-3">
+             {!showActionSection ? (
+                 <div className="grid grid-cols-2 gap-3">
+                    {buttons.map(btn => React.cloneElement(btn, { className: `${btn.props.className} w-full flex items-center justify-center px-4 py-2 rounded-lg`}))}
+                 </div>
+            ) : (
+                 <div className="space-y-3 p-4 bg-gray-100 rounded-lg">
+                    <h4 className="font-semibold text-gray-800">ยืนยันการดำเนินการ: {getWorkflowStepText(currentAction!)}</h4>
+                    <textarea
+                      value={comments}
+                      onChange={(e) => setComments(e.target.value)}
+                      placeholder="เพิ่มความคิดเห็น (ถ้ามี)"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                      rows={3}
+                    />
+                    <div className="flex items-center justify-end space-x-3">
+                      <button onClick={() => setShowActionSection(false)} className="text-gray-600" disabled={isProcessing}>ยกเลิก</button>
+                      <button onClick={() => handleAction(currentAction!)} disabled={isProcessing} className="bg-blue-600 text-white px-4 py-2 rounded-lg">
+                        {isProcessing ? 'กำลังดำเนินการ...' : 'ยืนยัน'}
+                      </button>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+  }
+
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+      <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-          <div className="flex items-center justify-between">
+           <div className="flex items-start justify-between">
             <div>
               <h2 className="text-xl font-bold text-gray-900">
                 {rfaDocument.documentNumber}
               </h2>
-              <p className="text-gray-600">{rfaDocument.title}</p>
+              <p className="text-gray-600 text-sm mt-1">{rfaDocument.title}</p>
             </div>
-            
             <div className="flex items-center space-x-3">
               <span className={`inline-flex px-3 py-1 rounded-full text-sm font-medium border ${getStatusColor(rfaDocument.status)}`}>
                 {getStatusText(rfaDocument.status)}
               </span>
-              
-              <button
-                onClick={onClose}
-                className="text-gray-400 hover:text-gray-600"
-              >
+              <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
                 <X className="w-6 h-6" />
               </button>
             </div>
@@ -182,10 +287,10 @@ export default function RFADetailModal({ document: rfaDocument, onClose, onUpdat
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto max-h-96">
-          {/* Details Tab */}
-          {activeTab === 'details' && (
-            <div className="p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-6">
+           {/* (ส่วนแสดงผล Details, Files, Workflow ยังคงเดิม แต่มีการปรับ getStatusText และอื่นๆเล็กน้อย) */}
+           {activeTab === 'details' && (
+             <div className="p-6 space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Document Information */}
                 <div>
@@ -284,10 +389,8 @@ export default function RFADetailModal({ document: rfaDocument, onClose, onUpdat
                 </div>
               )}
             </div>
-          )}
-
-          {/* Files Tab */}
-          {activeTab === 'files' && (
+           )}
+           {activeTab === 'files' && (
             <div className="p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-medium text-gray-900">
@@ -342,11 +445,9 @@ export default function RFADetailModal({ document: rfaDocument, onClose, onUpdat
                 </div>
               )}
             </div>
-          )}
-
-          {/* Workflow Tab */}
-          {activeTab === 'workflow' && (
-            <div className="p-6">
+           )}
+           {activeTab === 'workflow' && (
+             <div className="p-6">
               <h3 className="text-lg font-medium text-gray-900 mb-4">ขั้นตอนการทำงาน</h3>
               
               {rfaDocument.workflow.length > 0 ? (
@@ -360,7 +461,7 @@ export default function RFADetailModal({ document: rfaDocument, onClose, onUpdat
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center space-x-2 mb-1">
                           <p className="text-sm font-medium text-gray-900">
-                            {getWorkflowStepText(step.step)}
+                            {getWorkflowStepText(step.action || step.step)}
                           </p>
                           <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(step.status)}`}>
                             {getStatusText(step.status)}
@@ -368,7 +469,7 @@ export default function RFADetailModal({ document: rfaDocument, onClose, onUpdat
                         </div>
                         
                         <div className="text-sm text-gray-600">
-                          <p>โดย: {step.userId} ({step.userRole})</p>
+                          <p>โดย: {rfaDocument.usersInfo[step.userId]?.email || step.userId} ({step.userRole})</p>
                           <p>เวลา: {formatDate(step.timestamp)}</p>
                           {step.comments && (
                             <div className="mt-2 p-2 bg-gray-50 rounded border-l-4 border-blue-500">
@@ -387,104 +488,12 @@ export default function RFADetailModal({ document: rfaDocument, onClose, onUpdat
                 </div>
               )}
             </div>
-          )}
+           )}
         </div>
 
-        {/* Action Buttons */}
+        {/* Action Footer */}
         <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
-          <div className="flex flex-col space-y-4">
-            {/* Approval Section */}
-            {(rfaDocument.permissions.canApprove || rfaDocument.permissions.canReject) && (
-              <div className="space-y-3">
-                {!showApprovalSection ? (
-                  <button
-                    onClick={() => setShowApprovalSection(true)}
-                    className="w-full flex items-center justify-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                  >
-                    <MessageSquare className="w-4 h-4 mr-2" />
-                    ดำเนินการอนุมัติ/ไม่อนุมัติ
-                  </button>
-                ) : (
-                  <div className="space-y-3">
-                    <textarea
-                      value={comments}
-                      onChange={(e) => setComments(e.target.value)}
-                      placeholder="ความคิดเห็น (ไม่บังคับ)"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      rows={3}
-                    />
-                    
-                    <div className="flex items-center justify-end space-x-3">
-                      <button
-                        onClick={() => {
-                          setShowApprovalSection(false)
-                          setComments('')
-                        }}
-                        className="px-4 py-2 text-gray-600 hover:text-gray-800"
-                        disabled={isProcessing}
-                      >
-                        ยกเลิก
-                      </button>
-                      
-                      {rfaDocument.permissions.canReject && (
-                        <button
-                          onClick={() => handleAction('reject', comments)}
-                          disabled={isProcessing}
-                          className="inline-flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
-                        >
-                          <XCircle className="w-4 h-4 mr-2" />
-                          {isProcessing ? 'กำลังดำเนินการ...' : 'ไม่อนุมัติ'}
-                        </button>
-                      )}
-                      
-                      {rfaDocument.permissions.canApprove && (
-                        <button
-                          onClick={() => handleAction('approve', comments)}
-                          disabled={isProcessing}
-                          className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
-                        >
-                          <CheckCircle className="w-4 h-4 mr-2" />
-                          {isProcessing ? 'กำลังดำเนินการ...' : 'อนุมัติ'}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Other Action Buttons */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                {rfaDocument.permissions.canForward && (
-                  <button
-                    onClick={() => handleAction('forward')}
-                    disabled={isProcessing}
-                    className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                  >
-                    <ArrowRight className="w-4 h-4 mr-2" />
-                    ส่งต่อ
-                  </button>
-                )}
-
-                {rfaDocument.permissions.canEdit && (
-                  <button
-                    className="inline-flex items-center px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700"
-                  >
-                    <FileText className="w-4 h-4 mr-2" />
-                    แก้ไข
-                  </button>
-                )}
-              </div>
-
-              <button
-                onClick={onClose}
-                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
-              >
-                ปิด
-              </button>
-            </div>
-          </div>
+          {renderActionButtons()}
         </div>
       </div>
     </div>
