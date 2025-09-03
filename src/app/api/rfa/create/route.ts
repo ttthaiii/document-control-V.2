@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { adminDb, adminBucket } from "@/lib/firebase/admin";
 import { getAuth } from "firebase-admin/auth";
 import { FieldValue } from 'firebase-admin/firestore';
+import { REVIEWER_ROLES, STATUSES } from '@/lib/config/workflow';
 
 // (Helper functions toSlugId, ensureCategory, verifyIdTokenFromHeader, readRequest ไม่มีการเปลี่ยนแปลง)
 function toSlugId(input: string): string {
@@ -52,7 +53,7 @@ export async function POST(req: Request) {
   }
 
   let docId: string | null = null;
-  const tempFilePathsToDelete: string[] = []; // <--- เพิ่มบรรทัดนี้ที่ขาดไป
+  const tempFilePathsToDelete: string[] = [];
 
   try {
     const userDoc = await adminDb.collection('users').doc(uid).get();
@@ -60,6 +61,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: 'User not found' }, { status: 403 });
     }
     const userData = userDoc.data();
+    const userRole = userData?.role; // 2. ดึง Role ของผู้สร้าง
 
     const { payload } = await readRequest(req);
     const { rfaType, siteId, categoryId, title, description, taskData, documentNumber, uploadedFiles } = payload || {};
@@ -113,25 +115,19 @@ export async function POST(req: Request) {
         });
     }
     
-    let initialStatus = "DRAFT";
-    let initialWorkflowAction = "CREATE_DRAFT";
+    let initialStatus = "PENDING_REVIEW"; // สถานะปกติคือ "รอตรวจสอบ"
+    let initialAction = "CREATE";
 
-    switch (rfaType) {
-      case 'RFA-SHOP':
-        initialStatus = "PENDING_SITE_ADMIN";
-        initialWorkflowAction = "SUBMIT";
-        break;
-      case 'RFA-GEN':
-      case 'RFA-MAT':
-        initialStatus = "PENDING_CM";
-        initialWorkflowAction = "SUBMIT";
-        break;
-    }
+    const isReviewer = REVIEWER_ROLES.includes(userRole);
+    const isMatOrGen = ['RFA-MAT', 'RFA-GEN'].includes(rfaType);
+
+    if (isReviewer && isMatOrGen) {
+      initialStatus = "PENDING_CM_APPROVAL"; // ข้ามไปที่ "ส่ง CM"
+      initialAction = "CREATE_AND_SUBMIT";
+    }        
 
     // --- Create RFA document ---
     const rfaRef = adminDb.collection("rfaDocuments").doc();
-    docId = rfaRef.id;
-
     await rfaRef.set({
       siteId, 
       rfaType, 
@@ -140,22 +136,23 @@ export async function POST(req: Request) {
       description: description || "",
       taskData: taskData || null, 
       documentNumber, 
-      status: initialStatus,
+      status: initialStatus, // <-- 4. ใช้สถานะใหม่
+      currentStep: initialStatus, // เพิ่ม field นี้เพื่อ tracking
       createdBy: uid,
       createdAt: FieldValue.serverTimestamp(), 
       updatedAt: FieldValue.serverTimestamp(),
       workflow: [{
-          action: initialWorkflowAction,
+          action: initialAction,
           status: initialStatus,
           userId: uid,
           userName: userData?.email, 
-          role: userData?.role,
+          role: userRole,
           timestamp: new Date().toISOString(),
       }],
       files: finalFilesData,
     });
 
-    return NextResponse.json({ success: true, id: docId, documentNumber }, { status: 201 });
+    return NextResponse.json({ success: true, id: rfaRef.id }, { status: 201 });
 
   } catch (err: any) {
     console.error("RFA Create Finalization Error:", err);

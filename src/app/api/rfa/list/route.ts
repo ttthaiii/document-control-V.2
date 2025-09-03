@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminDb } from '@/lib/firebase/admin'
 import { getAuth } from 'firebase-admin/auth'
+import { APPROVER_ROLES, OBSERVER_FINISHED_ROLES, STATUSES } from '@/lib/config/workflow';
 
 export async function GET(request: NextRequest) {
   try {
@@ -24,9 +25,9 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const userData = userDoc.data()
+    const userData = userDoc.data();
     const userRole = userData?.role;
-    const userSites = userData?.sites || []
+    const userSites = userData?.sites || [];
 
     if (userSites.length === 0) {
       return NextResponse.json(
@@ -44,7 +45,25 @@ export async function GET(request: NextRequest) {
 
     // Build query with proper typing
     let firestoreQuery: any = adminDb.collection('rfaDocuments')
+    firestoreQuery = firestoreQuery.where('siteId', 'in', userSites)
 
+    if (APPROVER_ROLES.includes(userRole)) { // CM
+      firestoreQuery = firestoreQuery.where('status', 'in', [
+        STATUSES.PENDING_CM_APPROVAL,
+        STATUSES.APPROVED,
+        STATUSES.REJECTED,
+        STATUSES.APPROVED_WITH_COMMENTS,
+        STATUSES.APPROVED_REVISION_REQUIRED,
+      ]);
+    } else if (OBSERVER_FINISHED_ROLES.includes(userRole)) { // SE
+      firestoreQuery = firestoreQuery.where('status', 'in', [
+        STATUSES.APPROVED,
+        STATUSES.REJECTED,
+        STATUSES.APPROVED_WITH_COMMENTS,
+        STATUSES.APPROVED_REVISION_REQUIRED,
+      ]);
+    }
+        
     // Filter by site (user must have access)
     if (siteId && siteId !== 'ALL') { // เพิ่มเงื่อนไขเช็ค 'ALL'
       if (!userSites.includes(siteId)) {
