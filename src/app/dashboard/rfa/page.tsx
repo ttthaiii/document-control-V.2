@@ -1,26 +1,28 @@
-// src/app/dashboard/rfa/page.tsx
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useAuth } from '@/lib/auth/useAuth'
 import { AuthGuard } from '@/lib/components/shared/AuthGuard'
 import Layout from '@/components/layout/Layout'
 import RFAListTable from '@/components/rfa/RFAListTable'
 import RFADetailModal from '@/components/rfa/RFADetailModal'
-import CreateRFAForm from '@/components/rfa/CreateRFAForm'
+import CreateRFAForm from '@/components/rfa/CreateRFAForm' 
 import { FileText, Plus, Filter, Search, BarChart3, RefreshCw } from 'lucide-react'
-import { RFADocument, RFAFilters, RFAStats, CreateRFAUser } from '@/types/rfa'
+import { RFADocument } from '@/types/rfa'
+import { useSearchParams, useRouter } from 'next/navigation'
 
 interface Filters {
   rfaType: 'ALL' | 'RFA-SHOP' | 'RFA-GEN' | 'RFA-MAT'
   status: 'ALL' | 'DRAFT' | 'PENDING_SITE_ADMIN' | 'PENDING_CM' | 'APPROVED' | 'REJECTED'
-  assignedToMe: boolean
-  createdByMe: boolean
   siteId: string | 'ALL'
 }
 
-export default function RFAListPage() {
-  const { user } = useAuth()
+function RFAContent() {
+  const { user, firebaseUser } = useAuth()
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const rfaTypeParam = searchParams.get('type') as Filters['rfaType'] | null
+
   const [documents, setDocuments] = useState<RFADocument[]>([])
   const [filteredDocuments, setFilteredDocuments] = useState<RFADocument[]>([])
   const [loading, setLoading] = useState(true)
@@ -29,16 +31,12 @@ export default function RFAListPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [showMobileFilters, setShowMobileFilters] = useState(false)
   
-  // Filters state
   const [filters, setFilters] = useState<Filters>({
-    rfaType: 'ALL',
+    rfaType: rfaTypeParam || 'ALL',
     status: 'ALL',
-    assignedToMe: false,
-    createdByMe: false,
     siteId: 'ALL'
   })
 
-  // Statistics for dashboard
   const [stats, setStats] = useState({
     total: 0,
     pending: 0,
@@ -47,38 +45,40 @@ export default function RFAListPage() {
     assignedToMe: 0
   })
 
-  // Load documents
   useEffect(() => {
-    loadDocuments()
-  }, [])
+    if (firebaseUser) {
+      loadDocuments()
+    }
+  }, [firebaseUser])
+  
+  useEffect(() => {
+    if (rfaTypeParam) {
+      setFilters(prev => ({ ...prev, rfaType: rfaTypeParam }))
+    }
+  }, [rfaTypeParam]);
 
-  // Filter documents when filters or search term changes
   useEffect(() => {
     applyFilters()
   }, [documents, filters, searchTerm])
 
-  // Calculate stats when documents change
   useEffect(() => {
     calculateStats()
   }, [documents])
 
   const loadDocuments = async () => {
+    if (!firebaseUser) return;
     try {
       setLoading(true)
+      const token = await firebaseUser.getIdToken();
       const queryParams = new URLSearchParams()
-      
-      // Add any pre-filters based on user role
-      if (user?.role === 'BIM') {
-        queryParams.append('createdByMe', 'true')
-      }
-
-      const response = await fetch(`/api/rfa/list?${queryParams}`)
+      const response = await fetch(`/api/rfa/list?${queryParams}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
       const data = await response.json()
-
-      if (data.success) {
+      if (response.ok && data.success) {
         setDocuments(data.documents)
       } else {
-        console.error('Failed to load documents:', data.error)
+        console.error('Failed to load documents:', data.error || response.statusText)
       }
     } catch (error) {
       console.error('Error loading documents:', error)
@@ -89,8 +89,6 @@ export default function RFAListPage() {
 
   const applyFilters = () => {
     let filtered = [...documents]
-
-    // Search filter
     if (searchTerm.trim()) {
       const search = searchTerm.toLowerCase()
       filtered = filtered.filter(doc => 
@@ -100,40 +98,22 @@ export default function RFAListPage() {
         doc.category.categoryCode.toLowerCase().includes(search)
       )
     }
-
-    // RFA Type filter
     if (filters.rfaType !== 'ALL') {
       filtered = filtered.filter(doc => doc.rfaType === filters.rfaType)
     }
-
-    // Status filter
     if (filters.status !== 'ALL') {
       filtered = filtered.filter(doc => doc.status === filters.status)
     }
-
-    // Assignment filters
-    if (filters.assignedToMe) {
-      filtered = filtered.filter(doc => doc.assignedTo === user?.id)
-    }
-
-    if (filters.createdByMe) {
-      filtered = filtered.filter(doc => doc.createdBy === user?.id)
-    }
-
-    // Site filter
     if (filters.siteId !== 'ALL') {
       filtered = filtered.filter(doc => doc.site.id === filters.siteId)
     }
-
     setFilteredDocuments(filtered)
   }
 
   const calculateStats = () => {
     const stats = {
       total: documents.length,
-      pending: documents.filter(doc => 
-        ['PENDING_SITE_ADMIN', 'PENDING_CM'].includes(doc.status)
-      ).length,
+      pending: documents.filter(doc => ['PENDING_SITE_ADMIN', 'PENDING_CM'].includes(doc.status)).length,
       approved: documents.filter(doc => doc.status === 'APPROVED').length,
       draft: documents.filter(doc => doc.status === 'DRAFT').length,
       assignedToMe: documents.filter(doc => doc.assignedTo === user?.id).length
@@ -149,12 +129,21 @@ export default function RFAListPage() {
     setFilters({
       rfaType: 'ALL',
       status: 'ALL',
-      assignedToMe: false,
-      createdByMe: false,
       siteId: 'ALL'
     })
     setSearchTerm('')
+    router.push('/dashboard/rfa')
   }
+  
+  const handleCreateClick = () => {
+    const type = filters.rfaType;
+    if (type && type !== 'ALL') {
+      const path = `/rfa/${type.replace('RFA-', '').toLowerCase()}/create`;
+      router.push(path);
+    } else {
+      router.push('/dashboard/rfa/create');
+    }
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -216,7 +205,7 @@ export default function RFAListPage() {
                 </button>
                 
                 <button
-                  onClick={() => setShowCreateForm(true)}
+                  onClick={handleCreateClick}
                   className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                 >
                   <Plus className="w-4 h-4 mr-2" />
@@ -228,61 +217,11 @@ export default function RFAListPage() {
 
           {/* Statistics Cards */}
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-            <div className="bg-white p-4 rounded-lg shadow">
-              <div className="flex items-center">
-                <FileText className="w-8 h-8 text-blue-500" />
-                <div className="ml-3">
-                  <p className="text-2xl font-bold text-gray-900">{stats.total}</p>
-                  <p className="text-gray-600 text-sm">ทั้งหมด</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white p-4 rounded-lg shadow">
-              <div className="flex items-center">
-                <BarChart3 className="w-8 h-8 text-orange-500" />
-                <div className="ml-3">
-                  <p className="text-2xl font-bold text-gray-900">{stats.pending}</p>
-                  <p className="text-gray-600 text-sm">รออนุมัติ</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white p-4 rounded-lg shadow">
-              <div className="flex items-center">
-                <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
-                  <span className="text-green-600 font-bold">✓</span>
-                </div>
-                <div className="ml-3">
-                  <p className="text-2xl font-bold text-gray-900">{stats.approved}</p>
-                  <p className="text-gray-600 text-sm">อนุมัติแล้ว</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white p-4 rounded-lg shadow">
-              <div className="flex items-center">
-                <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
-                  <span className="text-gray-600 font-bold">📝</span>
-                </div>
-                <div className="ml-3">
-                  <p className="text-2xl font-bold text-gray-900">{stats.draft}</p>
-                  <p className="text-gray-600 text-sm">ร่าง</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white p-4 rounded-lg shadow">
-              <div className="flex items-center">
-                <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
-                  <span className="text-purple-600 font-bold">👤</span>
-                </div>
-                <div className="ml-3">
-                  <p className="text-2xl font-bold text-gray-900">{stats.assignedToMe}</p>
-                  <p className="text-gray-600 text-sm">มอบหมายให้ฉัน</p>
-                </div>
-              </div>
-            </div>
+             <div className="bg-white p-4 rounded-lg shadow"><div className="flex items-center"><FileText className="w-8 h-8 text-blue-500" /><div className="ml-3"><p className="text-2xl font-bold text-gray-900">{stats.total}</p><p className="text-gray-600 text-sm">ทั้งหมด</p></div></div></div>
+            <div className="bg-white p-4 rounded-lg shadow"><div className="flex items-center"><BarChart3 className="w-8 h-8 text-orange-500" /><div className="ml-3"><p className="text-2xl font-bold text-gray-900">{stats.pending}</p><p className="text-gray-600 text-sm">รออนุมัติ</p></div></div></div>
+            <div className="bg-white p-4 rounded-lg shadow"><div className="flex items-center"><div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center"><span className="text-green-600 font-bold">✓</span></div><div className="ml-3"><p className="text-2xl font-bold text-gray-900">{stats.approved}</p><p className="text-gray-600 text-sm">อนุมัติแล้ว</p></div></div></div>
+            <div className="bg-white p-4 rounded-lg shadow"><div className="flex items-center"><div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center"><span className="text-gray-600 font-bold">📝</span></div><div className="ml-3"><p className="text-2xl font-bold text-gray-900">{stats.draft}</p><p className="text-gray-600 text-sm">ร่าง</p></div></div></div>
+            <div className="bg-white p-4 rounded-lg shadow"><div className="flex items-center"><div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center"><span className="text-purple-600 font-bold">👤</span></div><div className="ml-3"><p className="text-2xl font-bold text-gray-900">{stats.assignedToMe}</p><p className="text-gray-600 text-sm">มอบหมายให้ฉัน</p></div></div></div>
           </div>
 
           {/* Filters Section */}
@@ -338,30 +277,6 @@ export default function RFAListPage() {
                     <option value="REJECTED">ไม่อนุมัติ</option>
                   </select>
 
-                  <div className="flex items-center space-x-2">
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={filters.assignedToMe}
-                        onChange={(e) => handleFilterChange('assignedToMe', e.target.checked)}
-                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span className="ml-2 text-sm">มอบหมายให้ฉัน</span>
-                    </label>
-                  </div>
-
-                  <div className="flex items-center space-x-2">
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={filters.createdByMe}
-                        onChange={(e) => handleFilterChange('createdByMe', e.target.checked)}
-                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span className="ml-2 text-sm">สร้างโดยฉัน</span>
-                    </label>
-                  </div>
-
                   <button
                     onClick={resetFilters}
                     className="flex items-center px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
@@ -401,28 +316,6 @@ export default function RFAListPage() {
                     </select>
                   </div>
 
-                  <div className="flex flex-col space-y-2">
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={filters.assignedToMe}
-                        onChange={(e) => handleFilterChange('assignedToMe', e.target.checked)}
-                        className="rounded border-gray-300 text-blue-600"
-                      />
-                      <span className="ml-2 text-sm">มอบหมายให้ฉัน</span>
-                    </label>
-                    
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={filters.createdByMe}
-                        onChange={(e) => handleFilterChange('createdByMe', e.target.checked)}
-                        className="rounded border-gray-300 text-blue-600"
-                      />
-                      <span className="ml-2 text-sm">สร้างโดยฉัน</span>
-                    </label>
-                  </div>
-
                   <button
                     onClick={resetFilters}
                     className="w-full flex items-center justify-center px-4 py-2 bg-gray-100 text-gray-700 rounded-lg"
@@ -433,16 +326,14 @@ export default function RFAListPage() {
                 </div>
               )}
             </div>
-
-            {/* Results Summary */}
+            
             <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
               <div className="flex items-center justify-between">
                 <p className="text-sm text-gray-600">
                   แสดง {filteredDocuments.length} จากทั้งหมด {documents.length} เอกสาร
                 </p>
                 
-                {(searchTerm || filters.rfaType !== 'ALL' || filters.status !== 'ALL' || 
-                  filters.assignedToMe || filters.createdByMe) && (
+                {(searchTerm || filters.rfaType !== 'ALL' || filters.status !== 'ALL') && (
                   <button
                     onClick={resetFilters}
                     className="text-sm text-blue-600 hover:text-blue-800"
@@ -521,7 +412,6 @@ export default function RFAListPage() {
               document={selectedDocument}
               onClose={() => setSelectedDocument(null)}
               onUpdate={(updatedDoc) => {
-                // Update the document in the list
                 setDocuments(prev => 
                   prev.map(doc => doc.id === updatedDoc.id ? updatedDoc : doc)
                 )
@@ -532,5 +422,13 @@ export default function RFAListPage() {
         </div>
       </Layout>
     </AuthGuard>
+  )
+}
+
+export default function RFAListPage() {
+  return (
+    <Suspense fallback={<div>Loading Filters...</div>}>
+      <RFAContent />
+    </Suspense>
   )
 }

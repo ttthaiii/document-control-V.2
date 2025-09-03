@@ -4,8 +4,7 @@ import { adminDb, adminBucket } from "@/lib/firebase/admin";
 import { getAuth } from "firebase-admin/auth";
 import { FieldValue } from 'firebase-admin/firestore';
 
-// (Helper functions toSlugId, ensureCategory, verifyIdTokenFromHeader ไม่มีการเปลี่ยนแปลง)
-
+// (Helper functions toSlugId, ensureCategory, verifyIdTokenFromHeader, readRequest ไม่มีการเปลี่ยนแปลง)
 function toSlugId(input: string): string {
   return input.trim().replace(/[^\p{L}\p{N}]+/gu, "_").replace(/^_+|_+$/g, "").toUpperCase();
 }
@@ -40,12 +39,11 @@ async function verifyIdTokenFromHeader(req: Request): Promise<string | null> {
     }
 }
 
-
-// ✅ ปรับแก้ `readRequest` ให้รับเฉพาะ JSON
 async function readRequest(req: Request): Promise<{ payload: any }> {
     const body = await req.json().catch(() => ({}));
     return { payload: body };
 }
+
 
 export async function POST(req: Request) {
   const uid = await verifyIdTokenFromHeader(req);
@@ -54,7 +52,7 @@ export async function POST(req: Request) {
   }
 
   let docId: string | null = null;
-  const tempFilePathsToDelete: string[] = [];
+  const tempFilePathsToDelete: string[] = []; // <--- เพิ่มบรรทัดนี้ที่ขาดไป
 
   try {
     const userDoc = await adminDb.collection('users').doc(uid).get();
@@ -63,7 +61,6 @@ export async function POST(req: Request) {
     }
     const userData = userDoc.data();
 
-    // ✅ รับข้อมูลเป็น JSON เท่านั้น
     const { payload } = await readRequest(req);
     const { rfaType, siteId, categoryId, title, description, taskData, documentNumber, uploadedFiles } = payload || {};
 
@@ -83,12 +80,12 @@ export async function POST(req: Request) {
     // --- Category Handling ---
     const rawCategoryKey = categoryId || taskData?.taskCategory || rfaType;
     const { id: finalCategoryId } = await ensureCategory(siteId, rawCategoryKey, {
-    name: taskData?.taskCategory || rfaType,
-    createdBy: uid,
-    rfaType,
+      name: taskData?.taskCategory || rfaType,
+      createdBy: uid,
+      rfaType,
     });
     
-    // --- ✅ Logic ใหม่: ย้ายไฟล์จาก temp ไปยัง path ถาวร ---
+    // --- File Handling Logic ---
     const finalFilesData = [];
     const cdnUrlBase = "https://ttsdoc-cdn.ttthaiii30.workers.dev";
 
@@ -99,7 +96,6 @@ export async function POST(req: Request) {
             continue;
         }
         
-        // เพิ่ม path เข้าไปใน list ที่จะลบทีหลัง
         tempFilePathsToDelete.push(sourcePath);
 
         const originalName = tempFile.fileName;
@@ -112,36 +108,51 @@ export async function POST(req: Request) {
             ...tempFile,
             fileUrl: `${cdnUrlBase}/${destinationPath}`,
             filePath: destinationPath,
-            uploadedAt: new Date().toISOString(),  // ← ใช้ new Date() แทน
+            uploadedAt: new Date().toISOString(),
             uploadedBy: uid,
         });
     }
     
-    // --- สร้างเอกสาร RFA พร้อมข้อมูลไฟล์ที่สมบูรณ์ ---
+    let initialStatus = "DRAFT";
+    let initialWorkflowAction = "CREATE_DRAFT";
+
+    switch (rfaType) {
+      case 'RFA-SHOP':
+        initialStatus = "PENDING_SITE_ADMIN";
+        initialWorkflowAction = "SUBMIT";
+        break;
+      case 'RFA-GEN':
+      case 'RFA-MAT':
+        initialStatus = "PENDING_CM";
+        initialWorkflowAction = "SUBMIT";
+        break;
+    }
+
+    // --- Create RFA document ---
     const rfaRef = adminDb.collection("rfaDocuments").doc();
     docId = rfaRef.id;
 
     await rfaRef.set({
-    siteId, 
-    rfaType, 
-    categoryId: finalCategoryId, 
-    title, 
-    description: description || "",
-    taskData: taskData || null, 
-    documentNumber, 
-    status: "DRAFT", 
-    createdBy: uid,
-    createdAt: FieldValue.serverTimestamp(), 
-    updatedAt: FieldValue.serverTimestamp(),
-    workflow: [{
-        action: 'CREATE', 
-        status: 'DRAFT', 
-        userId: uid,
-        userName: userData?.email, 
-        role: userData?.role,
-        timestamp: new Date().toISOString(),  // ← ใช้ ISO string
-    }],
-    files: finalFilesData,
+      siteId, 
+      rfaType, 
+      categoryId: finalCategoryId, 
+      title, 
+      description: description || "",
+      taskData: taskData || null, 
+      documentNumber, 
+      status: initialStatus,
+      createdBy: uid,
+      createdAt: FieldValue.serverTimestamp(), 
+      updatedAt: FieldValue.serverTimestamp(),
+      workflow: [{
+          action: initialWorkflowAction,
+          status: initialStatus,
+          userId: uid,
+          userName: userData?.email, 
+          role: userData?.role,
+          timestamp: new Date().toISOString(),
+      }],
+      files: finalFilesData,
     });
 
     return NextResponse.json({ success: true, id: docId, documentNumber }, { status: 201 });
@@ -149,8 +160,6 @@ export async function POST(req: Request) {
   } catch (err: any) {
     console.error("RFA Create Finalization Error:", err);
     
-    // ✅ Cleanup: ถ้าการสร้างเอกสารล้มเหลว แต่ไฟล์ถูกย้ายไปแล้ว ให้พยายามย้ายกลับไปที่ temp
-    // (เป็น Best-effort cleanup)
     if (docId) {
         await adminDb.collection("rfaDocuments").doc(docId).delete().catch(e => console.error("Cleanup failed for doc:", e));
     }

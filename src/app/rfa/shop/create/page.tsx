@@ -9,17 +9,14 @@ function RFAShopCreateContent() {
   const router = useRouter();
   const { user: appUser } = useAuth();
 
-  const handleSuccess = (data: any) => {
-    console.log('RFA-SHOP created successfully:', data);
-    // Redirect to RFA list or dashboard
-    router.push('/dashboard');
-  };
+  // ไม่ได้ใช้แล้ว สามารถลบออกได้
+  // const handleSuccess = (data: any) => { ... };
 
   const handleCancel = () => {
-    router.push('/dashboard');
+    // เมื่อยกเลิก ให้กลับไปหน้ารายการของ Shop Drawing
+    router.push('/dashboard/rfa?type=RFA-SHOP');
   };
 
-  // Convert AppUser to User format for CreateRFAForm
   const user = appUser ? {
     id: appUser.id,
     email: appUser.email,
@@ -48,21 +45,13 @@ function RFAShopCreateContent() {
         
         {/* Form Container */}
         <div className="bg-white rounded-lg shadow-sm border">
-          <div className="p-6 border-b bg-blue-50">
-            <h2 className="text-xl font-semibold text-blue-900 mb-2">
-              Request for Approval - Shop Drawing
-            </h2>
-            <p className="text-blue-700 text-sm">
-              📋 แบบร่างการผลิต/การติดตั้งที่ต้องได้รับการอนุมัติก่อนดำเนินการ
-            </p>
-          </div>
-          
           <div className="p-6">
+            {/* แก้ไข: ลบ onClose เดิม แล้วให้ฟอร์มจัดการตัวเอง */}
             <CreateRFAForm
               onClose={handleCancel}
               isModal={false}
               userProp={user}
-              presetRfaType="RFA-SHOP"  // 🎯 Preset type - ข้าม Step 1
+              presetRfaType="RFA-SHOP"
             />
           </div>
         </div>

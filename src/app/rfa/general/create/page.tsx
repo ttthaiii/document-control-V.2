@@ -9,13 +9,15 @@ function RFAGeneralCreateContent() {
   const router = useRouter();
   const { user: appUser } = useAuth();
 
+  // Redirect to the correct RFA list page on success
   const handleSuccess = (data: any) => {
     console.log('RFA-GEN created successfully:', data);
-    router.push('/dashboard');
+    router.push('/dashboard/rfa?type=RFA-GEN');
   };
 
+  // Redirect to the correct RFA list page on cancel
   const handleCancel = () => {
-    router.push('/dashboard');
+    router.push('/dashboard/rfa?type=RFA-GEN');
   };
 
   // Convert AppUser to User format for CreateRFAForm
@@ -61,7 +63,7 @@ function RFAGeneralCreateContent() {
               onClose={handleCancel}
               isModal={false}
               userProp={user}
-              presetRfaType="RFA-GEN"  // 🎯 Preset type - ข้าม Step 1
+              presetRfaType="RFA-GEN"
             />
           </div>
         </div>

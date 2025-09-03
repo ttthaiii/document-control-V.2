@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation' // แก้ไข: เพิ่ม useSearchParams
 import { useAuth } from '@/lib/auth/useAuth'
 import { 
   FileText, 
@@ -30,30 +30,25 @@ interface SiteData {
 const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
   const pathname = usePathname()
   const router = useRouter()
+  const searchParams = useSearchParams() // แก้ไข: เรียกใช้ hook
   const { user, logout } = useAuth()
   
-  // State for dropdown menus
   const [showRfaDropdown, setShowRfaDropdown] = useState(false)
   const [userSites, setUserSites] = useState<SiteData[]>([])
   
-  // Check if user is authorized for RFA functions
   const isRFAAuthorized = () => {
     const authorizedRoles = ['BIM', 'Site Admin', 'CM', 'Admin']
     return authorizedRoles.includes(user?.role || '')
   }
 
-  // Fetch user sites data
   useEffect(() => {
     const fetchUserSites = async () => {
       if (!user?.sites || user.sites.length === 0) return
       
       try {
-        // Fetch site details from Firebase
-        // This will be implemented when we have the sites API ready
-        // For now, we'll use mock data based on user.sites
         const sites = user.sites.map((siteId: string, index: number) => ({
           id: siteId,
-          name: `Site ${index + 1}` // Temporary until we implement sites API
+          name: `Site ${index + 1}`
         }))
         setUserSites(sites)
       } catch (error) {
@@ -66,9 +61,8 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
     }
   }, [user])
 
-  // Auto-expand RFA dropdown if we're on any RFA page
   useEffect(() => {
-    if (pathname.includes('/rfa/') || pathname.includes('/rfa-')) {
+    if (pathname.includes('/rfa')) {
       setShowRfaDropdown(true)
     }
   }, [pathname])
@@ -86,26 +80,22 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
     setShowRfaDropdown(!showRfaDropdown)
   }
 
-  // Helper function to check if path is active
   const isPathActive = (path: string) => {
     return pathname === path || pathname.startsWith(path + '/')
   }
 
   if (!user) {
-    return null // Don't render sidebar if not authenticated
+    return null
   }
 
   return (
     <>
-      {/* Mobile overlay */}
       {isOpen && (
         <div 
           className="lg:hidden fixed inset-0 bg-black bg-opacity-50 z-40"
           onClick={onToggle}
         />
       )}
-
-      {/* Sidebar */}
       <div className={`
         fixed lg:static inset-y-0 left-0 z-50
         w-64 bg-gradient-to-b from-amber-50 to-orange-50 
@@ -116,9 +106,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
         flex flex-col h-full
       `}>
         
-        {/* User Info Section */}
         <div className="bg-gradient-to-r from-orange-600 to-orange-700 text-white p-4 lg:p-6">
-          {/* Mobile close button */}
           <div className="lg:hidden flex justify-end mb-2">
             <button 
               onClick={onToggle}
@@ -143,10 +131,8 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
           </div>
         </div>
 
-        {/* Navigation Menu */}
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
           
-          {/* Dashboard */}
           <Link
             href="/dashboard"
             className={`
@@ -161,62 +147,14 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
             Dashboard
           </Link>
 
-          {/* RFA Section */}
           {isRFAAuthorized() && (
             <div className="space-y-1">
-              <button
-                onClick={toggleRfaDropdown}
-                className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors"
-              >
-                <div className="flex items-center">
-                  <FileText className="w-5 h-5 mr-3" />
-                  RFA Documents
-                </div>
-                {showRfaDropdown ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-              </button>
-              
-              {showRfaDropdown && (
-                <div className="ml-6 space-y-1">
-                  <Link
-                    href="/dashboard/rfa"
-                    className={`
-                      flex items-center px-3 py-2 rounded-lg transition-colors text-sm
-                      ${isPathActive('/dashboard/rfa') 
-                        ? 'bg-blue-100 text-blue-700' 
-                        : 'text-gray-600 hover:bg-gray-100'
-                      }
-                    `}
-                  >
-                    📋 จัดการ RFA
-                  </Link>
-                  
-                  <Link
-                    href="/dashboard/rfa/create"
-                    className={`
-                      flex items-center px-3 py-2 rounded-lg transition-colors text-sm
-                      ${isPathActive('/dashboard/rfa/create') 
-                        ? 'bg-blue-100 text-blue-700' 
-                        : 'text-gray-600 hover:bg-gray-100'
-                      }
-                    `}
-                  >
-                    ➕ สร้าง RFA
-                  </Link>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* RFA Section - Only show if authorized */}
-          {isRFAAuthorized() && (
-            <div className="space-y-1">
-              {/* RFA Parent Menu */}
               <button
                 onClick={toggleRfaDropdown}
                 className={`
                   w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
                   transition-colors duration-200
-                  ${pathname.includes('/rfa') 
+                  ${pathname.startsWith('/dashboard/rfa') || pathname.startsWith('/rfa/')
                     ? 'bg-orange-200 text-orange-900' 
                     : 'text-gray-700 hover:bg-orange-100 hover:text-orange-800'
                   }
@@ -224,26 +162,19 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
               >
                 <div className="flex items-center gap-3">
                   <FileText size={18} />
-                  <span>RFA</span>
+                  <span>RFA Documents</span>
                 </div>
-                {showRfaDropdown ? (
-                  <ChevronDown size={16} />
-                ) : (
-                  <ChevronRight size={16} />
-                )}
+                {showRfaDropdown ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
               </button>
-
-              {/* RFA Submenu */}
+              
               {showRfaDropdown && (
                 <div className="ml-6 space-y-1 border-l-2 border-orange-200 pl-4">
-                  
-                  {/* Shop Drawing */}
                   <Link
-                    href="/rfa/shop/create"
+                    href="/dashboard/rfa?type=RFA-SHOP"
                     className={`
                       flex items-center gap-3 px-3 py-2 rounded-md text-sm
                       transition-colors duration-200
-                      ${isPathActive('/rfa/shop') 
+                      ${(pathname === '/dashboard/rfa' && searchParams.get('type') === 'RFA-SHOP')
                         ? 'bg-blue-100 text-blue-900 font-medium' 
                         : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'
                       }
@@ -253,13 +184,12 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
                     <span>🏗️ Shop Drawing</span>
                   </Link>
 
-                  {/* General Submission */}
                   <Link
-                    href="/rfa/general/create"
+                    href="/dashboard/rfa?type=RFA-GEN"
                     className={`
                       flex items-center gap-3 px-3 py-2 rounded-md text-sm
                       transition-colors duration-200
-                      ${isPathActive('/rfa/general') 
+                      ${(pathname === '/dashboard/rfa' && searchParams.get('type') === 'RFA-GEN')
                         ? 'bg-green-100 text-green-900 font-medium' 
                         : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'
                       }
@@ -269,13 +199,12 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
                     <span>📋 General</span>
                   </Link>
 
-                  {/* Material Approval */}
                   <Link
-                    href="/rfa/material/create"
+                    href="/dashboard/rfa?type=RFA-MAT"
                     className={`
                       flex items-center gap-3 px-3 py-2 rounded-md text-sm
                       transition-colors duration-200
-                      ${isPathActive('/rfa/material') 
+                      ${(pathname === '/dashboard/rfa' && searchParams.get('type') === 'RFA-MAT')
                         ? 'bg-orange-100 text-orange-900 font-medium' 
                         : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'
                       }
@@ -289,7 +218,6 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
             </div>
           )}
 
-          {/* RFI */}
           {isRFAAuthorized() && (
             <Link
               href="/rfi"
@@ -307,25 +235,6 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
             </Link>
           )}
 
-          {/* Construction Info */}
-          {isRFAAuthorized() && (
-            <Link
-              href="/construction-info"
-              className={`
-                flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
-                transition-colors duration-200
-                ${isPathActive('/construction-info') 
-                  ? 'bg-orange-200 text-orange-900' 
-                  : 'text-gray-700 hover:bg-orange-100 hover:text-orange-800'
-                }
-              `}
-            >
-              <Building size={18} />
-              <span>Construction Info</span>
-            </Link>
-          )}
-
-          {/* Work Request */}
           <Link
             href="/work-request"
             className={`
@@ -342,7 +251,6 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
           </Link>
         </nav>
 
-        {/* Logout Button */}
         <div className="p-4 border-t border-orange-200">
           <button
             onClick={handleLogout}

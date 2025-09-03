@@ -9,13 +9,9 @@ function RFAMaterialCreateContent() {
   const router = useRouter();
   const { user: appUser } = useAuth();
 
-  const handleSuccess = (data: any) => {
-    console.log('RFA-MAT created successfully:', data);
-    router.push('/dashboard');
-  };
-
+  // Redirect to the correct RFA list page on cancel
   const handleCancel = () => {
-    router.push('/dashboard');
+    router.push('/dashboard/rfa?type=RFA-MAT');
   };
 
   // Convert AppUser to User format for CreateRFAForm
@@ -61,7 +57,7 @@ function RFAMaterialCreateContent() {
               onClose={handleCancel}
               isModal={false}
               userProp={user}
-              presetRfaType="RFA-MAT"  // 🎯 Preset type - ข้าม Step 1
+              presetRfaType="RFA-MAT"
             />
           </div>
         </div>

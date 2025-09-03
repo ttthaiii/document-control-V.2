@@ -1,11 +1,9 @@
-// src/app/api/rfa/list/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { adminDb } from '@/lib/firebase/admin'
 import { getAuth } from 'firebase-admin/auth'
 
 export async function GET(request: NextRequest) {
   try {
-    // Get auth token from header
     const authHeader = request.headers.get('authorization')
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json(
@@ -15,12 +13,9 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.split('Bearer ')[1]
-    
-    // Verify Firebase token
     const decodedToken = await getAuth().verifyIdToken(token)
     const userId = decodedToken.uid
 
-    // Get user data from Firestore
     const userDoc = await adminDb.collection('users').doc(userId).get()
     if (!userDoc.exists) {
       return NextResponse.json(
@@ -30,7 +25,7 @@ export async function GET(request: NextRequest) {
     }
 
     const userData = userDoc.data()
-    const userRole = userData?.role
+    const userRole = userData?.role;
     const userSites = userData?.sites || []
 
     if (userSites.length === 0) {
@@ -40,13 +35,10 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Get query parameters
     const { searchParams } = new URL(request.url)
     const siteId = searchParams.get('siteId')
     const rfaType = searchParams.get('rfaType')
     const status = searchParams.get('status')
-    const assignedToMe = searchParams.get('assignedToMe') === 'true'
-    const createdByMe = searchParams.get('createdByMe') === 'true'
     const limit = parseInt(searchParams.get('limit') || '50')
     const offset = parseInt(searchParams.get('offset') || '0')
 
@@ -54,7 +46,7 @@ export async function GET(request: NextRequest) {
     let firestoreQuery: any = adminDb.collection('rfaDocuments')
 
     // Filter by site (user must have access)
-    if (siteId) {
+    if (siteId && siteId !== 'ALL') { // เพิ่มเงื่อนไขเช็ค 'ALL'
       if (!userSites.includes(siteId)) {
         return NextResponse.json(
           { success: false, error: 'No access to specified site' },
@@ -67,42 +59,14 @@ export async function GET(request: NextRequest) {
       firestoreQuery = firestoreQuery.where('siteId', 'in', userSites)
     }
 
-    // Filter by RFA type
-    if (rfaType && ['RFA-SHOP', 'RFA-GEN', 'RFA-MAT'].includes(rfaType)) {
-      firestoreQuery = firestoreQuery.where('rfaType', '==', rfaType)
+    if (rfaType && rfaType !== 'ALL') { // เพิ่มเงื่อนไขเช็ค 'ALL'
+        firestoreQuery = firestoreQuery.where('rfaType', '==', rfaType)
     }
 
-    // Filter by status
-    if (status) {
+    if (status && status !== 'ALL') { // เพิ่มเงื่อนไขเช็ค 'ALL'
       const validStatuses = ['DRAFT', 'PENDING_SITE_ADMIN', 'PENDING_CM', 'APPROVED', 'REJECTED']
       if (validStatuses.includes(status)) {
         firestoreQuery = firestoreQuery.where('status', '==', status)
-      }
-    }
-
-    // Filter by assignment or creation
-    if (assignedToMe) {
-      firestoreQuery = firestoreQuery.where('assignedTo', '==', userId)
-    } else if (createdByMe) {
-      firestoreQuery = firestoreQuery.where('createdBy', '==', userId)
-    } else {
-      // Show documents user has access to based on role and current step
-      switch (userRole) {
-        case 'BIM':
-          // BIM can see their own documents and approved documents
-          firestoreQuery = firestoreQuery.where('createdBy', '==', userId)
-          break
-        case 'Site Admin':
-          // Site Admin can see documents assigned to them or in their workflow
-          // For simplicity, we'll fetch all and filter later
-          break
-        case 'CM':
-          // CM can see documents that reach CM approval stage
-          // For simplicity, we'll fetch all and filter later
-          break
-        case 'Admin':
-          // Admin can see all documents
-          break
       }
     }
 
@@ -112,7 +76,6 @@ export async function GET(request: NextRequest) {
       .limit(limit)
       .offset(offset)
 
-    // Execute query
     const documentsSnapshot = await firestoreQuery.get()
     const documents: any[] = []
 
@@ -203,21 +166,16 @@ export async function GET(request: NextRequest) {
 
       // Role-based filtering for complex permissions
       let shouldInclude = true
+      // ส่วนนี้ยังคงไว้เพื่อให้ User แต่ละ Role เห็นเอกสารตามสิทธิ์ของตัวเอง
       switch (userRole) {
         case 'BIM':
-          shouldInclude = documentData.createdBy === userId || 
-                         ['APPROVED', 'REJECTED'].includes(documentData.status)
+          shouldInclude = documentData.createdBy === userId || ['APPROVED', 'REJECTED'].includes(documentData.status)
           break
         case 'Site Admin':
-          shouldInclude = documentData.assignedTo === userId ||
-                         documentData.createdBy === userId ||
-                         ['SITE_ADMIN_REVIEW', 'PENDING_SITE_ADMIN'].includes(documentData.currentStep) ||
-                         documentData.rfaType === 'RFA-MAT'
+          shouldInclude = documentData.assignedTo === userId || documentData.createdBy === userId || ['SITE_ADMIN_REVIEW', 'PENDING_SITE_ADMIN'].includes(documentData.currentStep) || documentData.rfaType === 'RFA-MAT'
           break
         case 'CM':
-          shouldInclude = documentData.assignedTo === userId ||
-                         ['CM_APPROVAL', 'PENDING_CM'].includes(documentData.currentStep) ||
-                         ['APPROVED', 'REJECTED'].includes(documentData.status)
+          shouldInclude = documentData.assignedTo === userId || ['CM_APPROVAL', 'PENDING_CM'].includes(documentData.currentStep) || ['APPROVED', 'REJECTED'].includes(documentData.status)
           break
         case 'Admin':
           shouldInclude = true
@@ -301,14 +259,12 @@ export async function GET(request: NextRequest) {
         total: totalCount,
         limit: limit,
         offset: offset,
-        hasMore: totalCount === limit // Simplified check
+        hasMore: totalCount === limit
       },
       filters: {
         siteId,
         rfaType,
         status,
-        assignedToMe,
-        createdByMe,
         userRole,
         userSites
       }
