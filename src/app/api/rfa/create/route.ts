@@ -2,8 +2,7 @@
 import { NextResponse } from "next/server";
 import { adminDb, adminBucket } from "@/lib/firebase/admin";
 import { getAuth } from "firebase-admin/auth";
-import { FieldValue } from 'firebase-admin/firestore';
-// --- ✅ 1. Import ค่าคงที่ทั้งหมดที่ต้องใช้ ---
+import { FieldValue, Transaction } from 'firebase-admin/firestore';
 import { REVIEWER_ROLES, STATUSES } from '@/lib/config/workflow';
 
 // (Helper functions toSlugId, ensureCategory, verifyIdTokenFromHeader, readRequest ไม่มีการเปลี่ยนแปลง)
@@ -53,8 +52,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // --- ✅ 1. เพิ่มการประกาศตัวแปรที่ขาดหายไป ---
   let docId: string | null = null;
   const tempFilePathsToDelete: string[] = [];
+
 
   try {
     const userDoc = await adminDb.collection('users').doc(uid).get();
@@ -65,22 +66,35 @@ export async function POST(req: Request) {
     const userRole = userData?.role;
 
     const { payload } = await readRequest(req);
+    // --- ✅ 2. เพิ่ม categoryId ในการ destructure ---
     const { rfaType, siteId, categoryId, title, description, taskData, documentNumber, uploadedFiles } = payload || {};
 
-    // --- Validation ---
-    const missing: string[] = [];
-    if (!rfaType) missing.push("rfaType");
-    if (!siteId) missing.push("siteId");
-    if (!title) missing.push("title");
-    if (!documentNumber) missing.push("documentNumber");
-    if (!uploadedFiles || !Array.isArray(uploadedFiles) || uploadedFiles.length === 0) {
-        missing.push("uploadedFiles");
+    // (Validation ยังคงเหมือนเดิม)
+    if (!rfaType || !siteId || !title || !documentNumber || !uploadedFiles || uploadedFiles.length === 0) {
+        return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
-    if (missing.length > 0) {
-        return NextResponse.json({ error: "Missing required fields", missing }, { status: 400 });
-    }
-    
-    // --- Category Handling ---
+
+    const runningNumber = await adminDb.runTransaction(async (transaction) => {
+      const siteRef = adminDb.collection('sites').doc(siteId);
+      const siteDoc = await transaction.get(siteRef);
+      if (!siteDoc.exists) throw new Error("Site not found");
+      const siteShortName = siteDoc.data()?.shortName;
+      if (!siteShortName) throw new Error(`'shortName' is not configured for site ID: ${siteId}`);
+
+      const counterId = `${siteId}_${rfaType}`;
+      const counterRef = adminDb.collection('counters').doc(counterId);
+      const counterDoc = await transaction.get(counterRef);
+      
+      let nextNumber = 1;
+      if (counterDoc.exists) {
+        nextNumber = (counterDoc.data()?.currentNumber || 0) + 1;
+      }
+      
+      transaction.set(counterRef, { currentNumber: nextNumber }, { merge: true });
+      const formattedNumber = String(nextNumber).padStart(4, '0');
+      return `${rfaType}-${siteShortName}-${formattedNumber}`;
+    });
+
     const rawCategoryKey = categoryId || taskData?.taskCategory || rfaType;
     const { id: finalCategoryId } = await ensureCategory(siteId, rawCategoryKey, {
       name: taskData?.taskCategory || rfaType,
@@ -117,53 +131,40 @@ export async function POST(req: Request) {
     }
     
     // --- ✅ 2. ปรับปรุง Logic การกำหนดสถานะเริ่มต้นโดยใช้ค่าคงที่ ---
-    let initialStatus = STATUSES.PENDING_REVIEW; // สถานะปกติคือ "รอตรวจสอบ"
+    let initialStatus = STATUSES.PENDING_REVIEW;
     let initialAction = "CREATE";
-
     const isReviewer = REVIEWER_ROLES.includes(userRole);
     const isMatOrGen = ['RFA-MAT', 'RFA-GEN'].includes(rfaType);
-
-    // Shortcut Flow Logic
     if (isReviewer && isMatOrGen) {
-      initialStatus = STATUSES.PENDING_CM_APPROVAL; // ข้ามไปที่ "ส่ง CM"
+      initialStatus = STATUSES.PENDING_CM_APPROVAL;
       initialAction = "CREATE_AND_SUBMIT";
-    }        
+    }
 
-    // --- Create RFA document ---
     const rfaRef = adminDb.collection("rfaDocuments").doc();
+    docId = rfaRef.id; // เก็บ ID ไว้เผื่อต้องลบทิ้งกรณีเกิด Error
+    
     await rfaRef.set({
-      siteId, 
-      rfaType, 
-      categoryId: finalCategoryId, 
-      title, 
-      description: description || "",
-      taskData: taskData || null, 
-      documentNumber, 
-      status: initialStatus,
-      currentStep: initialStatus, // ใช้ status เป็น step ไปก่อนเพื่อความง่าย
-      createdBy: uid,
-      createdAt: FieldValue.serverTimestamp(), 
-      updatedAt: FieldValue.serverTimestamp(),
+      siteId, rfaType, categoryId: finalCategoryId, title, description: description || "",
+      taskData: taskData || null, documentNumber, status: initialStatus,
+      currentStep: initialStatus, createdBy: uid,
+      createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
       workflow: [{
-          action: initialAction,
-          status: initialStatus,
-          userId: uid,
-          userName: userData?.email, 
-          role: userRole,
+          action: initialAction, status: initialStatus, userId: uid,
+          userName: userData?.email, role: userRole,
           timestamp: new Date().toISOString(),
       }],
       files: finalFilesData,
+      runningNumber: runningNumber, 
     });
 
-    return NextResponse.json({ success: true, id: rfaRef.id }, { status: 201 });
+    return NextResponse.json({ success: true, id: rfaRef.id, runningNumber: runningNumber }, { status: 201 });
 
   } catch (err: any) {
     console.error("RFA Create Finalization Error:", err);
-    
+    // เพิ่ม Logic การ clean up กรณีเกิด Error ระหว่างทำงาน
     if (docId) {
         await adminDb.collection("rfaDocuments").doc(docId).delete().catch(e => console.error("Cleanup failed for doc:", e));
     }
-    
     return NextResponse.json({ error: "Internal Server Error", details: err.message }, { status: 500 });
   }
 }

@@ -65,6 +65,7 @@ export interface RFAUserInfo {
 export interface RFADocument {
   id: string
   documentNumber: string
+  runningNumber?: string
   rfaType: 'RFA-SHOP' | 'RFA-GEN' | 'RFA-MAT'
   title: string
   description: string
