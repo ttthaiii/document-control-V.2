@@ -13,10 +13,13 @@ export interface RFAWorkflowStep {
   step: string
   status: string
   userId: string
+  userName: string
   userRole: string
+  role: string
   timestamp: string
   comments?: string
   action?: string // <-- ✅ 3. เพิ่ม 'action' (เป็น optional)
+  files?: RFAFile[];
 }
 
 export interface RFAPermissions {

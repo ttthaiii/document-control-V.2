@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import { FileText, Calendar, User, Eye, Clock, Building, Tag } from 'lucide-react'
+import { FileText, Calendar, User, Clock, Building, Tag } from 'lucide-react'
 import { RFADocument } from '@/types/rfa'
 import { STATUSES } from '@/lib/config/workflow'
 
@@ -94,7 +94,7 @@ export default function RFAListTable({
   }
 
   if (isMobile) {
-    // Mobile Card View
+    // Mobile Card View (ไม่มีการเปลี่ยนแปลง)
     return (
       <div className="space-y-4">
       {documents.map((doc) => {
@@ -176,14 +176,13 @@ export default function RFAListTable({
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">System No.</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">หมวดหมู่</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">เอกสาร</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">สถานะ</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ผู้รับผิดชอบ</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">วันที่</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ไฟล์</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">การดำเนินการ</th>
+              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">System No.</th>
+              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">หมวดหมู่</th>
+              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">เอกสาร</th>
+              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">สถานะ</th>
+              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">ผู้รับผิดชอบ</th>
+              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">วันที่อัปเดตล่าสุด</th>
+              {/* --- ✅ คอลัมน์ "ไฟล์" และ "การดำเนินการ" ถูกลบออกจากส่วนหัวแล้ว --- */}
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
@@ -196,17 +195,17 @@ export default function RFAListTable({
                   onClick={() => onDocumentClick(doc)}
                 >
                   <td className="px-6 py-4">
-                    <p className="text-sm font-semibold text-blue-600">{doc.runningNumber || 'N/A'}</p>
+                    <p className="text-sm font-semibold text-blue-600 text-center">{doc.runningNumber || 'N/A'}</p>
                   </td>
                   <td className="px-6 py-4">
                     <div className="text-sm">
-                      <p className="text-gray-600">{doc.category.categoryCode}</p>
+                      <p className="text-gray-600 text-center">{doc.category.categoryCode}</p>
                     </div>
                   </td>
                   <td className="px-6 py-4">
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-gray-900 truncate">{doc.documentNumber}</p>
-                      <p className="text-sm text-gray-600 line-clamp-2">{doc.title}</p>
+                      <p className="text-sm font-medium text-gray-900 truncate text-center">{doc.documentNumber}</p>
+                      <p className="text-sm text-gray-600 line-clamp-2 text-center">{doc.title}</p>
                     </div>
                   </td>
                   <td className="px-6 py-4">
@@ -215,12 +214,12 @@ export default function RFAListTable({
                         {statusLabels[doc.status] || doc.status}
                       </span>
                       {[STATUSES.PENDING_REVIEW, STATUSES.PENDING_CM_APPROVAL].includes(doc.status) && (
-                        <span className="text-xs text-orange-600">ค้าง {calculatePendingDays(doc)} วัน</span>
+                        <span className="text-xs text-orange-600 text-center">ค้าง {calculatePendingDays(doc)} วัน</span>
                       )}
                     </div>
                   </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center">
+                  <td className="px-6 py-4 text-center">
+                    <div className="flex items-center justify-center"> {/* <-- ✅ เพิ่ม justify-center ตรงนี้ */}
                       <User className="w-4 h-4 text-gray-400 mr-2" />
                       <div className="text-sm">
                         <p className="text-gray-900">{responsible.name}</p>
@@ -228,41 +227,11 @@ export default function RFAListTable({
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="text-sm">
-                      <div className="flex items-center text-gray-900 mb-1">
-                        <Calendar className="w-3 h-3 mr-1" />
-                        <span>สร้าง: {formatDate(doc.createdAt)}</span>
-                      </div>
-                      <div className="flex items-center text-gray-600">
-                        <Calendar className="w-3 h-3 mr-1" />
-                        <span>อัปเดต: {formatDate(doc.updatedAt)}</span>
-                      </div>
+                    <div className="text-sm text-gray-600 text-center">
+                        <span>{formatDate(doc.updatedAt)}</span>
                     </div>
                   </td>
-                  <td className="px-6 py-4">
-                    {doc.filesCount > 0 ? (
-                      <div className="flex items-center text-sm">
-                        <FileText className="w-4 h-4 text-gray-400 mr-2" />
-                        <div>
-                          <p className="text-gray-900">{doc.filesCount} ไฟล์</p>
-                          <p className="text-gray-600 text-xs">{formatFileSize(doc.totalFileSize)}</p>
-                        </div>
-                      </div>
-                    ) : (
-                      <span className="text-sm text-gray-400">ไม่มีไฟล์</span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center space-x-2">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onDocumentClick(doc); }}
-                        className="inline-flex items-center px-2 py-1 border border-gray-300 rounded text-xs font-medium text-gray-700 bg-white hover:bg-gray-50"
-                      >
-                        <Eye className="w-3 h-3 mr-1" />
-                        ดู
-                      </button>
-                    </div>
-                  </td>
+                  {/* --- ✅ คอลัมน์ "ไฟล์" และ "การดำเนินการ" ถูกลบออกจากส่วนเนื้อหาแล้ว --- */}
                 </tr>
               );
             })}
