@@ -8,17 +8,24 @@ import { AuthGuard } from '@/lib/components/shared/AuthGuard'
 import Layout from '@/components/layout/Layout'
 import RFAListTable from '@/components/rfa/RFAListTable'
 import RFADetailModal from '@/components/rfa/RFADetailModal'
-import DashboardStats from '@/components/rfa/DashboardStats' // <-- Import component ใหม่
+import DashboardStats from '@/components/rfa/DashboardStats'
 import { RFADocument } from '@/types/rfa'
-import { STATUSES } from '@/lib/config/workflow'
-import { Plus, Filter, Search, RefreshCw } from 'lucide-react'
+import { STATUSES, STATUS_LABELS } from '@/lib/config/workflow' 
+import { Plus, Search, RefreshCw } from 'lucide-react'
 
-// (Interface Filters ไม่เปลี่ยนแปลง)
+// --- เพิ่ม: categoryId ใน interface ---
 interface Filters {
   rfaType: 'ALL' | 'RFA-SHOP' | 'RFA-GEN' | 'RFA-MAT'
   status: string
   siteId: string | 'ALL'
-  latestOnly: boolean // <-- เพิ่ม filter ใหม่
+  latestOnly: boolean
+  categoryId: string | 'ALL'; // <-- เพิ่ม field นี้
+}
+
+interface Category {
+  id: string;
+  categoryCode: string;
+  categoryName: string;
 }
 
 function RFAContent() {
@@ -30,19 +37,41 @@ function RFAContent() {
   const [loading, setLoading] = useState(true)
   const [selectedDocument, setSelectedDocument] = useState<RFADocument | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
-  
+  const [categories, setCategories] = useState<Category[]>([]); // <-- เพิ่ม State สำหรับเก็บหมวดงาน
+
   const [filters, setFilters] = useState<Filters>({
     rfaType: (searchParams.get('type') as Filters['rfaType']) || 'ALL',
     status: 'ALL',
     siteId: 'ALL',
-    latestOnly: true, // <-- ค่าเริ่มต้น
+    latestOnly: true,
+    categoryId: 'ALL', // <-- เพิ่มค่าเริ่มต้น
   })
+
+  const loadCategories = async () => {
+    if (!firebaseUser) return;
+    try {
+      const token = await firebaseUser.getIdToken();
+      // เราจะดึงหมวดงานทั้งหมดโดยไม่เจาะจง rfaType เพื่อให้ filter แสดงทุกหมวดที่เป็นไปได้
+      const response = await fetch(`/api/rfa/categories?rfaType=ALL`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const data = await response.json();
+      if (data.success) {
+        // ป้องกันข้อมูลซ้ำซ้อน
+        const uniqueCategories = Array.from(new Map(data.categories.map((cat: Category) => [cat.id, cat])).values());
+        setCategories(uniqueCategories as Category[]);
+      }
+    } catch (error) {
+      console.error('Failed to load categories:', error);
+    }
+  };
 
   useEffect(() => {
     if (firebaseUser) {
-      loadDocuments()
+      loadDocuments();
+      loadCategories(); // <-- เรียกใช้ฟังก์ชัน
     }
-  }, [firebaseUser, filters]) // Re-fetch เมื่อ filter เปลี่ยน
+  }, [firebaseUser, filters])
 
   const loadDocuments = async () => {
     if (!firebaseUser) return
@@ -87,7 +116,7 @@ function RFAContent() {
   }
   
   const resetFilters = () => {
-    setFilters({ rfaType: 'ALL', status: 'ALL', siteId: 'ALL', latestOnly: true })
+    setFilters({ rfaType: 'ALL', status: 'ALL', siteId: 'ALL', latestOnly: true, categoryId: 'ALL' }) // <-- เพิ่ม categoryId
     setSearchTerm('')
   }
   
@@ -171,6 +200,7 @@ function RFAContent() {
                     />
                 </div>
               </div>
+
               <div className="md:col-span-2">
                 <label htmlFor="status-filter" className="text-sm font-medium text-gray-700">สถานะ</label>
                  <select
@@ -180,16 +210,32 @@ function RFAContent() {
                     className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg"
                   >
                     <option value="ALL">ทุกสถานะ</option>
-                    {Object.values(STATUSES).map(s => <option key={s} value={s}>{s}</option>)}
+                    {/* --- ✅ 2. แก้ไขการสร้าง Option ตรงนี้ --- */}
+                    {Object.values(STATUSES).map(statusKey => (
+                      <option key={statusKey} value={statusKey}>
+                        {STATUS_LABELS[statusKey] || statusKey}
+                      </option>
+                    ))}
                   </select>
               </div>
-               <div className="md:col-span-2">
+
+              <div className="md:col-span-2">
                 <label htmlFor="category-filter" className="text-sm font-medium text-gray-700">หมวดงาน</label>
-                <select id="category-filter" className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg">
+                <select 
+                  id="category-filter" 
+                  className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg"
+                  value={filters.categoryId}
+                  onChange={(e) => handleFilterChange('categoryId', e.target.value)}
+                >
                     <option value="ALL">ทุกหมวดงาน</option>
-                    {/* TODO: Populate categories dynamically */}
+                    {categories.map(cat => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.categoryCode}
+                      </option>
+                    ))}
                 </select>
               </div>
+
                <div className="md:col-span-2 flex items-center h-10">
                  <input
                     id="latest-only"
@@ -220,8 +266,8 @@ function RFAContent() {
               documents={documents}
               onDocumentClick={setSelectedDocument}
               getStatusColor={getStatusColor}
-              getStatusText={getStatusText}
-              getRFATypeColor={getRFATypeColor}
+              statusLabels={STATUS_LABELS}
+              getRFATypeColor={getRFATypeColor} //  <-- ✅ เพิ่ม prop ที่ขาดไปตรงนี้ครับ
             />
           )}
 

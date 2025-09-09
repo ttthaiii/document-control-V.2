@@ -1,11 +1,11 @@
-// src/app/api/rfa/categories/route.ts
+// src/app/api/rfa/categories/route.ts (แก้ไขแล้ว)
 import { NextRequest, NextResponse } from 'next/server'
 import { adminDb } from '@/lib/firebase/admin'
 import { getAuth } from 'firebase-admin/auth'
 
 export async function GET(request: NextRequest) {
   try {
-    // Get auth token from header
+    // (ส่วนการยืนยันตัวตนและดึงข้อมูล User ยังคงเดิม)
     const authHeader = request.headers.get('authorization')
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json(
@@ -13,73 +13,63 @@ export async function GET(request: NextRequest) {
         { status: 401 }
       )
     }
-
     const token = authHeader.split('Bearer ')[1]
-    
-    // Verify Firebase token
     const decodedToken = await getAuth().verifyIdToken(token)
     const userId = decodedToken.uid
-
-    // Get user data from Firestore
     const userDoc = await adminDb.collection('users').doc(userId).get()
     if (!userDoc.exists) {
-      return NextResponse.json(
-        { success: false, error: 'User not found' },
-        { status: 404 }
-      )
+      return NextResponse.json({ success: false, error: 'User not found' }, { status: 404 })
     }
-
     const userData = userDoc.data()
     const userSites = userData?.sites || []
-
     if (userSites.length === 0) {
-      return NextResponse.json(
-        { success: false, error: 'No site access' },
-        { status: 403 }
-      )
+      return NextResponse.json({ success: false, error: 'No site access' }, { status: 403 })
     }
 
-    // Get rfaType from query params
     const { searchParams } = new URL(request.url)
     const rfaType = searchParams.get('rfaType')
 
-    if (!rfaType || !['RFA-SHOP', 'RFA-GEN', 'RFA-MAT'].includes(rfaType)) {
+    // --- ✅ 1. แก้ไข Validation ---
+    // อนุญาตให้ rfaType เป็น 'ALL' ได้
+    if (!rfaType) {
       return NextResponse.json(
-        { success: false, error: 'Invalid or missing rfaType parameter' },
+        { success: false, error: 'Missing rfaType parameter' },
         { status: 400 }
       )
     }
 
-    // Get categories from user's sites
     const categories: any[] = []
 
     for (const siteId of userSites) {
-      const categoriesSnapshot = await adminDb
+      // สร้าง Query เริ่มต้น
+      let categoriesQuery: any = adminDb
         .collection('sites')
         .doc(siteId)
         .collection('categories')
         .where('active', '==', true)
-        .where('rfaTypes', 'array-contains', rfaType)  // ใช้ได้แล้วหลัง migration
-        .get()
 
-      categoriesSnapshot.forEach(doc => {
+      // --- ✅ 2. เพิ่มเงื่อนไขการกรอง ---
+      // จะกรองด้วย rfaType ก็ต่อเมื่อไม่ใช่ 'ALL'
+      if (rfaType !== 'ALL') {
+        categoriesQuery = categoriesQuery.where('rfaTypes', 'array-contains', rfaType);
+      }
+
+      const categoriesSnapshot = await categoriesQuery.get();
+
+      categoriesSnapshot.forEach((doc: any) => {
         const data = doc.data()
-        
-        // ใช้ array เท่านั้น (หลัง migration)
-        if (data.rfaTypes && Array.isArray(data.rfaTypes) && data.rfaTypes.includes(rfaType)) {
-          categories.push({
-            id: doc.id,
-            siteId: siteId,
-            categoryCode: data.categoryCode || 'UNKNOWN',
-            categoryName: data.categoryName || 'Unknown Category',
-            rfaTypes: data.rfaTypes,
-            sequence: data.sequence || 0
-          })
-        }
+        categories.push({
+          id: doc.id,
+          siteId: siteId,
+          categoryCode: data.categoryCode || 'UNKNOWN',
+          categoryName: data.categoryName || 'Unknown Category',
+          rfaTypes: data.rfaTypes,
+          sequence: data.sequence || 0
+        })
       })
     }
-
-    // Sort by sequence and categoryCode
+    
+    // (ส่วนการ Sort และ Response ยังคงเดิม)
     categories.sort((a, b) => {
       if (a.sequence !== b.sequence) {
         return a.sequence - b.sequence

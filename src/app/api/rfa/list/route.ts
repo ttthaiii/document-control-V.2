@@ -13,7 +13,7 @@ import {
 
 export async function GET(request: NextRequest) {
   try {
-    // (ส่วนของการยืนยันตัวตนและดึงข้อมูล User ยังคงเดิม)
+    // (ส่วนการยืนยันตัวตนและดึงข้อมูล User ยังคงเดิม)
     const authHeader = request.headers.get('authorization')
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json({ success: false, error: 'Missing or invalid authorization header' }, { status: 401 })
@@ -29,20 +29,30 @@ export async function GET(request: NextRequest) {
     const userRole = userData.role;
     const userSites = userData.sites || [];
     if (userSites.length === 0) {
-      return NextResponse.json({ success: false, error: 'No site access' }, { status: 403 })
+      return NextResponse.json({ success: true, documents: [] });
     }
     
-    // (ส่วนของการ Query ข้อมูลจาก Firestore ยังคงเดิม)
     const { searchParams } = new URL(request.url)
     const rfaType = searchParams.get('rfaType')
     const status = searchParams.get('status')
-    
+    const categoryId = searchParams.get('categoryId');
+
     let firestoreQuery: any = adminDb.collection('rfaDocuments');
+    
+    // --- ✅ 1. ย้ายการกรองทั้งหมดมาไว้ใน Query ---
     firestoreQuery = firestoreQuery.where('siteId', 'in', userSites);
 
     if (rfaType && rfaType !== 'ALL') {
         firestoreQuery = firestoreQuery.where('rfaType', '==', rfaType)
     }
+    if (categoryId && categoryId !== 'ALL') {
+        firestoreQuery = firestoreQuery.where('categoryId', '==', categoryId);
+    }
+    if (status && status !== 'ALL') {
+        firestoreQuery = firestoreQuery.where('status', '==', status);
+    }
+    // --- สิ้นสุดส่วนที่แก้ไข ---
+
     firestoreQuery = firestoreQuery.orderBy('updatedAt', 'desc');
 
     const documentsSnapshot = await firestoreQuery.get();
@@ -57,7 +67,7 @@ export async function GET(request: NextRequest) {
     for (const doc of documentsSnapshot.docs) {
       const documentData = doc.data();
       
-      // (ส่วน Logic การกรอง shouldInclude ยังคงเดิม)
+      // --- ✅ 2. ลบการกรองสถานะเก่าออก เหลือแค่การเช็คสิทธิ์การมองเห็น ---
       let shouldInclude = false;
       if (userRole === 'Admin' || OBSERVER_ALL_ROLES.includes(userRole) || REVIEWER_ROLES.includes(userRole) || CREATOR_ROLES.includes(userRole)) {
         shouldInclude = true;
@@ -67,12 +77,8 @@ export async function GET(request: NextRequest) {
       } else if (OBSERVER_FINISHED_ROLES.includes(userRole)) {
          if (finishedStatuses.includes(documentData.status)) shouldInclude = true;
       }
-      if (shouldInclude && status && status !== 'ALL') {
-          if (documentData.status !== status) shouldInclude = false;
-      }
 
       if (shouldInclude) {
-        // --- ✅ นี่คือส่วนที่แก้ไข: เพิ่มการสร้างออบเจ็กต์ permissions ---
         const permissions = {
           canView: true,
           canEdit: documentData.createdBy === userId && documentData.status === STATUSES.REVISION_REQUIRED,
@@ -82,9 +88,8 @@ export async function GET(request: NextRequest) {
           canReject: APPROVER_ROLES.includes(userRole) && documentData.status === STATUSES.PENDING_CM_APPROVAL,
         };
         
-        // (ส่วนการดึงข้อมูล site, category สามารถนำกลับมาใช้ได้ถ้าต้องการ)
-        // เพื่อความรวดเร็วในการแสดงผล list อาจจะยังไม่ดึงข้อมูลย่อยเหล่านี้มา
         const siteInfo = { id: documentData.siteId, name: documentData.siteName || 'N/A' };
+        // แก้ไข: ใช้ taskData.taskCategory เพื่อความแม่นยำ
         const categoryInfo = { id: documentData.categoryId, categoryCode: documentData.taskData?.taskCategory || 'N/A' };
         const createdByInfo = { email: documentData.workflow[0]?.userName || 'N/A', role: documentData.workflow[0]?.role || 'N/A' };
         const assignedUserInfo = null;
@@ -96,7 +101,7 @@ export async function GET(request: NextRequest) {
           category: categoryInfo,
           createdByInfo: createdByInfo,
           assignedUserInfo: assignedUserInfo,
-          permissions: permissions // <-- เพิ่ม permissions เข้าไปในข้อมูลที่ส่งกลับ
+          permissions: permissions
         });
       }
     }
