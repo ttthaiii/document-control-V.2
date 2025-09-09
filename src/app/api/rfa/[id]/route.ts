@@ -287,6 +287,7 @@ export async function PUT(
       role: userRole,
       timestamp: new Date().toISOString(),
       comments: comments || '',
+      files: docData.files
     };
 
     await rfaDocRef.update({

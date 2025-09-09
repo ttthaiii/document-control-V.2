@@ -144,10 +144,10 @@ export default function RFADetailModal({ document, onClose, onUpdate }: RFADetai
                         <strong className="text-gray-500 block">หมวดงาน:</strong>
                         <span>{document.category.categoryCode}</span>
                     </div>
-                    <div>
+                    {/*<div>
                         <strong className="text-gray-500 block">ผู้สร้าง:</strong>
                         <span>{document.createdByInfo.email}</span>
-                    </div>
+                    </div>*/}
                 </div>
                 {document.description && (
                 <div className='mt-4'>

@@ -152,6 +152,7 @@ export async function POST(req: Request) {
           action: initialAction, status: initialStatus, userId: uid,
           userName: userData?.email, role: userRole,
           timestamp: new Date().toISOString(),
+          files: finalFilesData
       }],
       files: finalFilesData,
       runningNumber: runningNumber, 
