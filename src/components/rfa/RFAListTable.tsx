@@ -65,12 +65,18 @@ export default function RFAListTable({
   const calculatePendingDays = (document: RFADocument) => {
     const lastUpdate = convertToDate(document.updatedAt);
     if (!lastUpdate) return 0;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const updateDate = new Date(lastUpdate);
+    updateDate.setHours(0, 0, 0, 0);
+
+    const diffTime = today.getTime() - updateDate.getTime();
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
     
-    const today = new Date()
-    const diffTime = today.getTime() - lastUpdate.getTime()
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-    return diffDays
-  }
+    return Math.max(0, diffDays);
+  };
 
   const getResponsibleParty = (doc: RFADocument): { name: string, role: string } => {
     switch (doc.status) {
@@ -93,83 +99,71 @@ export default function RFAListTable({
     }
   }
 
+  // Mobile View (Card)
   if (isMobile) {
-    // Mobile Card View (ไม่มีการเปลี่ยนแปลง)
     return (
       <div className="space-y-4">
-      {documents.map((doc) => {
-        const responsible = getResponsibleParty(doc);
-        return (
-          <div
-            key={doc.id}
-            onClick={() => onDocumentClick(doc)}
-            className="bg-white rounded-lg shadow border p-4 cursor-pointer"
-          >
-            <div className="flex items-start justify-between mb-3">
-              <div className="flex-1">
-                <div className="flex items-center space-x-2 mb-1">
-                  <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${getRFATypeColor(doc.rfaType)}`}>
-                    {doc.rfaType}
-                  </span>
+        {documents.map((doc) => {
+          const responsible = getResponsibleParty(doc);
+          const pendingDays = calculatePendingDays(doc);
+          return (
+            <div
+              key={doc.id}
+              onClick={() => onDocumentClick(doc)}
+              className="bg-white rounded-lg shadow border p-4 cursor-pointer"
+            >
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center space-x-2 mb-1">
+                    <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${getRFATypeColor(doc.rfaType)}`}>
+                      {doc.rfaType}
+                    </span>
+                  </div>
+                  <h3 className="font-medium text-gray-900 text-sm mb-1 truncate">
+                    {doc.documentNumber}
+                  </h3>
+                  <p className="text-sm text-gray-600 line-clamp-2">
+                    {doc.title}
+                  </p>
                 </div>
-                
-                <h3 className="font-medium text-gray-900 text-sm mb-1">
-                  {doc.documentNumber}
-                </h3>
-                <p className="text-sm text-gray-600 line-clamp-2">
-                  {doc.title}
-                </p>
-              </div>
-               <div className="flex flex-col items-end space-y-1">
+                <div className="flex flex-col items-end space-y-1 flex-shrink-0 ml-2">
                   <span className={`inline-flex items-center justify-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(doc.status)}`}>
                     {statusLabels[doc.status] || doc.status}
                   </span>
-               </div>
-            </div>
-            
-            <div className="space-y-2 text-xs text-gray-600">
-              <div className="flex items-center">
-                <Building className="w-3 h-3 mr-2" />
-                <span>{doc.site.name}</span>
+                </div>
               </div>
-              
-              <div className="flex items-center">
-                <Tag className="w-3 h-3 mr-2" />
-                <span>{doc.category.categoryCode}</span>
-              </div>
-              
-              <div className="flex items-center">
-                <User className="w-3 h-3 mr-2" />
-                <span>ผู้รับผิดชอบ: {responsible.name}</span>
-              </div>
-              
-              <div className="flex items-center">
-                <Calendar className="w-3 h-3 mr-2" />
-                <span>อัปเดต: {formatDate(doc.updatedAt)}</span>
-              </div>
-
-              {doc.filesCount > 0 && (
+              <div className="space-y-2 text-xs text-gray-600">
                 <div className="flex items-center">
-                  <FileText className="w-3 h-3 mr-2" />
-                  <span>{doc.filesCount} ไฟล์ ({formatFileSize(doc.totalFileSize)})</span>
+                  <Building className="w-3 h-3 mr-2" />
+                  <span>{doc.site?.name || 'N/A'}</span>
                 </div>
-              )}
-
-              {[STATUSES.PENDING_REVIEW, STATUSES.PENDING_CM_APPROVAL].includes(doc.status) && (
-                <div className="flex items-center text-orange-600">
-                  <Clock className="w-3 h-3 mr-2" />
-                  <span>ค้างดำเนินการ: {calculatePendingDays(doc)} วัน</span>
+                <div className="flex items-center">
+                  <Tag className="w-3 h-3 mr-2" />
+                  <span>{doc.category?.categoryCode || 'N/A'}</span>
                 </div>
-              )}
+                <div className="flex items-center">
+                  <User className="w-3 h-3 mr-2" />
+                  <span>ผู้รับผิดชอบ: {responsible.name}</span>
+                </div>
+                <div className="flex items-center">
+                  <Calendar className="w-3 h-3 mr-2" />
+                  <span>อัปเดต: {formatDate(doc.updatedAt)}</span>
+                </div>
+                {[STATUSES.PENDING_REVIEW, STATUSES.PENDING_CM_APPROVAL].includes(doc.status) && pendingDays > 0 && (
+                  <div className="flex items-center text-orange-600">
+                    <Clock className="w-3 h-3 mr-2" />
+                    <span>ค้างดำเนินการ: {pendingDays} วัน</span>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        )
-      })}
-    </div>
+          )
+        })}
+      </div>
     )
   }
 
-  // Desktop Table View
+  // Desktop View (Table)
   return (
     <div className="bg-white rounded-lg shadow overflow-hidden">
       <div className="overflow-x-auto">
@@ -182,12 +176,12 @@ export default function RFAListTable({
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">สถานะ</th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">ผู้รับผิดชอบ</th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">วันที่อัปเดตล่าสุด</th>
-              {/* --- ✅ คอลัมน์ "ไฟล์" และ "การดำเนินการ" ถูกลบออกจากส่วนหัวแล้ว --- */}
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {documents.map((doc) => {
               const responsible = getResponsibleParty(doc);
+              const pendingDays = calculatePendingDays(doc);
               return (
                 <tr
                   key={doc.id}
@@ -199,7 +193,7 @@ export default function RFAListTable({
                   </td>
                   <td className="px-6 py-4">
                     <div className="text-sm">
-                      <p className="text-gray-600 text-center">{doc.category.categoryCode}</p>
+                      <p className="text-gray-600 text-center">{doc.category?.categoryCode || 'N/A'}</p>
                     </div>
                   </td>
                   <td className="px-6 py-4">
@@ -209,17 +203,17 @@ export default function RFAListTable({
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex flex-col space-y-1">
+                    <div className="flex flex-col space-y-1 items-center">
                       <span className={`inline-flex items-center justify-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(doc.status)}`}>
                         {statusLabels[doc.status] || doc.status}
                       </span>
-                      {[STATUSES.PENDING_REVIEW, STATUSES.PENDING_CM_APPROVAL].includes(doc.status) && (
-                        <span className="text-xs text-orange-600 text-center">ค้าง {calculatePendingDays(doc)} วัน</span>
+                      {[STATUSES.PENDING_REVIEW, STATUSES.PENDING_CM_APPROVAL].includes(doc.status) && pendingDays > 0 && (
+                        <span className="text-xs text-orange-600 text-center">ค้าง {pendingDays} วัน</span>
                       )}
                     </div>
                   </td>
                   <td className="px-6 py-4 text-center">
-                    <div className="flex items-center justify-center"> {/* <-- ✅ เพิ่ม justify-center ตรงนี้ */}
+                    <div className="flex items-center justify-center">
                       <User className="w-4 h-4 text-gray-400 mr-2" />
                       <div className="text-sm">
                         <p className="text-gray-900">{responsible.name}</p>
@@ -231,7 +225,6 @@ export default function RFAListTable({
                         <span>{formatDate(doc.updatedAt)}</span>
                     </div>
                   </td>
-                  {/* --- ✅ คอลัมน์ "ไฟล์" และ "การดำเนินการ" ถูกลบออกจากส่วนเนื้อหาแล้ว --- */}
                 </tr>
               );
             })}

@@ -1,9 +1,9 @@
 // src/app/api/rfa/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server'
-import { adminDb } from '@/lib/firebase/admin'
+import { adminDb, adminBucket } from '@/lib/firebase/admin'
 import { getAuth } from 'firebase-admin/auth'
 import { FieldValue } from 'firebase-admin/firestore'
-import { REVIEWER_ROLES, APPROVER_ROLES, STATUSES } from '@/lib/config/workflow';
+import { CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUSES } from '@/lib/config/workflow';
 
 // GET - Get RFA document details
 export async function GET(
@@ -40,133 +40,26 @@ export async function GET(
     if (!userSites.includes(rfaData.siteId)) {
       return NextResponse.json({ success: false, error: 'Access denied to this site' }, { status: 403 })
     }
-
-    // Check role-based permissions
-    let canView = false
-    switch (userRole) {
-      case 'BIM':
-        canView = rfaData.createdBy === userId || 
-                 ['APPROVED', 'REJECTED'].includes(rfaData.status)
-        break
-      case 'Site Admin':
-        canView = rfaData.assignedTo === userId ||
-                 rfaData.createdBy === userId ||
-                 ['SITE_ADMIN_REVIEW', 'PENDING_SITE_ADMIN'].includes(rfaData.currentStep) ||
-                 rfaData.rfaType === 'RFA-MAT'
-        break
-      case 'CM':
-        canView = rfaData.assignedTo === userId ||
-                 ['CM_APPROVAL', 'PENDING_CM'].includes(rfaData.currentStep) ||
-                 ['APPROVED', 'REJECTED'].includes(rfaData.status)
-        break
-      case 'Admin':
-        canView = true
-        break
-    }
-
-    if (!canView) {
-      return NextResponse.json(
-        { success: false, error: 'No permission to view this document' },
-        { status: 403 }
-      )
-    }
-
-    // Get category information
-    let categoryInfo = null
-    try {
-      const categoryDoc = await adminDb
-        .collection('sites')
-        .doc(rfaData.siteId)
-        .collection('categories')
-        .doc(rfaData.categoryId)
-        .get()
-      
-      if (categoryDoc.exists) {
-        const catData = categoryDoc.data()
-        categoryInfo = {
-          id: categoryDoc.id,
-          categoryCode: catData?.categoryCode,
-          categoryName: catData?.categoryName,
-          rfaTypes: catData?.rfaTypes
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching category:', error)
-    }
-
-    // Get site information
-    let siteInfo = null
-    try {
-      const siteDoc = await adminDb.collection('sites').doc(rfaData.siteId).get()
-      if (siteDoc.exists) {
-        const siteDataDoc = siteDoc.data()
-        siteInfo = {
-          id: siteDoc.id,
-          name: siteDataDoc?.name,
-          description: siteDataDoc?.description
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching site:', error)
-    }
-
-    // Get user information for workflow - Fix Set iteration issue
-    const userIdSet = new Set<string>()
-    if (rfaData.createdBy) userIdSet.add(rfaData.createdBy)
-    if (rfaData.assignedTo) userIdSet.add(rfaData.assignedTo)
     
-    // Add workflow user IDs
-    if (rfaData.workflow) {
-      rfaData.workflow.forEach((step: any) => {
-        if (step.userId) userIdSet.add(step.userId)
-      })
-    }
+    // ✅ [KEY CHANGE] Construct site and category info to ensure consistent data shape
+    const siteInfo = { id: rfaData.siteId, name: rfaData.siteName || 'N/A' };
+    const categoryInfo = { id: rfaData.categoryId, categoryCode: rfaData.taskData?.taskCategory || 'N/A' };
 
-    // Fetch user information - Convert Set to Array for iteration
-    const usersInfo: Record<string, any> = {}
-    const userIdArray = Array.from(userIdSet)
-    
-    for (const uid of userIdArray) {
-      try {
-        const userDoc = await adminDb.collection('users').doc(uid).get()
-        if (userDoc.exists) {
-          const userData = userDoc.data()
-          usersInfo[uid] = {
-            email: userData?.email,
-            role: userData?.role,
-            profile: userData?.profile
-          }
-        }
-      } catch (error) {
-        console.error(`Error fetching user ${uid}:`, error)
-      }
-    }
-
-    // Calculate user permissions
     const permissions = {
       canView: true,
-      canEdit: rfaData.createdBy === userId && rfaData.status === STATUSES.REVISION_REQUIRED,
+      canEdit: CREATOR_ROLES.includes(userRole) && rfaData.status === STATUSES.REVISION_REQUIRED,
       canSendToCm: REVIEWER_ROLES.includes(userRole) && rfaData.status === STATUSES.PENDING_REVIEW,
       canRequestRevision: REVIEWER_ROLES.includes(userRole) && rfaData.status === STATUSES.PENDING_REVIEW,
-
-      canDelete: rfaData.createdBy === userId && 
-                 rfaData.status === 'DRAFT' &&
-                 userRole === 'Admin',
       canApprove: APPROVER_ROLES.includes(userRole) && rfaData.status === STATUSES.PENDING_CM_APPROVAL,
       canReject: APPROVER_ROLES.includes(userRole) && rfaData.status === STATUSES.PENDING_CM_APPROVAL,
-      canForward: (
-        (userRole === 'Site Admin' && rfaData.currentStep === 'SITE_ADMIN_REVIEW') ||
-        userRole === 'Admin'
-      ),
-      canAddFiles: rfaData.createdBy === userId && 
-                   ['DRAFT', 'PENDING_SITE_ADMIN'].includes(rfaData.status),
-      canDownloadFiles: true // All viewers can download
+      canDownloadFiles: true
     }
 
-    // Prepare response data
     const responseData = {
       id: rfaDoc.id,
       ...rfaData,
+      site: siteInfo,       // Add constructed site object
+      category: categoryInfo, // Add constructed category object
       permissions
     };
 
@@ -179,158 +72,164 @@ export async function GET(
 }
 
 
-// PUT - Update RFA document (status, workflow, etc.)
+// PUT - Update RFA document
 export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  try {
-    const authHeader = request.headers.get('authorization')
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split('Bearer ')[1];
-    const decodedToken = await getAuth().verifyIdToken(token);
-    const userId = decodedToken.uid;
-
-    const userDoc = await adminDb.collection('users').doc(userId).get();
-    if (!userDoc.exists) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
-    const userData = userDoc.data()!;
-    const userRole = userData.role;
-
-    const body = await request.json();
-    const { action, comments } = body;
-
-    if (!action) {
-      return NextResponse.json({ error: 'Action is required' }, { status: 400 });
-    }
-
-    const rfaDocRef = adminDb.collection('rfaDocuments').doc(params.id);
-    const rfaDoc = await rfaDocRef.get();
-
-    if (!rfaDoc.exists) {
-      return NextResponse.json({ error: 'RFA document not found' }, { status: 404 });
-    }
-    const docData = rfaDoc.data()!;
-
-    let newStatus = docData.status;
-    let newAssignedTo = docData.assignedTo; // ยังไม่มี logic หาคน assign จริงจัง
-    let canPerformAction = false;
-
-    // Workflow Logic
-    switch (action) {
-      case 'SEND_TO_CM':
-        canPerformAction = REVIEWER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_REVIEW;
-        if (canPerformAction) {
-          newStatus = STATUSES.PENDING_CM_APPROVAL;
-          // TODO: Implement logic to find and assign to a CM user
+    // This function remains the same as the last version I provided.
+    // You can copy the PUT function from the previous response.
+    try {
+        const authHeader = request.headers.get('authorization');
+        if (!authHeader?.startsWith('Bearer ')) {
+          return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
-        break;
-
-      case 'REQUEST_REVISION':
-        canPerformAction = (REVIEWER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_REVIEW) || 
-                           (APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL);
-        if (canPerformAction) {
-          newStatus = STATUSES.REVISION_REQUIRED;
-          newAssignedTo = docData.createdBy; // ส่งกลับไปให้ผู้สร้าง
-        }
-        break;
-
-      case 'SUBMIT_REVISION':
-        canPerformAction = docData.createdBy === userId && docData.status === STATUSES.REVISION_REQUIRED;
-        if (canPerformAction) {
-            newStatus = STATUSES.PENDING_REVIEW; // กลับไปให้ Reviewer ตรวจสอบอีกครั้ง
-            // TODO: Implement logic to assign back to a Reviewer
-        }
-        break;
+        const token = authHeader.split('Bearer ')[1];
+        const decodedToken = await getAuth().verifyIdToken(token);
+        const userId = decodedToken.uid;
+    
+        const userDoc = await adminDb.collection('users').doc(userId).get();
+        if (!userDoc.exists) return NextResponse.json({ error: 'User not found' }, { status: 404 });
         
-      case 'APPROVE':
-        canPerformAction = APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL;
-        if (canPerformAction) newStatus = STATUSES.APPROVED;
-        break;
-
-      case 'REJECT':
-        canPerformAction = APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL;
-        if (canPerformAction) newStatus = STATUSES.REJECTED;
-        break;
-      
-      case 'APPROVE_WITH_COMMENTS':
-        canPerformAction = APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL;
-        if (canPerformAction) newStatus = STATUSES.APPROVED_WITH_COMMENTS;
-        break;
-        
-      case 'APPROVE_REVISION_REQUIRED':
-        canPerformAction = APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL;
-        if (canPerformAction) {
-            newStatus = STATUSES.APPROVED_REVISION_REQUIRED;
-            newAssignedTo = docData.createdBy; // ส่งกลับไปให้ผู้สร้าง
+        const userData = userDoc.data()!;
+        const userRole = userData.role;
+    
+        const body = await request.json();
+        const { action, comments, newFiles } = body; 
+    
+        if (!action) return NextResponse.json({ error: 'Action is required' }, { status: 400 });
+    
+        if (!newFiles || !Array.isArray(newFiles) || newFiles.length === 0) {
+            return NextResponse.json({ error: 'Attaching new files is required for this action' }, { status: 400 });
         }
-        break;
-
-      default:
-        return NextResponse.json({ success: false, error: 'Invalid action' }, { status: 400 });
-    }
-
-    if (!canPerformAction) {
-      return NextResponse.json({ success: false, error: 'Permission denied for this action' }, { status: 403 });
-    }
-
-    // Update document
-    const workflowEntry = {
-      action,
-      status: newStatus,
-      userId,
-      userName: userData.email,
-      role: userRole,
-      timestamp: new Date().toISOString(),
-      comments: comments || '',
-      files: docData.files
-    };
-
-    await rfaDocRef.update({
-      status: newStatus,
-      currentStep: newStatus, // ใช้ status เป็น step ไปก่อนเพื่อความง่าย
-      assignedTo: newAssignedTo,
-      workflow: FieldValue.arrayUnion(workflowEntry),
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-
-    return NextResponse.json({
-      success: true,
-      message: `Action [${action}] completed successfully`,
-      newStatus,
-    });
-
-  } catch (error) {
-    console.error('Error updating RFA document:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Internal server error';
-    return NextResponse.json({ success: false, error: errorMessage }, { status: 500 });
-  }
-}
-
-// Helper function to create notification
-async function createNotification(notificationData: {
-  type: string
-  recipientId: string
-  documentId: string
-  documentNumber: string
-  rfaType: string
-  title: string
-  actionBy: string
-  siteId: string
-  remarks?: string
-}) {
-  try {
-    await adminDb.collection('notifications').add({
-      ...notificationData,
-      read: false,
-      createdAt: FieldValue.serverTimestamp()
-    })
-  } catch (error) {
-    console.error('Error creating notification:', error)
-    // Don't fail the main request for notification errors
-  }
+    
+        const rfaDocRef = adminDb.collection('rfaDocuments').doc(params.id);
+        const rfaDoc = await rfaDocRef.get();
+        if (!rfaDoc.exists) return NextResponse.json({ error: 'RFA document not found' }, { status: 404 });
+        
+        const docData = rfaDoc.data()!;
+        let newStatus = docData.status;
+        let newAssignedTo = docData.assignedTo;
+        let canPerformAction = false;
+    
+        // Workflow Logic
+        switch (action) {
+          case 'SEND_TO_CM':
+            canPerformAction = REVIEWER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_REVIEW;
+            if (canPerformAction) {
+              newStatus = STATUSES.PENDING_CM_APPROVAL;
+              newAssignedTo = null; 
+            }
+            break;
+    
+          case 'REQUEST_REVISION':
+            canPerformAction = (REVIEWER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_REVIEW) || 
+                               (APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL);
+            if (canPerformAction) {
+              newStatus = STATUSES.REVISION_REQUIRED;
+              newAssignedTo = null; 
+            }
+            break;
+    
+          case 'SUBMIT_REVISION':
+            canPerformAction = CREATOR_ROLES.includes(userRole) && docData.status === STATUSES.REVISION_REQUIRED;
+            if (canPerformAction) {
+                newStatus = STATUSES.PENDING_REVIEW;
+                newAssignedTo = null;
+            }
+            break;
+            
+          case 'APPROVE':
+            canPerformAction = APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL;
+            if (canPerformAction) {
+                newStatus = STATUSES.APPROVED;
+                newAssignedTo = null;
+            }
+            break;
+    
+          case 'REJECT':
+            canPerformAction = APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL;
+            if (canPerformAction) {
+                newStatus = STATUSES.REJECTED;
+                newAssignedTo = null;
+            }
+            break;
+          
+          case 'APPROVE_WITH_COMMENTS':
+            canPerformAction = APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL;
+            if (canPerformAction) {
+                newStatus = STATUSES.APPROVED_WITH_COMMENTS;
+                newAssignedTo = null;
+            }
+            break;
+            
+          case 'APPROVE_REVISION_REQUIRED':
+            canPerformAction = APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL;
+            if (canPerformAction) {
+                newStatus = STATUSES.APPROVED_REVISION_REQUIRED;
+                newAssignedTo = null;
+            }
+            break;
+    
+          default:
+            return NextResponse.json({ success: false, error: 'Invalid action' }, { status: 400 });
+        }
+    
+        if (!canPerformAction) {
+          return NextResponse.json({ success: false, error: 'Permission denied for this action' }, { status: 403 });
+        }
+    
+        const finalFilesData = [];
+        const cdnUrlBase = "https://ttsdoc-cdn.ttthaiii30.workers.dev";
+    
+        for (const tempFile of newFiles) {
+            const sourcePath = tempFile.filePath;
+            if (!sourcePath || !sourcePath.startsWith(`temp/${userId}/`)) {
+                console.warn(`Skipping invalid file path: ${sourcePath}`);
+                continue;
+            }
+            const originalName = tempFile.fileName;
+            const timestamp = Date.now();
+            const destinationPath = `sites/${docData.siteId}/rfa/${docData.documentNumber}/${timestamp}_${originalName}`;
+            await adminBucket.file(sourcePath).move(destinationPath);
+            finalFilesData.push({
+                ...tempFile,
+                fileUrl: `${cdnUrlBase}/${destinationPath}`,
+                filePath: destinationPath,
+                uploadedAt: new Date().toISOString(),
+                uploadedBy: userId,
+            });
+        }
+    
+        const workflowEntry = {
+          action,
+          status: newStatus,
+          userId,
+          userName: userData.email,
+          role: userRole,
+          timestamp: new Date().toISOString(),
+          comments: comments || '',
+          files: finalFilesData,
+        };
+    
+        await rfaDocRef.update({
+          status: newStatus,
+          currentStep: newStatus,
+          assignedTo: newAssignedTo,
+          files: finalFilesData,
+          workflow: FieldValue.arrayUnion(workflowEntry),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+    
+        return NextResponse.json({
+          success: true,
+          message: `Action [${action}] completed successfully`,
+          newStatus,
+        });
+    
+      } catch (error) {
+        console.error('Error updating RFA document:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Internal server error';
+        return NextResponse.json({ success: false, error: errorMessage }, { status: 500 });
+      }
 }

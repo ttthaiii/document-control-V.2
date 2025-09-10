@@ -1,7 +1,7 @@
 // src/app/dashboard/rfa/page.tsx (ยกเครื่องใหม่)
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, Suspense, useMemo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth/useAuth'
 import { AuthGuard } from '@/lib/components/shared/AuthGuard'
@@ -33,7 +33,9 @@ function RFAContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
-  const [documents, setDocuments] = useState<RFADocument[]>([])
+  const [allDocuments, setAllDocuments] = useState<RFADocument[]>([]);
+  const [filteredDocuments, setFilteredDocuments] = useState<RFADocument[]>([]);
+
   const [loading, setLoading] = useState(true)
   const [selectedDocument, setSelectedDocument] = useState<RFADocument | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
@@ -51,13 +53,11 @@ function RFAContent() {
     if (!firebaseUser) return;
     try {
       const token = await firebaseUser.getIdToken();
-      // เราจะดึงหมวดงานทั้งหมดโดยไม่เจาะจง rfaType เพื่อให้ filter แสดงทุกหมวดที่เป็นไปได้
       const response = await fetch(`/api/rfa/categories?rfaType=ALL`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       const data = await response.json();
       if (data.success) {
-        // ป้องกันข้อมูลซ้ำซ้อน
         const uniqueCategories = Array.from(new Map(data.categories.map((cat: Category) => [cat.id, cat])).values());
         setCategories(uniqueCategories as Category[]);
       }
@@ -69,7 +69,7 @@ function RFAContent() {
   useEffect(() => {
     if (firebaseUser) {
       loadDocuments();
-      loadCategories(); // <-- เรียกใช้ฟังก์ชัน
+      loadCategories();
     }
   }, [firebaseUser, filters])
 
@@ -79,7 +79,6 @@ function RFAContent() {
     try {
       const token = await firebaseUser.getIdToken()
       const queryParams = new URLSearchParams()
-      // ส่งค่า filter ทั้งหมดไปกับ API request
       Object.entries(filters).forEach(([key, value]) => {
         queryParams.append(key, String(value))
       })
@@ -89,34 +88,37 @@ function RFAContent() {
       })
       const data = await response.json()
       if (data.success) {
-        // กรองด้วย searchTerm ฝั่ง Client (สามารถย้ายไปทำที่ Backend ได้ในอนาคต)
-        let finalDocs = data.documents;
-        if (searchTerm.trim()) {
-            const search = searchTerm.toLowerCase();
-            finalDocs = finalDocs.filter((doc: RFADocument) => 
-                doc.documentNumber.toLowerCase().includes(search) ||
-                doc.title.toLowerCase().includes(search)
-            );
-        }
-        setDocuments(finalDocs)
+        setAllDocuments(data.documents) // <-- เก็บข้อมูลดิบไว้ที่นี่
       } else {
         console.error('Failed to load documents:', data.error)
-        setDocuments([])
+        setAllDocuments([])
       }
     } catch (error) {
       console.error('Error loading documents:', error)
-      setDocuments([])
+      setAllDocuments([])
     } finally {
       setLoading(false)
     }
   }
 
+  useEffect(() => {
+    let docs = [...allDocuments];
+    if (searchTerm.trim()) {
+        const search = searchTerm.toLowerCase();
+        docs = docs.filter((doc: RFADocument) => 
+            doc.documentNumber.toLowerCase().includes(search) ||
+            doc.title.toLowerCase().includes(search)
+        );
+    }
+    setFilteredDocuments(docs);
+  }, [searchTerm, allDocuments]);
+
   const handleFilterChange = (key: keyof Filters, value: any) => {
     setFilters(prev => ({ ...prev, [key]: value }))
   }
-  
+
   const resetFilters = () => {
-    setFilters({ rfaType: 'ALL', status: 'ALL', siteId: 'ALL', latestOnly: true, categoryId: 'ALL' }) // <-- เพิ่ม categoryId
+    setFilters({ rfaType: 'ALL', status: 'ALL', siteId: 'ALL', latestOnly: true, categoryId: 'ALL' })
     setSearchTerm('')
   }
   
@@ -131,7 +133,9 @@ function RFAContent() {
     }
   };
 
-  const getStatusText = (status: string) => Object.entries(STATUSES).find(([_, value]) => value === status)?.[1] || status;
+  const handleChartFilter = (key: string, value: string) => {
+    setFilters(prev => ({ ...prev, [key]: value }));
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -182,7 +186,11 @@ function RFAContent() {
           </div>
 
           {/* --- Dashboard Charts --- */}
-          <DashboardStats />
+          <DashboardStats 
+            onChartFilter={handleChartFilter}
+            activeFilters={filters}
+            categories={categories}
+          />
 
           {/* --- Filters Section --- */}
           <div className="bg-white rounded-lg shadow mb-6 p-4">
@@ -257,17 +265,17 @@ function RFAContent() {
           {/* --- Document Table --- */}
           {loading ? (
              <div className="text-center p-8">กำลังโหลดเอกสาร...</div>
-          ) : documents.length === 0 ? (
+          ) : filteredDocuments.length === 0 ? (
             <div className="text-center bg-white rounded-lg shadow p-8">
               <p className="text-gray-500">ไม่พบเอกสารที่ตรงกับเงื่อนไข</p>
             </div>
           ) : (
             <RFAListTable
-              documents={documents}
+              documents={filteredDocuments} // <-- แสดงผลจาก State ที่กรองแล้ว
               onDocumentClick={setSelectedDocument}
               getStatusColor={getStatusColor}
               statusLabels={STATUS_LABELS}
-              getRFATypeColor={getRFATypeColor} //  <-- ✅ เพิ่ม prop ที่ขาดไปตรงนี้ครับ
+              getRFATypeColor={getRFATypeColor}
             />
           )}
 
@@ -277,9 +285,9 @@ function RFAContent() {
               document={selectedDocument}
               onClose={() => setSelectedDocument(null)}
               onUpdate={(updatedDoc) => {
-                setDocuments(prev => prev.map(doc => doc.id === updatedDoc.id ? updatedDoc : doc))
+                // When a document is updated in the modal, we need to update both lists.
+                setAllDocuments(prev => prev.map(doc => doc.id === updatedDoc.id ? updatedDoc : doc))
                 setSelectedDocument(updatedDoc)
-                // Optional: Reload stats after an action
               }}
             />
           )}
