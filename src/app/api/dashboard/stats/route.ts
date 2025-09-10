@@ -1,10 +1,10 @@
-// src/app/dashboard/stats/route.ts
-import { NextResponse } from 'next/server'
+// src/app/api/dashboard/stats/route.ts (New Version)
+import { NextRequest, NextResponse } from 'next/server'
 import { headers } from 'next/headers'
 import { adminAuth, adminDb } from '@/lib/firebase/admin'
 import { STATUSES } from '@/lib/config/workflow';
 
-export async function GET() {
+export async function GET(request: NextRequest) { // Changed to accept request object
   try {
     const headersList = headers()
     const authorization = headersList.get('authorization')
@@ -26,7 +26,6 @@ export async function GET() {
     const userSites = userData?.sites || []
 
     if (userSites.length === 0) {
-      // ถ้า user ไม่มี site, ส่งค่า default กลับไป
       return NextResponse.json({
         success: true,
         stats: {
@@ -36,25 +35,34 @@ export async function GET() {
       });
     }
 
-    // ดึงเอกสาร RFA ทั้งหมดที่ user มีสิทธิ์เห็นใน site
-    const rfaSnapshot = await adminDb.collection('rfaDocuments')
-      .where('siteId', 'in', userSites)
-      .get();
+    // ✅ [KEY CHANGE] Read filters from URL query parameters
+    const { searchParams } = new URL(request.url);
+    const status = searchParams.get('status');
+    const categoryId = searchParams.get('categoryId');
+
+    // ✅ [KEY CHANGE] Start building a dynamic query
+    let rfaQuery: FirebaseFirestore.Query = adminDb.collection('rfaDocuments')
+      .where('siteId', 'in', userSites);
+
+    // Apply filters to the query if they exist and are not 'ALL'
+    if (status && status !== 'ALL') {
+      rfaQuery = rfaQuery.where('status', '==', status);
+    }
+    if (categoryId && categoryId !== 'ALL') {
+      rfaQuery = rfaQuery.where('categoryId', '==', categoryId);
+    }
+    
+    const rfaSnapshot = await rfaQuery.get();
 
     const stats = {
-      responsibleParty: {
-        BIM: 0, // ใน workflow ใหม่คือสถานะ 'แก้ไข' ที่ส่งกลับไปหาผู้สร้าง
-        SITE: 0, // สถานะ 'รอตรวจสอบ'
-        CM: 0, // สถานะ 'ส่ง CM'
-        APPROVED: 0, // สถานะ 'อนุมัติ' ทั้งหมด
-      },
+      responsibleParty: { BIM: 0, SITE: 0, CM: 0, APPROVED: 0 },
       categories: {} as Record<string, number>,
     };
 
+    // The aggregation logic remains the same, but now operates on filtered data
     for (const doc of rfaSnapshot.docs) {
         const data = doc.data();
 
-        // 1. นับตามผู้รับผิดชอบ (Responsible Party)
         switch (data.status) {
             case STATUSES.PENDING_REVIEW:
                 stats.responsibleParty.SITE += 1;
@@ -72,7 +80,6 @@ export async function GET() {
                 break;
         }
 
-        // 2. นับตามหมวดหมู่ (Category)
         const categoryCode = data.taskData?.taskCategory || 'N/A';
         if (categoryCode) {
             stats.categories[categoryCode] = (stats.categories[categoryCode] || 0) + 1;

@@ -1,4 +1,4 @@
-// src/components/rfa/DashboardStats.tsx (แก้ไข Syntax Error แล้ว)
+// src/components/rfa/DashboardStats.tsx (New Version)
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -6,7 +6,7 @@ import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recha
 import { useAuth } from '@/lib/auth/useAuth';
 import { STATUSES, STATUS_LABELS } from '@/lib/config/workflow';
 
-// --- Interfaces ---
+// ... (Interfaces remain the same) ...
 interface StatsData {
   responsibleParty: { [key: string]: number };
   categories: { [key: string]: number };
@@ -53,12 +53,24 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ onChartFilter, activeFi
       setLoading(true);
       try {
         const token = await firebaseUser.getIdToken();
-        const response = await fetch('/api/dashboard/stats', {
+        
+        // ✅ [KEY CHANGE] Build query params from activeFilters
+        const queryParams = new URLSearchParams({
+            status: activeFilters.status,
+            categoryId: activeFilters.categoryId
+        }).toString();
+        
+        const response = await fetch(`/api/dashboard/stats?${queryParams}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
+
         const data = await response.json();
         if (data.success) {
           setStats(data.stats);
+        } else {
+          // Handle error from API
+          console.error("API Error fetching stats:", data.error);
+          setStats(null);
         }
       } catch (error) {
         console.error("Failed to fetch dashboard stats:", error);
@@ -66,9 +78,13 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ onChartFilter, activeFi
         setLoading(false);
       }
     };
-    fetchStats();
-  }, [firebaseUser]);
 
+    fetchStats();
+  }, [firebaseUser, activeFilters]); // ✅ [KEY CHANGE] Re-fetch when filters change
+
+  // ... (The rest of the component remains exactly the same as the last version) ...
+  // useMemo hooks for data, click handlers, and the return JSX are all correct.
+  
   const responsiblePartyData = useMemo(() => {
     if (!stats) return [];
     return [
@@ -135,7 +151,7 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ onChartFilter, activeFi
   const pieCx = isMobile ? '50%' : '40%';
   const textLeftPosition = isMobile ? '50%' : '30%';
   const textTopPosition = isMobile ? '45%' : '50%';
-
+  
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
       {/* Responsible Party Chart */}
@@ -165,7 +181,6 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ onChartFilter, activeFi
                 ))}
               </Pie>
               <Tooltip />
-              {/* ✅ [KEY CHANGE] แก้ไขโดยการกำหนด props แยกตามเงื่อนไข */}
               <Legend 
                 layout={isMobile ? 'horizontal' : 'vertical'}
                 verticalAlign={isMobile ? 'bottom' : 'middle'}
@@ -178,7 +193,7 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ onChartFilter, activeFi
           <div 
             className="absolute -translate-y-1/2 -translate-x-1/2 flex flex-col items-center justify-center pointer-events-none"
             style={{ 
-              top: textTopPosition, // ✅ ใช้ตัวแปรใหม่
+              top: textTopPosition,
               left: textLeftPosition 
             }}
           >
@@ -215,7 +230,6 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ onChartFilter, activeFi
                 ))}
               </Pie>
               <Tooltip />
-              {/* ✅ [KEY CHANGE] แก้ไขโดยการกำหนด props แยกตามเงื่อนไข */}
               <Legend 
                 layout={isMobile ? 'horizontal' : 'vertical'}
                 verticalAlign={isMobile ? 'bottom' : 'middle'}
@@ -228,12 +242,12 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ onChartFilter, activeFi
           <div 
             className="absolute -translate-y-1/2 -translate-x-1/2 flex flex-col items-center justify-center pointer-events-none"
             style={{ 
-              top: textTopPosition, // ✅ ใช้ตัวแปรใหม่
+              top: textTopPosition,
               left: textLeftPosition 
             }}
           >
             <span className="text-base text-gray-500">จำนวนเอกสาร</span>
-            <span className="text-4xl font-bold text-gray-800 mt-1">{displayTotalResponsible}</span>
+            <span className="text-4xl font-bold text-gray-800 mt-1">{displayTotalCategory}</span>
           </div>
         </div>
       </div>
