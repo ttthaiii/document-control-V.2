@@ -25,3 +25,12 @@ body {
     text-wrap: balance;
   }
 }
+
+.recharts-pie-sector:focus, .recharts-sector:focus {
+  outline: none !important;
+}
+
+.recharts-responsive-container .recharts-surface {
+  outline: none !important;
+  border: none !important;
+}
