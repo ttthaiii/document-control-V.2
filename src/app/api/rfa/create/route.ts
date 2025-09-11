@@ -7,18 +7,23 @@ import { REVIEWER_ROLES, STATUSES } from '@/lib/config/workflow';
 
 // (Helper functions toSlugId, ensureCategory, verifyIdTokenFromHeader, readRequest ไม่มีการเปลี่ยนแปลง)
 function toSlugId(input: string): string {
+  // ฟังก์ชันนี้ยังคงเดิม เพื่อสร้าง ID ที่เป็นมาตรฐาน
   return input.trim().replace(/[^\p{L}\p{N}]+/gu, "_").replace(/^_+|_+$/g, "").toUpperCase();
 }
 
 async function ensureCategory(siteId: string, categoryIdOrName: string, defaults?: Partial<{ name: string; description: string; createdBy: string; rfaType: string; }>): Promise<{ id: string; created: boolean }> {
-    const docId = toSlugId(categoryIdOrName);
+    const docId = toSlugId(categoryIdOrName); // ID ยังคงเป็นตัวใหญ่ทั้งหมด
     const ref = adminDb.doc(`sites/${siteId}/categories/${docId}`);
     const snap = await ref.get();
     if (snap.exists) {
         return { id: docId, created: false };
     }
+    
+    // ✅ [KEY CHANGE] บันทึก categoryCode และ name ตามค่าที่เข้ามา ไม่แปลงเป็นตัวใหญ่
     await ref.set({
         name: defaults?.name ?? categoryIdOrName,
+        categoryCode: categoryIdOrName, // <-- ใช้ค่าดั้งเดิม
+        categoryName: defaults?.name ?? categoryIdOrName, // <-- ใช้ค่าดั้งเดิม
         description: defaults?.description ?? "",
         rfaTypes: defaults?.rfaType ? [defaults.rfaType] : [],
         active: true,
@@ -96,8 +101,8 @@ export async function POST(req: Request) {
     });
 
     const rawCategoryKey = categoryId || taskData?.taskCategory || rfaType;
-    const { id: finalCategoryId } = await ensureCategory(siteId, rawCategoryKey, {
-      name: taskData?.taskCategory || rfaType,
+    const { id: finalCategoryId } = await ensureCategory(siteId, categoryId, {
+      name: categoryId, // ใช้ categoryId เป็น name ไปเลย
       createdBy: uid,
       rfaType,
     });
@@ -133,6 +138,13 @@ export async function POST(req: Request) {
     // --- ✅ 2. ปรับปรุง Logic การกำหนดสถานะเริ่มต้นโดยใช้ค่าคงที่ ---
     let initialStatus = STATUSES.PENDING_REVIEW;
     let initialAction = "CREATE";
+
+    // ถ้าเป็น RFA-SHOP และคนสร้างคือ ME หรือ SN ให้ข้ามไปที่ CM เลย
+    if (rfaType === 'RFA-SHOP' && (userRole === 'ME' || userRole === 'SN')) {
+      initialStatus = STATUSES.PENDING_CM_APPROVAL;
+      initialAction = "CREATE_AND_SUBMIT_TO_CM";
+    }
+
     const isReviewer = REVIEWER_ROLES.includes(userRole);
     const isMatOrGen = ['RFA-MAT', 'RFA-GEN'].includes(rfaType);
     if (isReviewer && isMatOrGen) {

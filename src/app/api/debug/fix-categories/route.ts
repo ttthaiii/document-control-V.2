@@ -1,13 +1,33 @@
+// src/app/api/debug/fix-categories/route.ts (Final Version)
 import { NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase/admin";
 import { FieldValue } from 'firebase-admin/firestore';
+
+function toSlugId(input: string): string {
+  if (!input) return '';
+  return input.trim().replace(/[^\p{L}\p{N}]+/gu, "_").replace(/^_+|_+$/g, "").toUpperCase();
+}
 
 export async function GET()  {
   try {
     const siteId = "O4GN2NuHj72uq2Z8WKp4";
     const fixes = [];
-    
-    // ดึง categories ทั้งหมด
+
+    // 1. เรียนรู้รูปแบบที่ถูกต้องจากเอกสาร RFA ทั้งหมด
+    const correctNames = new Map<string, string>();
+    const rfaSnapshot = await adminDb.collection('rfaDocuments').where('siteId', '==', siteId).get();
+    rfaSnapshot.forEach(doc => {
+        const data = doc.data();
+        if (data.taskData && data.taskData.taskCategory) {
+            const categoryCode = data.taskData.taskCategory;
+            const categoryId = toSlugId(categoryCode);
+            if (!correctNames.has(categoryId)) {
+                correctNames.set(categoryId, categoryCode);
+            }
+        }
+    });
+
+    // 2. อัปเดต "สารบัญหมวดงาน" ตามรูปแบบที่เรียนรู้มา
     const categoriesSnapshot = await adminDb
       .collection('sites')
       .doc(siteId)
@@ -19,28 +39,17 @@ export async function GET()  {
       const updates: any = {};
       let needsUpdate = false;
 
-      // แก้ไข rfaTypes เป็น array
-      if (typeof data.rfaTypes === 'string') {
-        updates.rfaTypes = [data.rfaTypes];
-        needsUpdate = true;
-      }
+      const correctName = correctNames.get(catDoc.id);
 
-      // เพิ่ม categoryCode ถ้าไม่มี (ใช้ name หรือ id)
-      if (!data.categoryCode && data.name) {
-        updates.categoryCode = data.name;
-        needsUpdate = true;
-      }
-
-      // เพิ่ม categoryName ถ้าไม่มี (ใช้ name หรือ categoryCode)
-      if (!data.categoryName) {
-        updates.categoryName = data.name || data.categoryCode || catDoc.id;
-        needsUpdate = true;
-      }
-
-      // เพิ่ม sequence ถ้าไม่มี
-      if (data.sequence === undefined) {
-        updates.sequence = 0;
-        needsUpdate = true;
+      if (correctName) {
+          if (data.categoryCode !== correctName) {
+              updates.categoryCode = correctName;
+              needsUpdate = true;
+          }
+          if (data.categoryName !== correctName) {
+              updates.categoryName = correctName;
+              needsUpdate = true;
+          }
       }
 
       if (needsUpdate) {
@@ -48,7 +57,7 @@ export async function GET()  {
         await catDoc.ref.update(updates);
         fixes.push({
           id: catDoc.id,
-          original: data,
+          foundCorrectName: correctName,
           updates
         });
       }
@@ -56,7 +65,7 @@ export async function GET()  {
 
     return NextResponse.json({
       success: true,
-      message: `Fixed ${fixes.length} categories`,
+      message: `Corrected ${fixes.length} categories based on RFA documents.`,
       fixes
     });
 

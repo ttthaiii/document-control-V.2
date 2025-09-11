@@ -1,4 +1,4 @@
-// app/api/sites/route.ts (ไฟล์ใหม่)
+// src/app/api/sites/route.ts (Fixed Version)
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth, adminDb } from '@/lib/firebase/admin';
 
@@ -11,8 +11,6 @@ export async function GET(request: NextRequest) {
 
     const token = authHeader.split('Bearer ')[1];
     const decodedToken = await adminAuth.verifyIdToken(token);
-
-    // ดึง user profile
     const userDoc = await adminDb.collection('users').doc(decodedToken.uid).get();
     const userProfile = userDoc.data();
 
@@ -20,11 +18,25 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'User profile not found' }, { status: 404 });
     }
 
-    // ดึง sites ที่ user มีสิทธิ์เข้าถึง
     const sitesSnapshot = await adminDb.collection('sites').get();
+    
     const sites = sitesSnapshot.docs
-      .map((doc: any) => ({ id: doc.id, ...doc.data() }))
-      .filter((site: any) => site.members?.includes(decodedToken.uid));
+      // ✅ 1. แก้ไข Logic การ Filter ให้ถูกต้อง (members เป็น array of objects)
+      .filter((doc: any) => {
+        const members = doc.data().members || [];
+        return members.some((member: any) => member.userId === decodedToken.uid);
+      })
+      // ✅ 2. แก้ไขการ map ข้อมูล ส่ง sheetId ไปให้ Frontend
+      .map((doc: any) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          name: data.name,
+          // ดึงค่า sheetId จาก object ที่ซ้อนกันอยู่
+          sheetId: data.settings?.googleSheetsConfig?.spreadsheetId || null,
+          sheetName: data.settings?.googleSheetsConfig?.sheetName || null,
+        };
+      });
 
     return NextResponse.json({
       success: true,

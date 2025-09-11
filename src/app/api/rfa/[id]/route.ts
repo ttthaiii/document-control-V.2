@@ -109,66 +109,36 @@ export async function PUT(
         
         const docData = rfaDoc.data()!;
         let newStatus = docData.status;
-        let newAssignedTo = docData.assignedTo;
         let canPerformAction = false;
     
         // Workflow Logic
         switch (action) {
           case 'SEND_TO_CM':
             canPerformAction = REVIEWER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_REVIEW;
-            if (canPerformAction) {
-              newStatus = STATUSES.PENDING_CM_APPROVAL;
-              newAssignedTo = null; 
-            }
+            if (canPerformAction) newStatus = STATUSES.PENDING_CM_APPROVAL;
             break;
     
           case 'REQUEST_REVISION':
-            canPerformAction = (REVIEWER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_REVIEW) || 
-                               (APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL);
-            if (canPerformAction) {
-              newStatus = STATUSES.REVISION_REQUIRED;
-              newAssignedTo = null; 
-            }
-            break;
-    
-          case 'SUBMIT_REVISION':
-            canPerformAction = CREATOR_ROLES.includes(userRole) && docData.status === STATUSES.REVISION_REQUIRED;
-            if (canPerformAction) {
-                newStatus = STATUSES.PENDING_REVIEW;
-                newAssignedTo = null;
-            }
+          case 'APPROVE_REVISION_REQUIRED':
+            canPerformAction = 
+                (REVIEWER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_REVIEW) || 
+                (APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL);
+            if (canPerformAction) newStatus = STATUSES.REVISION_REQUIRED;
             break;
             
           case 'APPROVE':
             canPerformAction = APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL;
-            if (canPerformAction) {
-                newStatus = STATUSES.APPROVED;
-                newAssignedTo = null;
-            }
+            if (canPerformAction) newStatus = STATUSES.APPROVED;
             break;
     
           case 'REJECT':
             canPerformAction = APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL;
-            if (canPerformAction) {
-                newStatus = STATUSES.REJECTED;
-                newAssignedTo = null;
-            }
+            if (canPerformAction) newStatus = STATUSES.REJECTED;
             break;
           
           case 'APPROVE_WITH_COMMENTS':
             canPerformAction = APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL;
-            if (canPerformAction) {
-                newStatus = STATUSES.APPROVED_WITH_COMMENTS;
-                newAssignedTo = null;
-            }
-            break;
-            
-          case 'APPROVE_REVISION_REQUIRED':
-            canPerformAction = APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL;
-            if (canPerformAction) {
-                newStatus = STATUSES.APPROVED_REVISION_REQUIRED;
-                newAssignedTo = null;
-            }
+            if (canPerformAction) newStatus = STATUSES.APPROVED_WITH_COMMENTS;
             break;
     
           default:
@@ -215,7 +185,6 @@ export async function PUT(
         await rfaDocRef.update({
           status: newStatus,
           currentStep: newStatus,
-          assignedTo: newAssignedTo,
           files: finalFilesData,
           workflow: FieldValue.arrayUnion(workflowEntry),
           updatedAt: FieldValue.serverTimestamp(),

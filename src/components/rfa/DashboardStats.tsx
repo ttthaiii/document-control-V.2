@@ -19,7 +19,7 @@ interface Category {
 }
 interface DashboardStatsProps {
   onChartFilter: (filterKey: string, value: string) => void;
-  activeFilters: { status: string; categoryId: string };
+  activeFilters: { rfaType: string; status: string; categoryId: string }; 
   categories: Category[];
 }
 
@@ -50,6 +50,15 @@ const STATUS_COLORS: { [key: string]: string } = {
 };
 const CATEGORY_COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF', '#FF6363', '#BC5090'];
 
+const getColorForString = (str: string): string => {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const index = Math.abs(hash % CATEGORY_COLORS.length);
+  return CATEGORY_COLORS[index];
+};
+
 const DashboardStats: React.FC<DashboardStatsProps> = ({ onChartFilter, activeFilters, categories }) => {
   const [stats, setStats] = useState<StatsData | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -76,10 +85,7 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ onChartFilter, activeFi
       
       try {
         const token = await firebaseUser.getIdToken();
-        const queryParams = new URLSearchParams({
-            status: activeFilters.status,
-            categoryId: activeFilters.categoryId
-        }).toString();
+        const queryParams = new URLSearchParams(activeFilters).toString();
         
         const response = await fetch(`/api/dashboard/stats?${queryParams}`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -118,12 +124,17 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ onChartFilter, activeFi
     if (!stats) return [];
     return Object.entries(stats.categories)
       .map(([categoryCode, value], index) => {
-        const categoryDetails = categories.find(c => c.categoryCode === categoryCode);
+        
+        // ✅ [KEY CHANGE] เพิ่ม .toUpperCase() เพื่อให้การเปรียบเทียบไม่สนตัวพิมพ์เล็ก-ใหญ่
+        const categoryDetails = categories.find(c => 
+            c.categoryCode.replace(/-/g, '_').toUpperCase() === categoryCode.replace(/-/g, '_').toUpperCase()
+        );
+
         return {
           id: categoryDetails?.id || categoryCode,
           name: categoryCode,
           value: value as number,
-          color: CATEGORY_COLORS[index % CATEGORY_COLORS.length]
+          color: getColorForString(categoryCode)
         };
       })
       .filter(item => item.value > 0);

@@ -39,11 +39,15 @@ export async function GET(request: NextRequest) { // Changed to accept request o
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
     const categoryId = searchParams.get('categoryId');
+    const rfaType = searchParams.get('rfaType');
 
     // ✅ [KEY CHANGE] Start building a dynamic query
     let rfaQuery: FirebaseFirestore.Query = adminDb.collection('rfaDocuments')
       .where('siteId', 'in', userSites);
 
+    if (rfaType && rfaType !== 'ALL') {
+      rfaQuery = rfaQuery.where('rfaType', '==', rfaType);
+    }      
     // Apply filters to the query if they exist and are not 'ALL'
     if (status && status !== 'ALL') {
       rfaQuery = rfaQuery.where('status', '==', status);

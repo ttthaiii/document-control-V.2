@@ -62,7 +62,8 @@ function RFAShopCreateContent() {
 
 export default function RFAShopCreatePage() {
   return (
-    <AuthGuard requiredRoles={['BIM', 'Admin']}>
+    // ✅ อัปเดตจาก ['BIM', 'Admin'] เป็น ['BIM', 'ME', 'SN', 'Admin']
+    <AuthGuard requiredRoles={['BIM', 'ME', 'SN', 'Admin']}>
       <RFAShopCreateContent />
     </AuthGuard>
   );

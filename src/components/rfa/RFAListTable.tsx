@@ -13,6 +13,13 @@ interface RFAListTableProps {
   getRFATypeColor: (type: string) => string
 }
 
+const PENDING_STATUSES = [
+  STATUSES.PENDING_REVIEW,
+  STATUSES.PENDING_CM_APPROVAL,
+  STATUSES.REVISION_REQUIRED,
+  STATUSES.APPROVED_REVISION_REQUIRED, // เพิ่มสถานะนี้เข้าไปด้วยเผื่ออนาคต
+];
+
 const convertToDate = (date: any): Date | null => {
   if (!date) return null;
   if (typeof date.toDate === 'function') {
@@ -149,7 +156,7 @@ export default function RFAListTable({
                   <Calendar className="w-3 h-3 mr-2" />
                   <span>อัปเดต: {formatDate(doc.updatedAt)}</span>
                 </div>
-                {[STATUSES.PENDING_REVIEW, STATUSES.PENDING_CM_APPROVAL].includes(doc.status) && pendingDays > 0 && (
+                {PENDING_STATUSES.includes(doc.status) && pendingDays > 0 && (
                   <div className="flex items-center text-orange-600">
                     <Clock className="w-3 h-3 mr-2" />
                     <span>ค้างดำเนินการ: {pendingDays} วัน</span>
@@ -207,7 +214,7 @@ export default function RFAListTable({
                       <span className={`inline-flex items-center justify-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(doc.status)}`}>
                         {statusLabels[doc.status] || doc.status}
                       </span>
-                      {[STATUSES.PENDING_REVIEW, STATUSES.PENDING_CM_APPROVAL].includes(doc.status) && pendingDays > 0 && (
+                      {PENDING_STATUSES.includes(doc.status) && pendingDays > 0 && (
                         <span className="text-xs text-orange-600 text-center">ค้าง {pendingDays} วัน</span>
                       )}
                     </div>
