@@ -5,7 +5,7 @@ import { useAuth } from '@/lib/auth/useAuth'; // <-- 1. เพิ่ม import u
 
 interface InviteUserFormData {
   email: string;
-  role: 'BIM' | 'Site Admin' | 'CM';
+  role: 'BIM' | 'Site Admin' | 'CM' | 'ME' | 'SN'; 
   sites: string[];
 }
 
@@ -128,6 +128,8 @@ export function InviteUserForm() {
             <option value="BIM">BIM</option>
             <option value="Site Admin">Site Admin</option>
             <option value="CM">CM</option>
+            <option value="ME">ME (Mechanical/Electrical Engineer)</option>
+            <option value="SN">SN (Sanitary Engineer)</option>            
           </select>
           {errors.role && (
             <p className="text-red-500 text-sm mt-1">{errors.role.message}</p>

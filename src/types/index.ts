@@ -4,7 +4,7 @@ export interface User {
   id: string;
   email: string;
   name?: string;
-  role: 'BIM' | 'Site Admin' | 'CM' | 'Admin';
+  role: 'BIM' | 'Site Admin' | 'CM' | 'Admin' | 'ME' | 'SN';
   sites: string[];
   status: 'ACTIVE' | 'PENDING_FIRST_LOGIN' | 'DISABLED';
   mustChangePassword?: boolean;

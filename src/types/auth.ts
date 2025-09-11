@@ -1,7 +1,7 @@
 export interface User {
   id: string;
   email: string;
-  role: 'BIM' | 'Site Admin' | 'CM' | 'Admin';
+  role: 'BIM' | 'Site Admin' | 'CM' | 'Admin' | 'ME' | 'SN';
   sites: string[];
   status: 'ACTIVE' | 'DISABLED';
   createdFromInvitation?: boolean;

@@ -3,7 +3,7 @@ import { randomBytes } from 'crypto';
 
 export interface CreateInvitationData {
   email: string;
-  role: 'BIM' | 'Site Admin' | 'CM';
+  role: 'BIM' | 'Site Admin' | 'CM' | 'ME' | 'SN'; 
   sites: string[];
 }
 
