@@ -110,8 +110,12 @@ export default function CreateRFAForm({
   userProp?: User 
   presetRfaType?: 'RFA-SHOP' | 'RFA-GEN' | 'RFA-MAT'
 }) {
-  const [currentStep, setCurrentStep] = useState(1);
-  const [formData, setFormData] = useState<RFAFormData>(INITIAL_FORM_DATA);
+  const initialStep = presetRfaType ? 2 : 1;
+  const [currentStep, setCurrentStep] = useState(initialStep);
+  const [formData, setFormData] = useState<RFAFormData>({
+    ...INITIAL_FORM_DATA,
+    rfaType: presetRfaType || '',
+  });
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isUploading, setIsUploading] = useState(false);
@@ -354,7 +358,12 @@ export default function CreateRFAForm({
     <div className={`${isModal ? 'max-w-4xl w-full mx-auto' : ''} bg-white rounded-lg shadow-xl flex flex-col h-full max-h-[95vh]`}>
       <div className="flex items-center justify-between p-6 border-b bg-gray-50">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">สร้าง RFA Document</h2>
+          <h2 className="text-2xl font-bold text-gray-900">
+            สร้าง RFA Document
+            {presetRfaType && RFA_TYPE_CONFIG[presetRfaType] && (
+              <span className="font-medium text-gray-600"> - {RFA_TYPE_CONFIG[presetRfaType].subtitle}</span>
+            )}
+          </h2>
           <p className="text-sm text-gray-600 mt-1">{userProp && `โดย ${userProp.email} (${userProp.role})`}</p>
         </div>
         {onClose && <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X /></button>}
@@ -470,7 +479,15 @@ export default function CreateRFAForm({
       </div>
 
       <div className="flex justify-between items-center p-6 border-t bg-gray-50">
-        <button onClick={prevStep} disabled={currentStep === 1 || isUploading} className="px-4 py-2 rounded-lg bg-gray-200 disabled:opacity-50">ย้อนกลับ</button>
+        {/* ✅ 4. ซ่อนปุ่ม "ย้อนกลับ" ใน Flow ที่ถูก Preset มา */}
+        <button 
+            onClick={prevStep} 
+            disabled={currentStep === initialStep || isUploading}
+            className={`px-4 py-2 rounded-lg bg-gray-200 disabled:opacity-50 ${currentStep === initialStep ? 'invisible' : 'visible'}`}
+        >
+          ย้อนกลับ
+        </button>
+
         {currentStep < 4 ? (
           <button onClick={nextStep} disabled={isUploading} className="px-4 py-2 rounded-lg bg-blue-600 text-white disabled:opacity-50">ถัดไป</button>
         ) : (

@@ -1,7 +1,6 @@
-// src/app/dashboard/rfa/page.tsx (Updated to use Modal)
 'use client'
 
-import { useState, useEffect, Suspense, useMemo } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth/useAuth'
 import { AuthGuard } from '@/lib/components/shared/AuthGuard'
@@ -9,7 +8,7 @@ import Layout from '@/components/layout/Layout'
 import RFAListTable from '@/components/rfa/RFAListTable'
 import RFADetailModal from '@/components/rfa/RFADetailModal'
 import DashboardStats from '@/components/rfa/DashboardStats'
-import CreateRFAForm from '@/components/rfa/CreateRFAForm' // <-- เพิ่ม Import นี้
+import CreateRFAForm from '@/components/rfa/CreateRFAForm'
 import { RFADocument } from '@/types/rfa'
 import { STATUSES, STATUS_LABELS } from '@/lib/config/workflow' 
 import { Plus, Search, RefreshCw } from 'lucide-react'
@@ -45,8 +44,6 @@ function RFAContent() {
   const [selectedDocument, setSelectedDocument] = useState<RFADocument | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [categories, setCategories] = useState<Category[]>([]);
-  
-  // ✅ 1. เพิ่ม State สำหรับควบคุม Modal
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
   const [filters, setFilters] = useState<Filters>({
@@ -94,7 +91,6 @@ function RFAContent() {
     try {
       const token = await firebaseUser.getIdToken()
       const queryParams = new URLSearchParams()
-      // ส่ง filter ทั้งหมดไปให้ API
       Object.entries(filters).forEach(([key, value]) => {
         queryParams.append(key, String(value))
       })
@@ -134,16 +130,15 @@ function RFAContent() {
   }
 
   const resetFilters = () => {
-    setFilters({ rfaType: 'ALL', status: 'ALL', siteId: 'ALL', latestOnly: true, categoryId: 'ALL' })
+    const currentRfaType = filters.rfaType;
+    setFilters({ rfaType: currentRfaType, status: 'ALL', siteId: 'ALL', latestOnly: true, categoryId: 'ALL' })
     setSearchTerm('')
   }
   
-  // ✅ 2. เปลี่ยน handleCreateClick ให้เป็นการเปิด Modal
   const handleCreateClick = () => {
     setIsCreateModalOpen(true);
   };
 
-  // ✅ 3. สร้างฟังก์ชันสำหรับปิด Modal และโหลดข้อมูลใหม่
   const handleModalClose = () => {
     setIsCreateModalOpen(false);
     loadDocuments(); 
@@ -211,9 +206,74 @@ function RFAContent() {
             categories={categories}
           />
 
-          {/* Filters Section */}
+          {/* ✅ [KEY CHANGE] นำโค้ด Filter Bar ที่หายไปกลับมาใส่ที่นี่ */}
           <div className="bg-white rounded-lg shadow mb-6 p-4">
-             {/* ... (Filter JSX remains the same) ... */}
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+              <div className="md:col-span-4">
+                <label htmlFor="search-filter" className="text-sm font-medium text-gray-700">ค้นหา</label>
+                <div className="relative mt-1">
+                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                   <input
+                      id="search-filter"
+                      type="text"
+                      placeholder="เลขที่เอกสาร, ชื่อเอกสาร..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg"
+                    />
+                </div>
+              </div>
+
+              <div className="md:col-span-2">
+                <label htmlFor="status-filter" className="text-sm font-medium text-gray-700">สถานะ</label>
+                 <select
+                    id="status-filter"
+                    value={filters.status}
+                    onChange={(e) => handleFilterChange('status', e.target.value)}
+                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg"
+                  >
+                    <option value="ALL">ทุกสถานะ</option>
+                    {Object.values(STATUSES).map(statusKey => (
+                      <option key={statusKey} value={statusKey}>
+                        {STATUS_LABELS[statusKey] || statusKey}
+                      </option>
+                    ))}
+                  </select>
+              </div>
+
+              <div className="md:col-span-2">
+                <label htmlFor="category-filter" className="text-sm font-medium text-gray-700">หมวดงาน</label>
+                <select 
+                  id="category-filter" 
+                  className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg"
+                  value={filters.categoryId}
+                  onChange={(e) => handleFilterChange('categoryId', e.target.value)}
+                >
+                    <option value="ALL">ทุกหมวดงาน</option>
+                    {categories.map(cat => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.categoryCode}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+               <div className="md:col-span-2 flex items-center h-10">
+                 <input
+                    id="latest-only"
+                    type="checkbox"
+                    checked={filters.latestOnly}
+                    onChange={(e) => handleFilterChange('latestOnly', e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                  />
+                  <label htmlFor="latest-only" className="ml-2 text-sm text-gray-700">แสดงเฉพาะฉบับล่าสุด</label>
+              </div>
+              <div className="md:col-span-2">
+                 <button onClick={resetFilters} className="w-full px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300">
+                    รีเซ็ต
+                  </button>
+              </div>
+            </div>
           </div>
           
           {/* Document Table */}
@@ -233,7 +293,7 @@ function RFAContent() {
             />
           )}
 
-          {/* ✅ 4. เพิ่ม Modal สำหรับสร้างเอกสาร */}
+          {/* Create Modal */}
           {isCreateModalOpen && (
             <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
                 <CreateRFAForm
