@@ -74,7 +74,6 @@ export interface RFADocument {
   description: string
   status: string
   currentStep: string
-  revisionNumber?: string
   createdAt: any // ใช้ any เพื่อความยืดหยุ่นกับ Timestamp ของ Firebase
   updatedAt: any // ใช้ any เพื่อความยืดหยุ่นกับ Timestamp ของ Firebase
   createdBy: string
@@ -88,6 +87,10 @@ export interface RFADocument {
   assignedUserInfo?: RFAUserInfo
   workflow: RFAWorkflowStep[]
   permissions: RFAPermissions
+  revisionNumber: number;       // เช่น 0, 1, 2
+  isLatest: boolean;            // true ถ้าเป็นฉบับล่าสุด
+  parentRfaId?: string;         // ID ของเอกสารตั้งต้น (ถ้ามี)
+  revisionHistory?: string[];  
   currentUser: RFACurrentUser
   metadata?: {
     [key: string]: any

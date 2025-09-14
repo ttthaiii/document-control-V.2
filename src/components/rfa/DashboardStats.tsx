@@ -1,4 +1,4 @@
-// src/components/rfa/DashboardStats.tsx (Final Version with Single Spinner)
+// src/components/rfa/DashboardStats.tsx (แก้ไขแล้ว)
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -6,8 +6,9 @@ import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recha
 import { useAuth } from '@/lib/auth/useAuth';
 import { STATUSES, STATUS_LABELS } from '@/lib/config/workflow';
 import { Loader2 } from 'lucide-react';
+import { RFADocument } from '@/types/rfa';
 
-// ... (Interfaces remain the same) ...
+// ... (Interfaces and constants remain the same) ...
 interface StatsData {
   responsibleParty: { [key: string]: number };
   categories: { [key: string]: number };
@@ -18,6 +19,7 @@ interface Category {
   categoryName: string;
 }
 interface DashboardStatsProps {
+  allDocuments: RFADocument[]; 
   onChartFilter: (filterKey: string, value: string) => void;
   activeFilters: { rfaType: string; status: string; categoryId: string }; 
   categories: Category[];
@@ -59,11 +61,7 @@ const getColorForString = (str: string): string => {
   return CATEGORY_COLORS[index];
 };
 
-const DashboardStats: React.FC<DashboardStatsProps> = ({ onChartFilter, activeFilters, categories }) => {
-  const [stats, setStats] = useState<StatsData | null>(null);
-  const [initialLoading, setInitialLoading] = useState(true);
-  const [isFiltering, setIsFiltering] = useState(false);
-  const { firebaseUser } = useAuth();
+const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFilter, activeFilters, categories }) => {
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -72,45 +70,43 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ onChartFilter, activeFi
     window.addEventListener('resize', checkIsMobile);
     return () => window.removeEventListener('resize', checkIsMobile);
   }, []);
-
-  useEffect(() => {
-    const fetchStats = async () => {
-      if (!firebaseUser) return;
+  
+  const stats = useMemo<StatsData | null>(() => {
+    const docsForStats = allDocuments; 
       
-      if (!stats) {
-        setInitialLoading(true);
-      } else {
-        setIsFiltering(true);
-      }
-      
-      try {
-        const token = await firebaseUser.getIdToken();
-        const queryParams = new URLSearchParams(activeFilters).toString();
-        
-        const response = await fetch(`/api/dashboard/stats?${queryParams}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        const data = await response.json();
-        if (data.success) {
-          setStats(data.stats);
-        } else {
-          console.error("API Error fetching stats:", data.error);
-          setStats(null);
-        }
-      } catch (error) {
-        console.error("Failed to fetch dashboard stats:", error);
-      } finally {
-        setInitialLoading(false);
-        setIsFiltering(false);
-      }
+    const newStats: StatsData = {
+      responsibleParty: { BIM: 0, SITE: 0, CM: 0, APPROVED: 0 },
+      categories: {},
     };
 
-    fetchStats();
-  }, [firebaseUser, activeFilters]);
+    for (const doc of docsForStats) {
+      switch (doc.status) {
+        case STATUSES.PENDING_REVIEW:
+            newStats.responsibleParty.SITE += 1;
+            break;
+        case STATUSES.PENDING_CM_APPROVAL:
+            newStats.responsibleParty.CM += 1;
+            break;
+        case STATUSES.REVISION_REQUIRED:
+        case STATUSES.APPROVED_REVISION_REQUIRED:
+            newStats.responsibleParty.BIM += 1;
+            break;
+        case STATUSES.APPROVED:
+        case STATUSES.APPROVED_WITH_COMMENTS:
+            newStats.responsibleParty.APPROVED += 1;
+            break;
+      }
 
-  // ... (useMemo hooks and click handlers remain the same) ...
-    const responsiblePartyData = useMemo(() => {
+      // ✅ KEY CHANGE: Consistently use doc.category.id for aggregation key
+      const categoryId = doc.category?.id || 'N/A';
+      if (categoryId !== 'N/A') {
+          newStats.categories[categoryId] = (newStats.categories[categoryId] || 0) + 1;
+      }
+    }
+    return newStats;
+  }, [allDocuments]);
+
+  const responsiblePartyData = useMemo(() => {
     if (!stats) return [];
     return [
       { name: STATUS_LABELS[STATUSES.PENDING_REVIEW], value: stats.responsibleParty.SITE, statusKey: STATUSES.PENDING_REVIEW, color: STATUS_COLORS[STATUSES.PENDING_REVIEW] },
@@ -120,53 +116,35 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ onChartFilter, activeFi
     ].filter(item => item.value > 0);
   }, [stats]);
 
+  // ✅ KEY CHANGE: Logic updated to map from categoryId (the key) to its details
   const categoryData = useMemo(() => {
     if (!stats) return [];
     return Object.entries(stats.categories)
-      .map(([categoryCode, value], index) => {
-        
-        // ✅ [KEY CHANGE] เพิ่ม .toUpperCase() เพื่อให้การเปรียบเทียบไม่สนตัวพิมพ์เล็ก-ใหญ่
-        const categoryDetails = categories.find(c => 
-            c.categoryCode.replace(/-/g, '_').toUpperCase() === categoryCode.replace(/-/g, '_').toUpperCase()
-        );
-
+      .map(([categoryId, value]) => {
+        const categoryDetails = categories.find(c => c.id === categoryId);
         return {
-          id: categoryDetails?.id || categoryCode,
-          name: categoryCode,
+          id: categoryId,
+          name: categoryDetails?.categoryCode || categoryId, // Display code, fallback to ID
           value: value as number,
-          color: getColorForString(categoryCode)
+          color: getColorForString(categoryDetails?.categoryCode || categoryId)
         };
       })
       .filter(item => item.value > 0);
   }, [stats, categories]);
 
+  // ... (The rest of the file remains the same) ...
   const { displayData: displayResponsibleData, total: displayTotalResponsible } = useMemo(() => {
     const total = responsiblePartyData.reduce((sum, item) => sum + item.value, 0);
-    const { status } = activeFilters;
-    if (status === 'ALL' || !status) {
-        return { displayData: responsiblePartyData, total };
-    }
-    const selectedItem = responsiblePartyData.find(item => item.statusKey === status);
-    return selectedItem 
-      ? { displayData: [selectedItem], total: selectedItem.value }
-      : { displayData: responsiblePartyData, total };
-  }, [activeFilters.status, responsiblePartyData]);
+    return { displayData: responsiblePartyData, total };
+  }, [responsiblePartyData]);
 
   const { displayData: displayCategoryData, total: displayTotalCategory } = useMemo(() => {
     const total = categoryData.reduce((sum, item) => sum + item.value, 0);
-    const { categoryId } = activeFilters;
-    if (categoryId === 'ALL' || !categoryId) {
-        return { displayData: categoryData, total };
-    }
-    const selectedItem = categoryData.find(item => item.id === categoryId);
-    return selectedItem
-      ? { displayData: [selectedItem], total: selectedItem.value }
-      : { displayData: categoryData, total };
-  }, [activeFilters.categoryId, categoryData]);
+    return { displayData: categoryData, total };
+  }, [categoryData]);
 
 
-  if (initialLoading) { return <div className="text-center p-8">กำลังโหลดข้อมูลสรุป...</div>; }
-  if (!stats) { return <div className="text-center p-8 text-red-500">ไม่สามารถโหลดข้อมูลสรุปได้</div>; }
+  if (!stats) { return <div className="text-center p-8 text-gray-500">ไม่มีข้อมูลสำหรับแสดงผล</div>; }
 
   const handleResponsibleClick = (data: any) => {
     const statusKey = data.payload.statusKey;
@@ -184,7 +162,7 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ onChartFilter, activeFi
   
   return (
     <div className="relative grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-      <div className={`transition-opacity duration-300 ${isFiltering ? 'opacity-40' : 'opacity-100'}`}>
+      <div>
           {/* Responsible Party Chart */}
           <div className="bg-white p-6 rounded-lg shadow">
             <h3 className="text-lg font-semibold text-gray-800 mb-4 text-center">สถานะตามผู้รับผิดชอบ</h3>
@@ -235,7 +213,7 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ onChartFilter, activeFi
           </div>
       </div>
       
-      <div className={`transition-opacity duration-300 ${isFiltering ? 'opacity-40' : 'opacity-100'}`}>
+      <div>
           {/* Category Chart */}
           <div className="bg-white p-6 rounded-lg shadow">
             <h3 className="text-lg font-semibold text-gray-800 mb-4 text-center">สถานะตามหมวดหมู่</h3>
@@ -285,12 +263,6 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ onChartFilter, activeFi
             </div>
           </div>
         </div>
-
-      {isFiltering && (
-        <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-50 rounded-lg z-10">
-            <Loader2 className="w-10 h-10 animate-spin text-blue-600"/>
-        </div>
-      )}
     </div>
   );
 };

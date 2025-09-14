@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, Suspense, useMemo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth/useAuth'
 import { AuthGuard } from '@/lib/components/shared/AuthGuard'
@@ -12,12 +12,14 @@ import CreateRFAForm from '@/components/rfa/CreateRFAForm'
 import { RFADocument } from '@/types/rfa'
 import { STATUSES, STATUS_LABELS } from '@/lib/config/workflow' 
 import { Plus, Search, RefreshCw } from 'lucide-react'
+import { db } from '@/lib/firebase/client'
+import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore'
 
 interface Filters {
   rfaType: 'ALL' | 'RFA-SHOP' | 'RFA-GEN' | 'RFA-MAT'
   status: string
   siteId: string | 'ALL'
-  latestOnly: boolean
+  showAllRevisions: boolean;
   categoryId: string | 'ALL';
 }
 
@@ -50,7 +52,7 @@ function RFAContent() {
     rfaType: (searchParams.get('type') as Filters['rfaType']) || 'ALL',
     status: 'ALL',
     siteId: 'ALL',
-    latestOnly: true,
+    showAllRevisions: false,
     categoryId: 'ALL',
   })
 
@@ -60,6 +62,85 @@ function RFAContent() {
       handleFilterChange('rfaType', typeFromUrl);
     }
   }, [searchParams]);
+  
+  useEffect(() => {
+    if (!firebaseUser || !user?.sites || user.sites.length === 0) {
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+
+    const q = query(
+      collection(db, 'rfaDocuments'),
+      where('siteId', 'in', user.sites),
+      orderBy('updatedAt', 'desc')
+    );
+    
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      const documentsFromDb: RFADocument[] = [];
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        documentsFromDb.push({
+            id: doc.id,
+            ...data,
+            site: { id: data.siteId, name: data.siteName || 'N/A' },
+            category: { id: data.categoryId, categoryCode: data.taskData?.taskCategory || 'N/A', categoryName: '' },
+            createdByInfo: { 
+              email: data.workflow?.[0]?.userName || 'N/A', 
+              role: data.workflow?.[0]?.role || 'N/A' 
+            },
+            permissions: {}, // This might need more logic if detailed permissions are required on the list view
+        } as RFADocument);
+      });
+      
+      setAllDocuments(documentsFromDb);
+      setLoading(false);
+    }, (error) => {
+      console.error("Error fetching realtime documents:", error);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+
+  }, [firebaseUser, user?.sites]);
+  
+  useEffect(() => {
+    let docs = [...allDocuments];
+    
+    if (filters.rfaType !== 'ALL') {
+      docs = docs.filter(doc => doc.rfaType === filters.rfaType);
+    }
+    if (filters.status !== 'ALL') {
+      docs = docs.filter(doc => doc.status === filters.status);
+    }
+    if (filters.categoryId !== 'ALL') {
+      docs = docs.filter(doc => doc.category?.id === filters.categoryId);
+    }
+    
+    if (!filters.showAllRevisions) {
+        const latestDocsMap = new Map<string, RFADocument>();
+        docs.forEach(doc => {
+            const baseNumber = doc.documentNumber.split('-REV')[0];
+            const existing = latestDocsMap.get(baseNumber);
+            if (!existing || doc.revisionNumber > existing.revisionNumber) {
+                latestDocsMap.set(baseNumber, doc);
+            }
+        });
+        docs = Array.from(latestDocsMap.values());
+    }
+
+    if (searchTerm.trim()) {
+        const search = searchTerm.toLowerCase();
+        docs = docs.filter((doc: RFADocument) => 
+            doc.documentNumber.toLowerCase().includes(search) ||
+            doc.title.toLowerCase().includes(search)
+        );
+    }
+
+    setFilteredDocuments(docs);
+  }, [searchTerm, allDocuments, filters]);
+
 
   const loadCategories = async () => {
     if (!firebaseUser) return;
@@ -80,50 +161,9 @@ function RFAContent() {
 
   useEffect(() => {
     if (firebaseUser) {
-      loadDocuments();
       loadCategories();
     }
-  }, [firebaseUser, filters])
-
-  const loadDocuments = async () => {
-    if (!firebaseUser) return
-    setLoading(true)
-    try {
-      const token = await firebaseUser.getIdToken()
-      const queryParams = new URLSearchParams()
-      Object.entries(filters).forEach(([key, value]) => {
-        queryParams.append(key, String(value))
-      })
-      
-      const response = await fetch(`/api/rfa/list?${queryParams}`, {
-        headers: { 'Authorization': `Bearer ${token}` },
-      })
-      const data = await response.json()
-      if (data.success) {
-        setAllDocuments(data.documents)
-      } else {
-        console.error('Failed to load documents:', data.error)
-        setAllDocuments([])
-      }
-    } catch (error) {
-      console.error('Error loading documents:', error)
-      setAllDocuments([])
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    let docs = [...allDocuments];
-    if (searchTerm.trim()) {
-        const search = searchTerm.toLowerCase();
-        docs = docs.filter((doc: RFADocument) => 
-            doc.documentNumber.toLowerCase().includes(search) ||
-            doc.title.toLowerCase().includes(search)
-        );
-    }
-    setFilteredDocuments(docs);
-  }, [searchTerm, allDocuments]);
+  }, [firebaseUser])
 
   const handleFilterChange = (key: keyof Filters, value: any) => {
     setFilters(prev => ({ ...prev, [key]: value }))
@@ -131,17 +171,16 @@ function RFAContent() {
 
   const resetFilters = () => {
     const currentRfaType = filters.rfaType;
-    setFilters({ rfaType: currentRfaType, status: 'ALL', siteId: 'ALL', latestOnly: true, categoryId: 'ALL' })
+    setFilters({ rfaType: currentRfaType, status: 'ALL', siteId: 'ALL', showAllRevisions: false, categoryId: 'ALL' })
     setSearchTerm('')
   }
   
   const handleCreateClick = () => {
     setIsCreateModalOpen(true);
   };
-
+  
   const handleModalClose = () => {
     setIsCreateModalOpen(false);
-    loadDocuments(); 
   };
 
   const handleChartFilter = (key: string, value: string) => {
@@ -189,9 +228,9 @@ function RFAContent() {
               <p className="text-gray-600 mt-1">จัดการเอกสาร Request for Approval</p>
             </div>
             <div className="flex items-center space-x-3 mt-4 sm:mt-0">
-              <button onClick={loadDocuments} className="flex items-center px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200" disabled={loading}>
+              <button onClick={() => {}} className="flex items-center px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200" disabled={loading}>
                 <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                รีเฟรช
+                {loading ? 'Syncing...' : 'Real-time'}
               </button>
               <button onClick={handleCreateClick} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                 <Plus className="w-4 h-4 mr-2" />
@@ -199,14 +238,15 @@ function RFAContent() {
               </button>
             </div>
           </div>
-
+          
           <DashboardStats 
+            allDocuments={filteredDocuments}
             onChartFilter={handleChartFilter}
             activeFilters={filters}
             categories={categories}
           />
 
-          {/* ✅ [KEY CHANGE] นำโค้ด Filter Bar ที่หายไปกลับมาใส่ที่นี่ */}
+          {/* Filter Bar */}
           <div className="bg-white rounded-lg shadow mb-6 p-4">
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
               <div className="md:col-span-4">
@@ -260,13 +300,13 @@ function RFAContent() {
 
                <div className="md:col-span-2 flex items-center h-10">
                  <input
-                    id="latest-only"
+                    id="show-all-revisions"
                     type="checkbox"
-                    checked={filters.latestOnly}
-                    onChange={(e) => handleFilterChange('latestOnly', e.target.checked)}
+                    checked={filters.showAllRevisions}
+                    onChange={(e) => handleFilterChange('showAllRevisions', e.target.checked)}
                     className="h-4 w-4 rounded border-gray-300 text-blue-600"
                   />
-                  <label htmlFor="latest-only" className="ml-2 text-sm text-gray-700">แสดงเฉพาะฉบับล่าสุด</label>
+                  <label htmlFor="show-all-revisions" className="ml-2 text-sm text-gray-700">แสดงทุกฉบับ</label>
               </div>
               <div className="md:col-span-2">
                  <button onClick={resetFilters} className="w-full px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300">
@@ -316,8 +356,7 @@ function RFAContent() {
               document={selectedDocument}
               onClose={() => setSelectedDocument(null)}
               onUpdate={(updatedDoc) => {
-                setAllDocuments(prev => prev.map(doc => doc.id === updatedDoc.id ? updatedDoc : doc))
-                setSelectedDocument(updatedDoc)
+                setSelectedDocument(updatedDoc) 
               }}
             />
           )}

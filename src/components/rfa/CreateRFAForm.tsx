@@ -1,4 +1,3 @@
-// src/components/rfa/CreateRFAForm.tsx (Final Complete Version)
 'use client'
 
 import React, { useState, useEffect, useMemo } from 'react'
@@ -7,7 +6,6 @@ import { FileText, Upload, CheckCircle, ChevronRight, ChevronLeft, X, AlertCircl
 import { useGoogleSheets } from '@/lib/hooks/useGoogleSheets'
 import { useAuth } from '@/lib/auth/useAuth'
 
-// Types
 interface UploadedFile {
   id: string;
   file: File;
@@ -30,6 +28,7 @@ interface RFAFormData {
   documentNumber: string
   title: string
   description: string
+  revisionNumber: string;
   uploadedFiles: UploadedFile[]
   selectedProject: string
   selectedCategory: string
@@ -63,6 +62,7 @@ const INITIAL_FORM_DATA: RFAFormData = {
   documentNumber: '',
   title: '',
   description: '',
+  revisionNumber: '00',
   uploadedFiles: [],
   selectedProject: '',
   selectedCategory: '',
@@ -190,6 +190,7 @@ export default function CreateRFAForm({
         break;
       case 2:
         if (!formData.title.trim()) newErrors.title = 'กรุณาใส่หัวข้อเอกสาร';
+        if (!formData.revisionNumber.trim()) newErrors.revisionNumber = 'กรุณาใส่ Rev. No.';
         if (!formData.documentNumber.trim()) newErrors.documentNumber = 'กรุณาใส่เลขที่เอกสาร';
         if (!selectedSite) newErrors.site = 'กรุณาเลือกโครงการ';
         if (isManualFlow) {
@@ -206,6 +207,47 @@ export default function CreateRFAForm({
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
+  };
+  
+  const submitForm = async () => {
+    if (!validateStep(3)) return;
+    setIsUploading(true);
+    try {
+      if (!firebaseUser) throw new Error('กรุณาล็อกอินก่อน');
+      const successfulFiles = formData.uploadedFiles.filter(f => f.status === 'success');
+      if (successfulFiles.length === 0) throw new Error('กรุณาอัปโหลดไฟล์ให้สำเร็จ');
+      
+      const token = await firebaseUser.getIdToken();
+      const submitData = {
+        rfaType: formData.rfaType,
+        title: formData.title,
+        description: formData.description,
+        siteId: selectedSite,
+        documentNumber: `${formData.documentNumber}-REV${formData.revisionNumber}`,
+        revisionNumber: formData.revisionNumber,
+        uploadedFiles: successfulFiles.map(f => f.uploadedData),
+        categoryId: isManualFlow ? formData.categoryId : formData.selectedTask?.taskCategory,
+        taskData: isManualFlow ? null : formData.selectedTask
+      };
+
+      const response = await fetch('/api/rfa/create', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payload: submitData })
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        alert(`สร้าง RFA สำเร็จ! หมายเลขเอกสาร: ${result.runningNumber}`);
+        if (onClose) onClose();
+      } else {
+        throw new Error(result.error || 'เกิดข้อผิดพลาด');
+      }
+    } catch (error) {
+      setErrors({ general: error instanceof Error ? error.message : 'Unknown error' });
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const nextStep = () => currentStep < 4 && validateStep(currentStep) && setCurrentStep(currentStep + 1);
@@ -279,46 +321,6 @@ export default function CreateRFAForm({
     }
     updateFormData({ uploadedFiles: formData.uploadedFiles.filter((_, i) => i !== index) });
   };
-  
-  const submitForm = async () => {
-    if (!validateStep(3)) return;
-    setIsUploading(true);
-    try {
-      if (!firebaseUser) throw new Error('กรุณาล็อกอินก่อน');
-      const successfulFiles = formData.uploadedFiles.filter(f => f.status === 'success');
-      if (successfulFiles.length === 0) throw new Error('กรุณาอัปโหลดไฟล์ให้สำเร็จ');
-      
-      const token = await firebaseUser.getIdToken();
-      const submitData = {
-        rfaType: formData.rfaType,
-        title: formData.title,
-        description: formData.description,
-        siteId: selectedSite,
-        documentNumber: formData.documentNumber,
-        uploadedFiles: successfulFiles.map(f => f.uploadedData),
-        categoryId: isManualFlow ? formData.categoryId : formData.selectedTask?.taskCategory,
-        taskData: isManualFlow ? null : formData.selectedTask
-      };
-
-      const response = await fetch('/api/rfa/create', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ payload: submitData })
-      });
-
-      const result = await response.json();
-      if (result.success) {
-        alert(`สร้าง RFA สำเร็จ! หมายเลขเอกสาร: ${result.runningNumber}`);
-        if (onClose) onClose();
-      } else {
-        throw new Error(result.error || 'เกิดข้อผิดพลาด');
-      }
-    } catch (error) {
-      setErrors({ general: error instanceof Error ? error.message : 'Unknown error' });
-    } finally {
-      setIsUploading(false);
-    }
-  };
 
   const handleSiteChange = async (siteId: string) => {
     setSelectedSite(siteId);
@@ -353,6 +355,7 @@ export default function CreateRFAForm({
     if (!taskSearchQuery) return tasks.slice(0, 20);
     return tasks.filter(t => t.taskName.toLowerCase().includes(taskSearchQuery.toLowerCase()));
   }, [tasks, taskSearchQuery]);
+
 
   return (
     <div className={`${isModal ? 'max-w-4xl w-full mx-auto' : ''} bg-white rounded-lg shadow-xl flex flex-col h-full max-h-[95vh]`}>
@@ -425,11 +428,19 @@ export default function CreateRFAForm({
               </>
             )}
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">เลขที่เอกสาร</label>
-              <input type="text" value={formData.documentNumber} onChange={(e) => updateFormData({ documentNumber: e.target.value })} className="w-full p-3 border rounded-lg" />
-              {errors.documentNumber && <p className="text-red-600 text-sm mt-1">{errors.documentNumber}</p>}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">เลขที่เอกสาร</label>
+                <input type="text" value={formData.documentNumber} onChange={(e) => updateFormData({ documentNumber: e.target.value })} className="w-full p-3 border rounded-lg" />
+                {errors.documentNumber && <p className="text-red-600 text-sm mt-1">{errors.documentNumber}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Rev. No.</label>
+                <input type="text" value={formData.revisionNumber} onChange={(e) => updateFormData({ revisionNumber: e.target.value })} className="w-full p-3 border rounded-lg" />
+                {errors.revisionNumber && <p className="text-red-600 text-sm mt-1">{errors.revisionNumber}</p>}
+              </div>
             </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">หัวข้อเอกสาร</label>
               <input type="text" value={formData.title} onChange={(e) => updateFormData({ title: e.target.value })} className="w-full p-3 border rounded-lg" />
@@ -470,7 +481,7 @@ export default function CreateRFAForm({
               <p><strong>ประเภท:</strong> {formData.rfaType}</p>
               <p><strong>โครงการ:</strong> {sites.find(s => s.id === selectedSite)?.name}</p>
               <p><strong>หมวดงาน:</strong> {isManualFlow ? formData.categoryId : formData.selectedTask?.taskCategory}</p>
-              <p><strong>เลขที่เอกสาร:</strong> {formData.documentNumber}</p>
+              <p><strong>เลขที่เอกสาร:</strong> {`${formData.documentNumber}-REV${formData.revisionNumber}`}</p>
               <p><strong>หัวข้อ:</strong> {formData.title}</p>
               <p><strong>ไฟล์:</strong> {formData.uploadedFiles.filter(f => f.status === 'success').length} ไฟล์</p>
             </div>
@@ -479,7 +490,6 @@ export default function CreateRFAForm({
       </div>
 
       <div className="flex justify-between items-center p-6 border-t bg-gray-50">
-        {/* ✅ 4. ซ่อนปุ่ม "ย้อนกลับ" ใน Flow ที่ถูก Preset มา */}
         <button 
             onClick={prevStep} 
             disabled={currentStep === initialStep || isUploading}

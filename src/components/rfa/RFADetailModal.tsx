@@ -1,9 +1,9 @@
-// src/components/rfa/RFADetailModal.tsx (แก้ไข Syntax Error แล้ว)
+// src/components/rfa/RFADetailModal.tsx (แก้ไขแล้ว)
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import { RFADocument, RFAPermissions, RFAWorkflowStep, RFAFile } from '@/types/rfa'
-import { X, Paperclip, Clock, User, Check, Send, AlertTriangle, FileText, Download, History, MessageSquare, Edit3, Upload, Loader2, RefreshCw } from 'lucide-react'
+import { X, Paperclip, Clock, User, Check, Send, AlertTriangle, FileText, Download, History, MessageSquare, Edit3, Upload, Loader2, ThumbsUp, ThumbsDown } from 'lucide-react'
 import { useAuth } from '@/lib/auth/useAuth'
 import { STATUS_LABELS, STATUSES } from '@/lib/config/workflow'
 
@@ -85,7 +85,6 @@ const WorkflowHistoryModal = ({ workflow, onClose }: { workflow: RFAWorkflowStep
     );
 };
 
-
 // =========== Main Detail Modal Component ===========
 interface RFADetailModalProps {
   document: RFADocument | null
@@ -114,6 +113,20 @@ export default function RFADetailModal({ document, onClose, onUpdate }: RFADetai
   const permissions = document.permissions || {} as RFAPermissions;
   const latestFiles = document.files || [];
 
+  const latestCommentItem = useMemo(() => {
+    if (!document.workflow || document.workflow.length === 0) {
+      return null;
+    }
+    return [...document.workflow].reverse().find(step => step.comments && step.comments.trim() !== '');
+  }, [document.workflow]);
+
+  // ✅ KEY CHANGE: Updated the logic to remove the commenter's name
+  const displayDetailOrComment = latestCommentItem?.comments || document.description;
+  const displayLabel = latestCommentItem 
+    ? `ความคิดเห็นล่าสุด` 
+    : 'รายละเอียดเพิ่มเติม';
+
+  // ... (All other functions remain unchanged) ...
   const uploadTempFile = async (file: File): Promise<Partial<UploadedFile>> => {
     try {
         if (!firebaseUser) throw new Error('กรุณาล็อกอินก่อนอัปโหลดไฟล์');
@@ -179,10 +192,6 @@ export default function RFADetailModal({ document, onClose, onUpdate }: RFADetai
   };
 
   const handleAction = async (action: string) => {
-    if (action === 'REQUEST_REVISION' && !comment.trim()) {
-      alert('กรุณาใส่ความคิดเห็น/เหตุผลที่ต้องแก้ไข');
-      return;
-    }
     const successfulUploads = newFiles.filter(f => f.status === 'success');
     if (successfulUploads.length === 0) {
         alert('กรุณาแนบไฟล์ใหม่สำหรับขั้นตอนนี้ก่อนดำเนินการ');
@@ -261,10 +270,13 @@ export default function RFADetailModal({ document, onClose, onUpdate }: RFADetai
                         <span>{document.category.categoryCode}</span>
                     </div>
                 </div>
-                {document.description && (
+
+                {(displayDetailOrComment && displayDetailOrComment.trim() !== '') && (
                 <div className='mt-4'>
-                    <strong className="text-gray-500 block text-sm">รายละเอียดเพิ่มเติม:</strong>
-                    <p className="text-gray-700 whitespace-pre-wrap">{document.description}</p>
+                    <strong className="text-gray-500 block text-sm">{displayLabel}:</strong>
+                    <div className="text-gray-700 whitespace-pre-wrap bg-white p-3 rounded-md mt-1 border">
+                      <p className="italic">"{displayDetailOrComment}"</p>
+                    </div>
                 </div>
                 )}
             </div>
@@ -296,70 +308,111 @@ export default function RFADetailModal({ document, onClose, onUpdate }: RFADetai
             </div>
           </div>
           
-          <div className="p-4 border-t bg-gray-50 rounded-b-lg">
-            {permissions.canSendToCm && (
+          {(permissions.canSendToCm || permissions.canApprove) && (
+            <div className="p-4 border-t bg-gray-50 rounded-b-lg">
               <div className="space-y-4">
-                <div>
-                    <label className="text-sm font-medium text-gray-700 mb-1 block">แสดงความคิดเห็น (Comment)</label>
-                    <textarea
-                      value={comment}
-                      onChange={(e) => setComment(e.target.value)}
-                      placeholder="เพิ่มความคิดเห็น/เหตุผลในการขอแก้ไข..."
-                      className="w-full p-2 border rounded-md text-sm"
-                      rows={2}
-                    />
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-1 block">แนบไฟล์ใหม่ (จำเป็น)</label>
-                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
-                      <input type="file" multiple onChange={handleFileUpload} className="hidden" id="action-file-upload" />
-                      <label htmlFor="action-file-upload" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
-                          <Upload size={16} className="mr-2"/>
-                          คลิกเพื่อเลือกไฟล์
-                      </label>
+                  <div>
+                      <label className="text-sm font-medium text-gray-700 mb-1 block">แสดงความคิดเห็น (Optional)</label>
+                      <textarea
+                        value={comment}
+                        onChange={(e) => setComment(e.target.value)}
+                        placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..."
+                        className="w-full p-2 border rounded-md text-sm"
+                        rows={2}
+                      />
                   </div>
-                  <div className="mt-2 space-y-2">
-                      {newFiles.map((fileObj, index) => (
-                           <div key={fileObj.id} className="flex items-center text-sm p-2 bg-gray-100 rounded">
-                               <FileText className="w-4 h-4 mr-2 text-gray-500" />
-                               <span className="flex-1 truncate">{fileObj.file.name}</span>
-                               {fileObj.status === 'uploading' && <Loader2 className="w-4 h-4 animate-spin text-blue-500" />}
-                               {fileObj.status === 'success' && <Check className="w-4 h-4 text-green-500" />}
-                               {/* ✅ [KEY CHANGE] Fixed the syntax error here */}
-                               {fileObj.status === 'error' && (
-                                <span title={fileObj.error}>
-                                  <AlertTriangle className="w-4 h-4 text-red-500" />
-                                </span>
-                               )}
-                               <button onClick={() => removeNewFile(index)} className="ml-2 text-gray-500 hover:text-red-600">
-                                   <X size={16} />
-                               </button>
-                           </div>
-                      ))}
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 mb-1 block">แนบไฟล์ใหม่ (จำเป็น)</label>
+                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
+                        <input type="file" multiple onChange={handleFileUpload} className="hidden" id="action-file-upload" />
+                        <label htmlFor="action-file-upload" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
+                            <Upload size={16} className="mr-2"/>
+                            คลิกเพื่อเลือกไฟล์
+                        </label>
+                    </div>
+                    <div className="mt-2 space-y-2">
+                        {newFiles.map((fileObj, index) => (
+                            <div key={fileObj.id} className="flex items-center text-sm p-2 bg-gray-100 rounded">
+                                <FileText className="w-4 h-4 mr-2 text-gray-500" />
+                                <span className="flex-1 truncate">{fileObj.file.name}</span>
+                                {fileObj.status === 'uploading' && <Loader2 className="w-4 h-4 animate-spin text-blue-500" />}
+                                {fileObj.status === 'success' && <Check className="w-4 h-4 text-green-500" />}
+                                {fileObj.status === 'error' && (
+                                  <span title={fileObj.error}>
+                                    <AlertTriangle className="w-4 h-4 text-red-500" />
+                                  </span>
+                                )}
+                                <button onClick={() => removeNewFile(index)} className="ml-2 text-gray-500 hover:text-red-600">
+                                    <X size={16} />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
                   </div>
-                </div>
-                <div className="flex justify-end space-x-3">
-                  <button
-                    onClick={() => handleAction('REQUEST_REVISION')}
-                    disabled={isSubmitting || newFiles.filter(f => f.status === 'success').length === 0}
-                    className="flex items-center px-4 py-2 text-sm font-medium text-white bg-yellow-500 rounded-lg hover:bg-yellow-600 disabled:bg-gray-300"
-                  >
-                    <Edit3 size={16} className="mr-2" />
-                    ขอแก้ไข
-                  </button>
-                  <button
-                    onClick={() => handleAction('SEND_TO_CM')}
-                    disabled={isSubmitting || newFiles.filter(f => f.status === 'success').length === 0}
-                    className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-300"
-                  >
-                    <Send size={16} className="mr-2" />
-                    ส่งให้ CM
-                  </button>
-                </div>
+                  
+                  {/* Site Admin Actions */}
+                  {permissions.canSendToCm && (
+                    <div className="flex justify-end space-x-3">
+                      <button
+                        onClick={() => handleAction('REQUEST_REVISION')}
+                        disabled={isSubmitting || newFiles.filter(f => f.status === 'success').length === 0}
+                        className="flex items-center px-4 py-2 text-sm font-medium text-white bg-yellow-500 rounded-lg hover:bg-yellow-600 disabled:bg-gray-300"
+                      >
+                        <Edit3 size={16} className="mr-2" />
+                        ขอแก้ไข
+                      </button>
+                      <button
+                        onClick={() => handleAction('SEND_TO_CM')}
+                        disabled={isSubmitting || newFiles.filter(f => f.status === 'success').length === 0}
+                        className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-300"
+                      >
+                        <Send size={16} className="mr-2" />
+                        ส่งให้ CM
+                      </button>
+                    </div>
+                  )}
+
+                  {/* CM Actions */}
+                  {permissions.canApprove && (
+                    <div className="flex flex-wrap justify-end gap-3">
+                       <button
+                          onClick={() => handleAction('APPROVE')}
+                          disabled={isSubmitting || newFiles.filter(f => f.status === 'success').length === 0}
+                          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:bg-gray-300"
+                        >
+                          <ThumbsUp size={16} className="mr-2" />
+                          อนุมัติ (Approve)
+                        </button>
+                        <button
+                          onClick={() => handleAction('APPROVE_WITH_COMMENTS')}
+                          disabled={isSubmitting || newFiles.filter(f => f.status === 'success').length === 0}
+                          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-gray-300"
+                        >
+                          <MessageSquare size={16} className="mr-2" />
+                          อนุมัติตามคอมเมนต์
+                        </button>
+                        <button
+                          onClick={() => handleAction('APPROVE_REVISION_REQUIRED')}
+                          disabled={isSubmitting || newFiles.filter(f => f.status === 'success').length === 0}
+                          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-lg hover:bg-orange-600 disabled:bg-gray-300"
+                        >
+                          <Edit3 size={16} className="mr-2" />
+                          อนุมัติแต่ต้องแก้ไข
+                        </button>
+                        <button
+                          onClick={() => handleAction('REJECT')}
+                          disabled={isSubmitting || newFiles.filter(f => f.status === 'success').length === 0}
+                          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:bg-gray-300"
+                        >
+                          <ThumbsDown size={16} className="mr-2" />
+                          ไม่อนุมัติ (Reject)
+                        </button>
+                    </div>
+                  )}
+
               </div>
-            )}
-            
-          </div>
+            </div>
+          )}
         </div>
       </div>
       {showHistory && (

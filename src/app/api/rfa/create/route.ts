@@ -2,28 +2,26 @@
 import { NextResponse } from "next/server";
 import { adminDb, adminBucket } from "@/lib/firebase/admin";
 import { getAuth } from "firebase-admin/auth";
-import { FieldValue, Transaction } from 'firebase-admin/firestore';
+import { FieldValue } from 'firebase-admin/firestore';
 import { REVIEWER_ROLES, STATUSES } from '@/lib/config/workflow';
 
-// (Helper functions toSlugId, ensureCategory, verifyIdTokenFromHeader, readRequest ไม่มีการเปลี่ยนแปลง)
 function toSlugId(input: string): string {
-  // ฟังก์ชันนี้ยังคงเดิม เพื่อสร้าง ID ที่เป็นมาตรฐาน
+  if (!input) return '';
   return input.trim().replace(/[^\p{L}\p{N}]+/gu, "_").replace(/^_+|_+$/g, "").toUpperCase();
 }
 
 async function ensureCategory(siteId: string, categoryIdOrName: string, defaults?: Partial<{ name: string; description: string; createdBy: string; rfaType: string; }>): Promise<{ id: string; created: boolean }> {
-    const docId = toSlugId(categoryIdOrName); // ID ยังคงเป็นตัวใหญ่ทั้งหมด
+    const docId = toSlugId(categoryIdOrName);
     const ref = adminDb.doc(`sites/${siteId}/categories/${docId}`);
     const snap = await ref.get();
     if (snap.exists) {
         return { id: docId, created: false };
     }
     
-    // ✅ [KEY CHANGE] บันทึก categoryCode และ name ตามค่าที่เข้ามา ไม่แปลงเป็นตัวใหญ่
     await ref.set({
         name: defaults?.name ?? categoryIdOrName,
-        categoryCode: categoryIdOrName, // <-- ใช้ค่าดั้งเดิม
-        categoryName: defaults?.name ?? categoryIdOrName, // <-- ใช้ค่าดั้งเดิม
+        categoryCode: categoryIdOrName,
+        categoryName: defaults?.name ?? categoryIdOrName,
         description: defaults?.description ?? "",
         rfaTypes: defaults?.rfaType ? [defaults.rfaType] : [],
         active: true,
@@ -57,7 +55,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // --- ✅ 1. เพิ่มการประกาศตัวแปรที่ขาดหายไป ---
   let docId: string | null = null;
   const tempFilePathsToDelete: string[] = [];
 
@@ -71,10 +68,8 @@ export async function POST(req: Request) {
     const userRole = userData?.role;
 
     const { payload } = await readRequest(req);
-    // --- ✅ 2. เพิ่ม categoryId ในการ destructure ---
-    const { rfaType, siteId, categoryId, title, description, taskData, documentNumber, uploadedFiles } = payload || {};
+    const { rfaType, siteId, categoryId, title, description, taskData, documentNumber, revisionNumber, uploadedFiles } = payload || {};
 
-    // (Validation ยังคงเหมือนเดิม)
     if (!rfaType || !siteId || !title || !documentNumber || !uploadedFiles || uploadedFiles.length === 0) {
         return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
@@ -102,12 +97,11 @@ export async function POST(req: Request) {
 
     const rawCategoryKey = categoryId || taskData?.taskCategory || rfaType;
     const { id: finalCategoryId } = await ensureCategory(siteId, categoryId, {
-      name: categoryId, // ใช้ categoryId เป็น name ไปเลย
+      name: categoryId,
       createdBy: uid,
       rfaType,
     });
     
-    // --- File Handling Logic ---
     const finalFilesData = [];
     const cdnUrlBase = "https://ttsdoc-cdn.ttthaiii30.workers.dev";
 
@@ -135,11 +129,9 @@ export async function POST(req: Request) {
         });
     }
     
-    // --- ✅ 2. ปรับปรุง Logic การกำหนดสถานะเริ่มต้นโดยใช้ค่าคงที่ ---
     let initialStatus = STATUSES.PENDING_REVIEW;
     let initialAction = "CREATE";
 
-    // ถ้าเป็น RFA-SHOP และคนสร้างคือ ME หรือ SN ให้ข้ามไปที่ CM เลย
     if (rfaType === 'RFA-SHOP' && (userRole === 'ME' || userRole === 'SN')) {
       initialStatus = STATUSES.PENDING_CM_APPROVAL;
       initialAction = "CREATE_AND_SUBMIT_TO_CM";
@@ -153,7 +145,7 @@ export async function POST(req: Request) {
     }
 
     const rfaRef = adminDb.collection("rfaDocuments").doc();
-    docId = rfaRef.id; // เก็บ ID ไว้เผื่อต้องลบทิ้งกรณีเกิด Error
+    docId = rfaRef.id;
     
     await rfaRef.set({
       siteId, rfaType, categoryId: finalCategoryId, title, description: description || "",
@@ -168,13 +160,14 @@ export async function POST(req: Request) {
       }],
       files: finalFilesData,
       runningNumber: runningNumber, 
+      revisionNumber: parseInt(revisionNumber, 10) || 0,
+      isLatest: true,
     });
 
     return NextResponse.json({ success: true, id: rfaRef.id, runningNumber: runningNumber }, { status: 201 });
 
   } catch (err: any) {
     console.error("RFA Create Finalization Error:", err);
-    // เพิ่ม Logic การ clean up กรณีเกิด Error ระหว่างทำงาน
     if (docId) {
         await adminDb.collection("rfaDocuments").doc(docId).delete().catch(e => console.error("Cleanup failed for doc:", e));
     }

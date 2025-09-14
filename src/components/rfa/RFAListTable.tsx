@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import { FileText, Calendar, User, Clock, Building, Tag } from 'lucide-react'
+import { FileText, Calendar, User, Clock, Building, Tag, GitCommit } from 'lucide-react'
 import { RFADocument } from '@/types/rfa'
 import { STATUSES } from '@/lib/config/workflow'
 
@@ -17,7 +17,7 @@ const PENDING_STATUSES = [
   STATUSES.PENDING_REVIEW,
   STATUSES.PENDING_CM_APPROVAL,
   STATUSES.REVISION_REQUIRED,
-  STATUSES.APPROVED_REVISION_REQUIRED, // เพิ่มสถานะนี้เข้าไปด้วยเผื่ออนาคต
+  STATUSES.APPROVED_REVISION_REQUIRED,
 ];
 
 const convertToDate = (date: any): Date | null => {
@@ -93,7 +93,7 @@ export default function RFAListTable({
         return { name: 'CM', role: 'CM' };
       case STATUSES.REVISION_REQUIRED:
       case STATUSES.APPROVED_REVISION_REQUIRED:
-        return { name: doc.createdByInfo.email.split('@')[0], role: doc.createdByInfo.role };
+        return { name: doc.createdByInfo?.email?.split('@')[0] || 'Unknown', role: doc.createdByInfo?.role || 'Unknown' };
       case STATUSES.APPROVED:
       case STATUSES.APPROVED_WITH_COMMENTS:
       case STATUSES.REJECTED:
@@ -102,9 +102,10 @@ export default function RFAListTable({
         if (doc.assignedUserInfo) {
           return { name: doc.assignedUserInfo.email.split('@')[0], role: doc.assignedUserInfo.role };
         }
-        return { name: doc.createdByInfo.email.split('@')[0], role: doc.createdByInfo.role };
+        return { name: doc.createdByInfo?.email?.split('@')[0] || 'Unknown', role: doc.createdByInfo?.role || 'Unknown' };
     }
   }
+
 
   // Mobile View (Card)
   if (isMobile) {
@@ -124,6 +125,9 @@ export default function RFAListTable({
                   <div className="flex items-center space-x-2 mb-1">
                     <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${getRFATypeColor(doc.rfaType)}`}>
                       {doc.rfaType}
+                    </span>
+                    <span className="inline-flex items-center px-2 py-1 bg-gray-200 text-gray-800 rounded-full text-xs font-semibold">
+                        REV-{String(doc.revisionNumber).padStart(2, '0')}
                     </span>
                   </div>
                   <h3 className="font-medium text-gray-900 text-sm mb-1 truncate">
@@ -179,7 +183,8 @@ export default function RFAListTable({
             <tr>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">System No.</th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">หมวดหมู่</th>
-              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">เอกสาร</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">เอกสาร</th>
+              <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Rev.</th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">สถานะ</th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">ผู้รับผิดชอบ</th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">วันที่อัปเดตล่าสุด</th>
@@ -205,17 +210,23 @@ export default function RFAListTable({
                   </td>
                   <td className="px-6 py-4">
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-gray-900 truncate text-center">{doc.documentNumber}</p>
-                      <p className="text-sm text-gray-600 line-clamp-2 text-center">{doc.title}</p>
+                      <p className="text-sm font-medium text-gray-900 truncate">{doc.documentNumber}</p>
+                      <p className="text-sm text-gray-600 line-clamp-2">{doc.title}</p>
                     </div>
                   </td>
+                  <td className="px-4 py-4 text-center">
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gray-200 text-gray-800">
+                      {String(doc.revisionNumber).padStart(2, '0')}
+                    </span>
+                  </td>
+                  {/* ✅ KEY CHANGE: นำ Logic การแสดงวันที่คงค้างกลับมาไว้ใต้สถานะ */}
                   <td className="px-6 py-4">
                     <div className="flex flex-col space-y-1 items-center">
                       <span className={`inline-flex items-center justify-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(doc.status)}`}>
                         {statusLabels[doc.status] || doc.status}
                       </span>
                       {PENDING_STATUSES.includes(doc.status) && pendingDays > 0 && (
-                        <span className="text-xs text-orange-600 text-center">ค้าง {pendingDays} วัน</span>
+                        <span className="text-xs text-orange-600 text-center">{`ค้าง ${pendingDays} วัน`}</span>
                       )}
                     </div>
                   </td>
