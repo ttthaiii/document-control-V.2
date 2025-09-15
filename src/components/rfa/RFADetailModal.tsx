@@ -25,7 +25,9 @@ const WorkflowHistoryModal = ({ workflow, onClose, userRole }: { workflow: RFAWo
     
     const filteredWorkflow = useMemo(() => {
         if (userRole && APPROVER_ROLES.includes(userRole)) {
-            return workflow.filter(item => item.status !== STATUSES.PENDING_REVIEW);
+            // ✅ KEY CHANGE: เพิ่ม STATUSES.REVISION_REQUIRED ในการกรอง
+            const statusesToHide = [STATUSES.PENDING_REVIEW, STATUSES.REVISION_REQUIRED];
+            return workflow.filter(item => !statusesToHide.includes(item.status));
         }
         return workflow;
     }, [workflow, userRole]);
@@ -44,6 +46,7 @@ const WorkflowHistoryModal = ({ workflow, onClose, userRole }: { workflow: RFAWo
                 </div>
                 <div className="p-6 overflow-y-auto">
                     <div className="border-l-2 border-gray-200 ml-2">
+                        {/* ✅ ใช้ filteredWorkflow ที่ผ่านการกรองแล้ว */}
                         {filteredWorkflow.length > 0 ? (
                             filteredWorkflow.map((item, index) => (
                             <div key={index} className="relative pl-6 pb-8 last:pb-0">

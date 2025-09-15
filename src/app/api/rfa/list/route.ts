@@ -50,7 +50,14 @@ export async function GET(request: NextRequest) {
         firestoreQuery = firestoreQuery.where('status', '==', status);
     }
 
-    firestoreQuery = firestoreQuery.orderBy('updatedAt', 'desc');
+    // ✅ KEY CHANGE: หาก User เป็น CM, ให้กรองสถานะ PENDING_REVIEW และ REVISION_REQUIRED ออก
+    // Firestore รองรับ 'not-in' สำหรับการกรองหลายค่า
+    if (APPROVER_ROLES.includes(userRole)) {
+        firestoreQuery = firestoreQuery.where('status', 'not-in', [STATUSES.PENDING_REVIEW, STATUSES.REVISION_REQUIRED]);
+    }
+
+    firestoreQuery = firestoreQuery.orderBy('status').orderBy('updatedAt', 'desc');
+
 
     const documentsSnapshot = await firestoreQuery.get();
     const documents: any[] = [];
@@ -64,20 +71,18 @@ export async function GET(request: NextRequest) {
     for (const doc of documentsSnapshot.docs) {
       const documentData = doc.data();
       
-      let shouldInclude = false;
+      let shouldInclude = true; // ตั้งค่าเริ่มต้นให้แสดงผล
 
-      if (userRole === 'Admin' || OBSERVER_ALL_ROLES.includes(userRole) || REVIEWER_ROLES.includes(userRole) || CREATOR_ROLES.includes(userRole)) {
-        shouldInclude = true;
-      } 
-      else if (APPROVER_ROLES.includes(userRole)) {
+      // ตรวจสอบเงื่อนไขเดิมอีกครั้งเพื่อความปลอดภัย (แม้ว่า query จะกรองไปแล้ว)
+      if (APPROVER_ROLES.includes(userRole)) {
         const relevantStatuses = [STATUSES.PENDING_CM_APPROVAL, ...finishedStatuses];
-        if (relevantStatuses.includes(documentData.status)) {
-          shouldInclude = true;
+        if (!relevantStatuses.includes(documentData.status)) {
+          shouldInclude = false;
         }
       } 
       else if (OBSERVER_FINISHED_ROLES.includes(userRole)) {
-         if (finishedStatuses.includes(documentData.status)) {
-           shouldInclude = true;
+         if (!finishedStatuses.includes(documentData.status)) {
+           shouldInclude = false;
          }
       }
 

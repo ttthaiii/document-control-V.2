@@ -10,7 +10,7 @@ import RFADetailModal from '@/components/rfa/RFADetailModal'
 import DashboardStats from '@/components/rfa/DashboardStats'
 import CreateRFAForm from '@/components/rfa/CreateRFAForm'
 import { RFADocument } from '@/types/rfa'
-import { STATUSES, STATUS_LABELS, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES } from '@/lib/config/workflow' 
+import { STATUSES, STATUS_LABELS, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES } from '@/lib/config/workflow'
 import { Plus, Search, RefreshCw, User } from 'lucide-react'
 import { db } from '@/lib/firebase/client'
 import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore'
@@ -44,7 +44,7 @@ function RFAContent() {
   const searchParams = useSearchParams()
 
   const [allDocuments, setAllDocuments] = useState<RFADocument[]>([]);
-  const [filteredDocuments, setFilteredDocuments] = useState<RFADocument[]>([]);
+  // const [filteredDocuments, setFilteredDocuments] = useState<RFADocument[]>([]); // <-- จะถูกแทนที่ด้วย useMemo
   const [loading, setLoading] = useState(true)
   const [selectedDocument, setSelectedDocument] = useState<RFADocument | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
@@ -59,13 +59,37 @@ function RFAContent() {
     categoryId: 'ALL',
     responsibleParty: 'ALL',
   })
+  
+  const availableStatuses = useMemo(() => {
+    const allStatusKeys = Object.values(STATUSES);
+    if (user && APPROVER_ROLES.includes(user.role)) {
+      const statusesToHide = [STATUSES.PENDING_REVIEW, STATUSES.REVISION_REQUIRED];
+      return allStatusKeys.filter(status => !statusesToHide.includes(status));
+    }
+    return allStatusKeys;
+  }, [user]);
+
+  const availableResponsibleParties = useMemo(() => {
+    if (user && APPROVER_ROLES.includes(user.role)) {
+      return [
+        { value: 'ALL', label: 'ทุกคน' },
+        { value: 'CM', label: 'CM' },
+      ];
+    }
+    return [
+      { value: 'ALL', label: 'ทุกคน' },
+      ...CREATOR_ROLES.map(role => ({ value: role, label: role })),
+      { value: 'SITE', label: 'Site' },
+      { value: 'CM', label: 'CM' },
+    ];
+  }, [user]);
 
   useEffect(() => {
     const typeFromUrl = (searchParams.get('type') as Filters['rfaType']) || 'ALL';
     if (typeFromUrl !== filters.rfaType) {
       handleFilterChange('rfaType', typeFromUrl);
     }
-  }, [searchParams]);
+  }, [searchParams, filters.rfaType]);
   
   useEffect(() => {
     if (!firebaseUser || !user?.sites || user.sites.length === 0) {
@@ -74,7 +98,6 @@ function RFAContent() {
     }
 
     setLoading(true);
-
     const q = query(
       collection(db, 'rfaDocuments'),
       where('siteId', 'in', user.sites),
@@ -97,7 +120,6 @@ function RFAContent() {
             permissions: {},
         } as RFADocument);
       });
-      
       setAllDocuments(documentsFromDb);
       setLoading(false);
     }, (error) => {
@@ -106,67 +128,94 @@ function RFAContent() {
     });
 
     return () => unsubscribe();
+  }, [firebaseUser, user]);
 
-  }, [firebaseUser, user?.sites]);
-  
-  useEffect(() => {
-    let docs = [...allDocuments];
-    
-    if (!filters.showAllRevisions) {
-      docs = docs.filter(doc => doc.isLatest === true);
+  // ✅ KEY CHANGE: รวม Logic การกรองทั้งหมดไว้ใน useMemo ที่เดียว
+  const filteredDocuments = useMemo(() => {
+    const isCM = user && APPROVER_ROLES.includes(user.role);
+    const statusesHiddenFromCM = [STATUSES.PENDING_REVIEW, STATUSES.REVISION_REQUIRED];
+
+    let docsToShow: RFADocument[];
+
+    if (filters.showAllRevisions) {
+      docsToShow = allDocuments;
+    } else {
+      const familyMap = new Map<string, RFADocument[]>();
+      allDocuments.forEach(doc => {
+        const familyId = doc.parentRfaId || doc.id;
+        if (!familyMap.has(familyId)) {
+          familyMap.set(familyId, []);
+        }
+        familyMap.get(familyId)!.push(doc);
+      });
+
+      const latestVisibleDocs: RFADocument[] = [];
+      familyMap.forEach(group => {
+        if (group.length === 0) return;
+        group.sort((a, b) => (b.revisionNumber || 0) - (a.revisionNumber || 0));
+        const latestRev = group[0];
+
+        if (isCM) {
+          const isLatestVisibleToCM = latestRev && !statusesHiddenFromCM.includes(latestRev.status);
+          if (isLatestVisibleToCM) {
+            latestVisibleDocs.push(latestRev);
+          } else {
+            const previousVisibleRev = group.find(doc => !statusesHiddenFromCM.includes(doc.status));
+            if (previousVisibleRev) {
+              latestVisibleDocs.push(previousVisibleRev);
+            }
+          }
+        } else {
+          latestVisibleDocs.push(latestRev);
+        }
+      });
+      docsToShow = latestVisibleDocs;
     }
 
+    if (isCM) {
+      docsToShow = docsToShow.filter(doc => !statusesHiddenFromCM.includes(doc.status));
+    }
+    
     if (filters.rfaType !== 'ALL') {
-      docs = docs.filter(doc => doc.rfaType === filters.rfaType);
+      docsToShow = docsToShow.filter(doc => doc.rfaType === filters.rfaType);
     }
     if (filters.status !== 'ALL') {
-      docs = docs.filter(doc => doc.status === filters.status);
+      docsToShow = docsToShow.filter(doc => doc.status === filters.status);
     }
     if (filters.categoryId !== 'ALL') {
-      docs = docs.filter(doc => doc.category?.id === filters.categoryId);
+      docsToShow = docsToShow.filter(doc => doc.category?.id === filters.categoryId);
     }
-
-    // ✅ [แก้ไข] แก้ไข Logic การกรองผู้รับผิดชอบให้ถูกต้องและแม่นยำ
     if (filters.responsibleParty !== 'ALL') {
-        docs = docs.filter(doc => {
+        docsToShow = docsToShow.filter(doc => {
             const filter = filters.responsibleParty;
             const status = doc.status;
             const creatorRole = doc.createdByInfo?.role;
 
-            // ตรวจสอบความรับผิดชอบของ "Site"
             if (filter === 'SITE') {
                 if (status === STATUSES.PENDING_REVIEW) return true;
-                // ถ้าเอกสารต้องแก้ไข และคนสร้างคือ Role ในกลุ่ม Reviewer (เช่น Site Admin) ให้ถือว่าเป็นความรับผิดชอบของ Site
-                if ((status === STATUSES.REVISION_REQUIRED || status === STATUSES.APPROVED_REVISION_REQUIRED) && creatorRole && REVIEWER_ROLES.includes(creatorRole)) {
-                    return true;
-                }
+                if ((status === STATUSES.REVISION_REQUIRED || status === STATUSES.APPROVED_REVISION_REQUIRED) && creatorRole && REVIEWER_ROLES.includes(creatorRole)) return true;
             }
-            
-            // ตรวจสอบความรับผิดชอบของ "CM"
             if (filter === 'CM') {
                 return status === STATUSES.PENDING_CM_APPROVAL;
             }
-
-            // ตรวจสอบความรับผิดชอบของ Creator (BIM, ME, SN)
             if (creatorRole && CREATOR_ROLES.includes(creatorRole)) {
                  const isRevisionState = status === STATUSES.REVISION_REQUIRED || status === STATUSES.APPROVED_REVISION_REQUIRED;
                  return isRevisionState && creatorRole === filter;
             }
-            
             return false;
         });
     }
-    
     if (searchTerm.trim()) {
         const search = searchTerm.toLowerCase();
-        docs = docs.filter((doc: RFADocument) => 
+        docsToShow = docsToShow.filter((doc: RFADocument) => 
             doc.documentNumber.toLowerCase().includes(search) ||
             doc.title.toLowerCase().includes(search)
         );
     }
 
-    setFilteredDocuments(docs);
-  }, [searchTerm, allDocuments, filters, user]);
+    return docsToShow;
+  }, [allDocuments, filters, user, searchTerm]);
+
 
   const loadCategories = async () => {
     if (!firebaseUser) return;
@@ -306,7 +355,7 @@ function RFAContent() {
                     className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg"
                   >
                     <option value="ALL">ทุกสถานะ</option>
-                    {Object.values(STATUSES).map(statusKey => (
+                    {availableStatuses.map(statusKey => (
                       <option key={statusKey} value={statusKey}>
                         {STATUS_LABELS[statusKey] || statusKey}
                       </option>
@@ -322,12 +371,9 @@ function RFAContent() {
                   onChange={(e) => handleFilterChange('responsibleParty', e.target.value as Filters['responsibleParty'])}
                   className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg"
                 >
-                  <option value="ALL">ทุกคน</option>
-                  {CREATOR_ROLES.map(role => (
-                      <option key={role} value={role}>{role}</option>
+                  {availableResponsibleParties.map(party => (
+                      <option key={party.value} value={party.value}>{party.label}</option>
                   ))}
-                  <option value="SITE">Site</option>
-                  <option value="CM">CM</option>
                 </select>
               </div>
 
