@@ -211,40 +211,74 @@ export default function CreateRFAForm({
   
   const submitForm = async () => {
     if (!validateStep(3)) return;
+
     setIsUploading(true);
     try {
       if (!firebaseUser) throw new Error('กรุณาล็อกอินก่อน');
-      const successfulFiles = formData.uploadedFiles.filter(f => f.status === 'success');
-      if (successfulFiles.length === 0) throw new Error('กรุณาอัปโหลดไฟล์ให้สำเร็จ');
-      
       const token = await firebaseUser.getIdToken();
+
+      // ✅ KEY CHANGE 1: กรองไฟล์ให้มั่นใจว่า uploadedData ไม่ใช่ undefined
+      const successfulFiles = formData.uploadedFiles.filter(
+        f => f.status === 'success' && f.uploadedData
+      );
+
+      if (successfulFiles.length === 0) {
+        throw new Error('กรุณาอัปโหลดไฟล์ให้สำเร็จอย่างน้อย 1 ไฟล์');
+      }
+
+      const finalCategoryId = isManualFlow ? formData.categoryId : formData.selectedTask?.taskCategory;
+      const finalTaskData = isManualFlow ? null : formData.selectedTask;
+
+      if (!finalCategoryId) {
+        throw new Error('ไม่สามารถระบุ Category ID ได้ กรุณาตรวจสอบข้อมูล');
+      }
+
       const submitData = {
         rfaType: formData.rfaType,
         title: formData.title,
         description: formData.description,
         siteId: selectedSite,
         documentNumber: `${formData.documentNumber}-REV${formData.revisionNumber}`,
-        revisionNumber: formData.revisionNumber,
-        uploadedFiles: successfulFiles.map(f => f.uploadedData),
-        categoryId: isManualFlow ? formData.categoryId : formData.selectedTask?.taskCategory,
-        taskData: isManualFlow ? null : formData.selectedTask
+        revisionNumber: parseInt(formData.revisionNumber, 10) || 0,
+        
+        // ✅ KEY CHANGE 2: แก้ไข Mapping ให้ตรงกับ Type ที่ถูกต้อง
+        uploadedFiles: successfulFiles.map(f => ({
+          fileName: f.uploadedData!.fileName,
+          fileUrl: f.uploadedData!.fileUrl,
+          filePath: f.uploadedData!.filePath,
+          fileSize: f.uploadedData!.size,       // แก้ไขจาก fileSize เป็น size
+          fileType: f.uploadedData!.contentType // แก้ไขจาก fileType เป็น contentType
+        })),
+
+        categoryId: finalCategoryId,
+        taskData: finalTaskData
       };
 
       const response = await fetch('/api/rfa/create', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify({ payload: submitData })
       });
 
       const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || `HTTP error! status: ${response.status}`);
+      }
+
       if (result.success) {
         alert(`สร้าง RFA สำเร็จ! หมายเลขเอกสาร: ${result.runningNumber}`);
         if (onClose) onClose();
       } else {
-        throw new Error(result.error || 'เกิดข้อผิดพลาด');
+        throw new Error(result.error || 'เกิดข้อผิดพลาดในการสร้างเอกสาร');
       }
+
     } catch (error) {
-      setErrors({ general: error instanceof Error ? error.message : 'Unknown error' });
+      console.error("Submit Error:", error);
+      setErrors({ general: error instanceof Error ? error.message : 'เกิดข้อผิดพลาดที่ไม่รู้จัก' });
     } finally {
       setIsUploading(false);
     }

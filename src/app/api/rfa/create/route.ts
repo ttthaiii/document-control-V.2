@@ -70,8 +70,8 @@ export async function POST(req: Request) {
     const { payload } = await readRequest(req);
     const { rfaType, siteId, categoryId, title, description, taskData, documentNumber, revisionNumber, uploadedFiles } = payload || {};
 
-    if (!rfaType || !siteId || !title || !documentNumber || !uploadedFiles || uploadedFiles.length === 0) {
-        return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    if (!rfaType || !siteId || !title || !documentNumber || !uploadedFiles || uploadedFiles.length === 0 || !categoryId) {
+        return NextResponse.json({ error: "Missing required fields. Required: rfaType, siteId, categoryId, title, documentNumber, uploadedFiles." }, { status: 400 });
     }
 
     const runningNumber = await adminDb.runTransaction(async (transaction) => {
