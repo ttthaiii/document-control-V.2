@@ -43,7 +43,12 @@ export async function GET(
     }
     
     const siteInfo = { id: rfaData.siteId, name: rfaData.siteName || 'N/A' };
-    const categoryInfo = { id: rfaData.categoryId, categoryCode: rfaData.taskData?.taskCategory || 'N/A' };
+
+    // ✅ FIX: ปรับ Logic การดึง categoryCode ให้เหมือนกับหน้า List
+    const categoryInfo = { 
+      id: rfaData.categoryId, 
+      categoryCode: rfaData.taskData?.taskCategory || rfaData.categoryId || 'N/A' 
+    };
 
     const permissions = {
       canView: true,

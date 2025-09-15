@@ -43,9 +43,9 @@ async function verifyIdTokenFromHeader(req: Request): Promise<string | null> {
     }
 }
 
-async function readRequest(req: Request): Promise<{ payload: any }> {
-    const body = await req.json().catch(() => ({}));
-    return { payload: body };
+// ✅ FIX 1: แก้ไขฟังก์ชันนี้ให้คืนค่า body โดยตรง
+async function readRequest(req: Request): Promise<any> {
+    return req.json().catch(() => ({}));
 }
 
 
@@ -67,7 +67,9 @@ export async function POST(req: Request) {
     const userData = userDoc.data();
     const userRole = userData?.role;
 
-    const { payload } = await readRequest(req);
+    // ✅ FIX 2: อ่าน body ที่ถูกแก้ไขแล้ว และดึง payload ออกมา
+    const body = await readRequest(req);
+    const { payload } = body;
     const { rfaType, siteId, categoryId, title, description, taskData, documentNumber, revisionNumber, uploadedFiles } = payload || {};
 
     if (!rfaType || !siteId || !title || !documentNumber || !uploadedFiles || uploadedFiles.length === 0 || !categoryId) {

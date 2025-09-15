@@ -112,7 +112,12 @@ function RFAContent() {
             id: doc.id,
             ...data,
             site: { id: data.siteId, name: data.siteName || 'N/A' },
-            category: { id: data.categoryId, categoryCode: data.taskData?.taskCategory || 'N/A', categoryName: '' },
+            // ✅ FIX 2: ปรับ Logic การดึง categoryCode ที่นี่
+            category: { 
+              id: data.categoryId, 
+              categoryCode: data.taskData?.taskCategory || data.categoryId || 'N/A', 
+              categoryName: '' 
+            },
             createdByInfo: { 
               email: data.workflow?.[0]?.userName || 'N/A', 
               role: data.workflow?.[0]?.role || 'N/A' 
@@ -192,15 +197,20 @@ function RFAContent() {
             const creatorRole = doc.createdByInfo?.role;
 
             if (filter === 'SITE') {
-                if (status === STATUSES.PENDING_REVIEW) return true;
-                if ((status === STATUSES.REVISION_REQUIRED || status === STATUSES.APPROVED_REVISION_REQUIRED) && creatorRole && REVIEWER_ROLES.includes(creatorRole)) return true;
+                // Site จะรับผิดชอบเฉพาะเมื่อสถานะคือ "รอตรวจสอบ"
+                return status === STATUSES.PENDING_REVIEW;
             }
             if (filter === 'CM') {
+                // CM จะรับผิดชอบเฉพาะเมื่อสถานะคือ "ส่ง CM"
                 return status === STATUSES.PENDING_CM_APPROVAL;
             }
-            if (creatorRole && CREATOR_ROLES.includes(creatorRole)) {
+            if (creatorRole && CREATOR_ROLES.includes(creatorRole as CreatorRole)) {
+                 // Creator (BIM, ME, SN) จะรับผิดชอบเมื่อ:
                  const isRevisionState = status === STATUSES.REVISION_REQUIRED || status === STATUSES.APPROVED_REVISION_REQUIRED;
-                 return isRevisionState && creatorRole === filter;
+                 const isRejectedAndLatest = status === STATUSES.REJECTED && doc.isLatest;
+
+                 // ต้องเป็นสถานะ "แก้ไข" หรือ "ไม่อนุมัติ (ล่าสุด)" และ role ต้องตรงกับที่เลือก
+                 return (isRevisionState || isRejectedAndLatest) && creatorRole === filter;
             }
             return false;
         });

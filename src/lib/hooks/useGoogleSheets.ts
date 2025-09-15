@@ -61,15 +61,18 @@ export const useGoogleSheets = () => {
   // ดึงหมวดงาน
   const getCategories = useCallback(async (
     config: SheetConfig, 
-    projectName: string
+    projectName: string,
+    rfaType: string // <-- เพิ่ม Parameter นี้
   ): Promise<string[]> => {
     setLoading(true);
     setError(null);
     
     try {
+      // ✅ FIX: เพิ่ม rfaType เข้าไปใน body ที่จะส่งไป API
       const data = await makeAuthenticatedRequest('/api/google-sheets/categories', {
         ...config,
-        projectName
+        projectName,
+        rfaType
       });
       return data.categories;
     } catch (err: any) {

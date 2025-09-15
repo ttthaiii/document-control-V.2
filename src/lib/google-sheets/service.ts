@@ -40,7 +40,9 @@ export class GoogleSheetsService {
       
       const response = await this.sheets.spreadsheets.values.get({
         spreadsheetId: sheetId,
-        range: `${sheetName}!A:Z`, // อ่านทุกคอลัมน์
+        // ✅ FIX: เปลี่ยนจาก 'A:Z' เป็น 'A:F' เพื่อดึงแค่ 6 คอลัมน์แรกที่จำเป็น
+        // ซึ่งครอบคลุม 'หมวดงาน' และ 'โครงการ'
+        range: `${sheetName}!A:F`,
       });
 
       const rows = response.data.values || [];
@@ -49,7 +51,6 @@ export class GoogleSheetsService {
         throw new Error('No data found in sheet');
       }
 
-      // แถวแรกเป็น header
       const headers = rows[0];
       const dataRows = rows.slice(1);
 
@@ -97,31 +98,50 @@ export class GoogleSheetsService {
   /**
    * ดึงหมวดงานตามโครงการ
    */
-  async getTaskCategoriesByProject(sheetId: string, projectName: string, sheetName: string = 'DB_TaskOverview'): Promise<string[]> {
+  async getTaskCategoriesByProject(
+    sheetId: string, 
+    projectName: string, 
+    rfaType: string, // <-- 1. เพิ่ม Parameter นี้
+    sheetName: string = 'DB_TaskOverview'
+  ): Promise<string[]> {
     try {
       const data = await this.getSheetData(sheetId, sheetName);
       
-      // กรองเฉพาะโครงการที่ระบุ
       const projectTasks = data.filter((row: any) => {
         const rowProject = row['โครงการ'] || row['Project'] || '';
         return rowProject.trim() === projectName.trim();
       });
 
-      // ดึงหมวดงานที่ไม่ซ้ำ และกรองเฉพาะ Shop_ และ AS-Built_
       const allCategories = Array.from(new Set(
         projectTasks
           .map((row: any) => row['หมวดงาน'] || row['Category'] || '')
-          .filter((category: string) => category.trim())
+          .filter((category: string) => category && category.trim())
           .map((category: string) => category.trim())
       ));
 
-      // กรองเฉพาะหมวดงานที่ขึ้นต้นด้วย Shop_ หรือ AS-Built_
+      // ✅ 2. สร้าง Logic การกรองแบบ Dynamic ตาม rfaType
+      const getRequiredPrefix = (type: string): string[] => {
+        switch(type) {
+          case 'RFA-SHOP':
+            return ['shop_', 'as-built_']; // Shop Drawing สามารถเป็น As-Built ได้
+          case 'RFA-MAT':
+            return ['mat_'];
+          case 'RFA-GEN':
+            return ['gen_'];
+          default:
+            return []; // ถ้าไม่ระบุประเภท ไม่ต้องแสดงอะไรเลย
+        }
+      }
+
+      const requiredPrefixes = getRequiredPrefix(rfaType);
+
       const categories = allCategories.filter((category: string) => {
         const categoryLower = category.toLowerCase();
-        return categoryLower.startsWith('shop_') || categoryLower.startsWith('as-built_');
+        // ตรวจสอบว่า category ขึ้นต้นด้วย prefix ที่กำหนดหรือไม่
+        return requiredPrefixes.some(prefix => categoryLower.startsWith(prefix));
       }).sort();
 
-      console.log(`📂 Project "${projectName}" has ${categories.length} categories:`, categories);
+      console.log(`📂 Project "${projectName}" for ${rfaType} has ${categories.length} categories:`, categories);
       
       return categories;
 

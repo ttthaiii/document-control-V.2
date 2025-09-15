@@ -15,11 +15,11 @@ export async function POST(request: NextRequest) {
     const decodedToken = await adminAuth.verifyIdToken(token);
 
     // รับ parameters
-    const { sheetId, projectName, sheetName } = await request.json();
+    const { sheetId, projectName, sheetName, rfaType } = await request.json();
     
-    if (!sheetId || !projectName) {
+    if (!sheetId || !projectName || !rfaType) {
       return NextResponse.json({ 
-        error: 'Sheet ID and Project Name are required' 
+        error: 'Sheet ID, Project Name, and RFA Type are required' 
       }, { status: 400 });
     }
 
@@ -27,6 +27,7 @@ export async function POST(request: NextRequest) {
     const categories = await googleSheetsService.getTaskCategoriesByProject(
       sheetId,
       projectName, 
+      rfaType,
       sheetName || 'DB_TaskOverview'
     );
 
