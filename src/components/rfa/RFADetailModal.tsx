@@ -163,7 +163,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const isCreator = document.createdBy === user?.id;
   
   const isResubmissionFlow = document.status === STATUSES.REVISION_REQUIRED && isCreator;
-  const isRevisionFlow = document.status === STATUSES.REJECTED && isCreator;
+  const isRevisionFlow = document.status === STATUSES.REJECTED && isCreator && document.isLatest;
   
   const newRevisionNumber = (document.revisionNumber || 0) + 1;
   const newDocumentNumber = `${document.documentNumber.split('-REV')[0]}-REV${String(newRevisionNumber).padStart(2, '0')}`;
@@ -428,6 +428,19 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
               </div>
             )}
 
+            {/* จะแสดงเมื่อสถานะเป็น REJECTED และ "ไม่ใช่" ฉบับล่าสุด */}
+            {document.status === STATUSES.REJECTED && !document.isLatest && (
+              <div className="p-4 bg-red-50 text-red-800 rounded-lg flex items-center">
+                <AlertTriangle size={24} className="mr-3 flex-shrink-0 text-red-600" />
+                <div>
+                  <h4 className="font-bold">เอกสารฉบับนี้ถูกแทนที่แล้ว</h4>
+                  <p className="text-sm text-red-700">
+                    ได้มีการสร้างเอกสารฉบับใหม่ (REV-{String((document.revisionNumber || 0) + 1).padStart(2, '0')}) จากเอกสารฉบับนี้แล้ว
+                  </p>
+                </div>
+              </div>
+            )}
+            
             {isRevisionFlow && (
               <div className="p-4 border-t bg-yellow-50 rounded-b-lg">
                   <h3 className="text-lg font-bold text-yellow-800 mb-4">สร้างเอกสารฉบับแก้ไข (Create New Revision)</h3>

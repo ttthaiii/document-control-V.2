@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react'
 import { FileText, Calendar, User, Clock, Building, Tag, GitCommit } from 'lucide-react'
 import { RFADocument } from '@/types/rfa'
-import { STATUSES } from '@/lib/config/workflow'
+import { STATUSES, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES } from '@/lib/config/workflow'
 
 interface RFAListTableProps {
   documents: RFADocument[]
@@ -61,14 +61,6 @@ export default function RFAListTable({
     })
   }
 
-  const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return '0 B'
-    const k = 1024
-    const sizes = ['B', 'KB', 'MB', 'GB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
-  }
-
   const calculatePendingDays = (document: RFADocument) => {
     const lastUpdate = convertToDate(document.updatedAt);
     if (!lastUpdate) return 0;
@@ -85,24 +77,24 @@ export default function RFAListTable({
     return Math.max(0, diffDays);
   };
 
+  /**
+   * ✅ [แก้ไข] ปรับ Logic ให้แสดงผลเป็น Role ตามสถานะของเอกสาร
+   */
   const getResponsibleParty = (doc: RFADocument): { name: string, role: string } => {
     switch (doc.status) {
       case STATUSES.PENDING_REVIEW:
-        return { name: 'Site', role: 'Adminsite' };
+        return { name: 'Site', role: 'Site' }; // <--- ปรับแก้ที่นี่
       case STATUSES.PENDING_CM_APPROVAL:
         return { name: 'CM', role: 'CM' };
       case STATUSES.REVISION_REQUIRED:
       case STATUSES.APPROVED_REVISION_REQUIRED:
-        return { name: doc.createdByInfo?.email?.split('@')[0] || 'Unknown', role: doc.createdByInfo?.role || 'Unknown' };
+        return { name: doc.createdByInfo?.role || 'Creator', role: doc.createdByInfo?.role || 'Creator' };
       case STATUSES.APPROVED:
       case STATUSES.APPROVED_WITH_COMMENTS:
       case STATUSES.REJECTED:
         return { name: 'เสร็จสิ้น', role: 'Completed' };
       default:
-        if (doc.assignedUserInfo) {
-          return { name: doc.assignedUserInfo.email.split('@')[0], role: doc.assignedUserInfo.role };
-        }
-        return { name: doc.createdByInfo?.email?.split('@')[0] || 'Unknown', role: doc.createdByInfo?.role || 'Unknown' };
+        return { name: 'N/A', role: 'N/A' };
     }
   }
 
@@ -219,7 +211,6 @@ export default function RFAListTable({
                       {String(doc.revisionNumber).padStart(2, '0')}
                     </span>
                   </td>
-                  {/* ✅ KEY CHANGE: นำ Logic การแสดงวันที่คงค้างกลับมาไว้ใต้สถานะ */}
                   <td className="px-6 py-4">
                     <div className="flex flex-col space-y-1 items-center">
                       <span className={`inline-flex items-center justify-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(doc.status)}`}>

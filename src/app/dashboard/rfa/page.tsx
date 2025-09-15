@@ -10,10 +10,12 @@ import RFADetailModal from '@/components/rfa/RFADetailModal'
 import DashboardStats from '@/components/rfa/DashboardStats'
 import CreateRFAForm from '@/components/rfa/CreateRFAForm'
 import { RFADocument } from '@/types/rfa'
-import { STATUSES, STATUS_LABELS } from '@/lib/config/workflow' 
-import { Plus, Search, RefreshCw } from 'lucide-react'
+import { STATUSES, STATUS_LABELS, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES } from '@/lib/config/workflow' 
+import { Plus, Search, RefreshCw, User } from 'lucide-react'
 import { db } from '@/lib/firebase/client'
 import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore'
+
+type CreatorRole = typeof CREATOR_ROLES[number];
 
 interface Filters {
   rfaType: 'ALL' | 'RFA-SHOP' | 'RFA-GEN' | 'RFA-MAT'
@@ -21,6 +23,7 @@ interface Filters {
   siteId: string | 'ALL'
   showAllRevisions: boolean;
   categoryId: string | 'ALL';
+  responsibleParty: 'ALL' | 'SITE' | 'CM' | CreatorRole;
 }
 
 interface Category {
@@ -54,6 +57,7 @@ function RFAContent() {
     siteId: 'ALL',
     showAllRevisions: false,
     categoryId: 'ALL',
+    responsibleParty: 'ALL',
   })
 
   useEffect(() => {
@@ -90,7 +94,7 @@ function RFAContent() {
               email: data.workflow?.[0]?.userName || 'N/A', 
               role: data.workflow?.[0]?.role || 'N/A' 
             },
-            permissions: {}, // This might need more logic if detailed permissions are required on the list view
+            permissions: {},
         } as RFADocument);
       });
       
@@ -108,12 +112,10 @@ function RFAContent() {
   useEffect(() => {
     let docs = [...allDocuments];
     
-    // 1. กรอง isLatest ก่อนเสมอ ถ้าไม่ได้เลือก "แสดงทุกฉบับ"
     if (!filters.showAllRevisions) {
       docs = docs.filter(doc => doc.isLatest === true);
     }
 
-    // 2. จากนั้นจึงกรองตามเงื่อนไขอื่นๆ
     if (filters.rfaType !== 'ALL') {
       docs = docs.filter(doc => doc.rfaType === filters.rfaType);
     }
@@ -123,8 +125,38 @@ function RFAContent() {
     if (filters.categoryId !== 'ALL') {
       docs = docs.filter(doc => doc.category?.id === filters.categoryId);
     }
+
+    // ✅ [แก้ไข] แก้ไข Logic การกรองผู้รับผิดชอบให้ถูกต้องและแม่นยำ
+    if (filters.responsibleParty !== 'ALL') {
+        docs = docs.filter(doc => {
+            const filter = filters.responsibleParty;
+            const status = doc.status;
+            const creatorRole = doc.createdByInfo?.role;
+
+            // ตรวจสอบความรับผิดชอบของ "Site"
+            if (filter === 'SITE') {
+                if (status === STATUSES.PENDING_REVIEW) return true;
+                // ถ้าเอกสารต้องแก้ไข และคนสร้างคือ Role ในกลุ่ม Reviewer (เช่น Site Admin) ให้ถือว่าเป็นความรับผิดชอบของ Site
+                if ((status === STATUSES.REVISION_REQUIRED || status === STATUSES.APPROVED_REVISION_REQUIRED) && creatorRole && REVIEWER_ROLES.includes(creatorRole)) {
+                    return true;
+                }
+            }
+            
+            // ตรวจสอบความรับผิดชอบของ "CM"
+            if (filter === 'CM') {
+                return status === STATUSES.PENDING_CM_APPROVAL;
+            }
+
+            // ตรวจสอบความรับผิดชอบของ Creator (BIM, ME, SN)
+            if (creatorRole && CREATOR_ROLES.includes(creatorRole)) {
+                 const isRevisionState = status === STATUSES.REVISION_REQUIRED || status === STATUSES.APPROVED_REVISION_REQUIRED;
+                 return isRevisionState && creatorRole === filter;
+            }
+            
+            return false;
+        });
+    }
     
-    // 3. กรองตามการค้นหาเป็นลำดับสุดท้าย
     if (searchTerm.trim()) {
         const search = searchTerm.toLowerCase();
         docs = docs.filter((doc: RFADocument) => 
@@ -134,7 +166,7 @@ function RFAContent() {
     }
 
     setFilteredDocuments(docs);
-  }, [searchTerm, allDocuments, filters]);
+  }, [searchTerm, allDocuments, filters, user]);
 
   const loadCategories = async () => {
     if (!firebaseUser) return;
@@ -165,7 +197,14 @@ function RFAContent() {
 
   const resetFilters = () => {
     const currentRfaType = filters.rfaType;
-    setFilters({ rfaType: currentRfaType, status: 'ALL', siteId: 'ALL', showAllRevisions: false, categoryId: 'ALL' })
+    setFilters({ 
+      rfaType: currentRfaType, 
+      status: 'ALL', 
+      siteId: 'ALL', 
+      showAllRevisions: false, 
+      categoryId: 'ALL',
+      responsibleParty: 'ALL'
+    })
     setSearchTerm('')
   }
   
@@ -243,7 +282,7 @@ function RFAContent() {
           {/* Filter Bar */}
           <div className="bg-white rounded-lg shadow mb-6 p-4">
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-              <div className="md:col-span-4">
+              <div className="md:col-span-3">
                 <label htmlFor="search-filter" className="text-sm font-medium text-gray-700">ค้นหา</label>
                 <div className="relative mt-1">
                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -274,6 +313,23 @@ function RFAContent() {
                     ))}
                   </select>
               </div>
+              
+              <div className="md:col-span-2">
+                <label htmlFor="responsible-party-filter" className="text-sm font-medium text-gray-700">ผู้รับผิดชอบ</label>
+                <select
+                  id="responsible-party-filter"
+                  value={filters.responsibleParty}
+                  onChange={(e) => handleFilterChange('responsibleParty', e.target.value as Filters['responsibleParty'])}
+                  className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="ALL">ทุกคน</option>
+                  {CREATOR_ROLES.map(role => (
+                      <option key={role} value={role}>{role}</option>
+                  ))}
+                  <option value="SITE">Site</option>
+                  <option value="CM">CM</option>
+                </select>
+              </div>
 
               <div className="md:col-span-2">
                 <label htmlFor="category-filter" className="text-sm font-medium text-gray-700">หมวดงาน</label>
@@ -292,7 +348,7 @@ function RFAContent() {
                 </select>
               </div>
 
-               <div className="md:col-span-2 flex items-center h-10">
+               <div className="md:col-span-1 flex items-center h-10">
                  <input
                     id="show-all-revisions"
                     type="checkbox"
@@ -300,7 +356,7 @@ function RFAContent() {
                     onChange={(e) => handleFilterChange('showAllRevisions', e.target.checked)}
                     className="h-4 w-4 rounded border-gray-300 text-blue-600"
                   />
-                  <label htmlFor="show-all-revisions" className="ml-2 text-sm text-gray-700">แสดงทุกฉบับ</label>
+                  <label htmlFor="show-all-revisions" className="ml-2 text-sm text-gray-700">ทุกฉบับ</label>
               </div>
               <div className="md:col-span-2">
                  <button onClick={resetFilters} className="w-full px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300">
