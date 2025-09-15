@@ -1,4 +1,4 @@
-// src/app/api/rfa/list/route.ts (แก้ไขแล้ว)
+// src/app/api/rfa/list/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { adminDb } from '@/lib/firebase/admin'
 import { getAuth } from 'firebase-admin/auth'
@@ -13,7 +13,6 @@ import {
 
 export async function GET(request: NextRequest) {
   try {
-    // (ส่วนการยืนยันตัวตนและดึงข้อมูล User ยังคงเดิม)
     const authHeader = request.headers.get('authorization')
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json({ success: false, error: 'Missing or invalid authorization header' }, { status: 401 })
@@ -39,7 +38,6 @@ export async function GET(request: NextRequest) {
 
     let firestoreQuery: any = adminDb.collection('rfaDocuments');
     
-    // --- ✅ 1. ย้ายการกรองทั้งหมดมาไว้ใน Query ---
     firestoreQuery = firestoreQuery.where('siteId', 'in', userSites);
 
     if (rfaType && rfaType !== 'ALL') {
@@ -51,7 +49,6 @@ export async function GET(request: NextRequest) {
     if (status && status !== 'ALL') {
         firestoreQuery = firestoreQuery.where('status', '==', status);
     }
-    // --- สิ้นสุดส่วนที่แก้ไข ---
 
     firestoreQuery = firestoreQuery.orderBy('updatedAt', 'desc');
 
@@ -67,15 +64,21 @@ export async function GET(request: NextRequest) {
     for (const doc of documentsSnapshot.docs) {
       const documentData = doc.data();
       
-      // --- ✅ 2. ลบการกรองสถานะเก่าออก เหลือแค่การเช็คสิทธิ์การมองเห็น ---
       let shouldInclude = false;
+
       if (userRole === 'Admin' || OBSERVER_ALL_ROLES.includes(userRole) || REVIEWER_ROLES.includes(userRole) || CREATOR_ROLES.includes(userRole)) {
         shouldInclude = true;
-      } else if (APPROVER_ROLES.includes(userRole)) {
+      } 
+      else if (APPROVER_ROLES.includes(userRole)) {
         const relevantStatuses = [STATUSES.PENDING_CM_APPROVAL, ...finishedStatuses];
-        if (relevantStatuses.includes(documentData.status)) shouldInclude = true;
-      } else if (OBSERVER_FINISHED_ROLES.includes(userRole)) {
-         if (finishedStatuses.includes(documentData.status)) shouldInclude = true;
+        if (relevantStatuses.includes(documentData.status)) {
+          shouldInclude = true;
+        }
+      } 
+      else if (OBSERVER_FINISHED_ROLES.includes(userRole)) {
+         if (finishedStatuses.includes(documentData.status)) {
+           shouldInclude = true;
+         }
       }
 
       if (shouldInclude) {
@@ -89,7 +92,6 @@ export async function GET(request: NextRequest) {
         };
         
         const siteInfo = { id: documentData.siteId, name: documentData.siteName || 'N/A' };
-        // แก้ไข: ใช้ taskData.taskCategory เพื่อความแม่นยำ
         const categoryInfo = { id: documentData.categoryId, categoryCode: documentData.taskData?.taskCategory || 'N/A' };
         const createdByInfo = { email: documentData.workflow[0]?.userName || 'N/A', role: documentData.workflow[0]?.role || 'N/A' };
         const assignedUserInfo = null;
@@ -113,7 +115,7 @@ export async function GET(request: NextRequest) {
 
   } catch (error) {
     console.error('Error fetching RFA documents:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Internal server error';
+    const errorMessage = error instanceof Error ? error.message : 'Internal Server Error';
     return NextResponse.json({ success: false, error: errorMessage }, { status: 500 });
   }
 }

@@ -1,13 +1,11 @@
-// src/components/rfa/RFADetailModal.tsx (แก้ไขสมบูรณ์)
 'use client'
 
 import React, { useState, useMemo, useEffect } from 'react'
 import { RFADocument, RFAPermissions, RFAWorkflowStep, RFAFile } from '@/types/rfa'
 import { X, Paperclip, Clock, User, Check, Send, AlertTriangle, FileText, Download, History, MessageSquare, Edit3, Upload, Loader2, ThumbsUp, ThumbsDown } from 'lucide-react'
 import { useAuth } from '@/lib/auth/useAuth'
-import { STATUS_LABELS, STATUSES, CREATOR_ROLES } from '@/lib/config/workflow'
+import { STATUS_LABELS, STATUSES, CREATOR_ROLES, APPROVER_ROLES } from '@/lib/config/workflow' // ✅ แก้ไข: เพิ่ม APPROVER_ROLES
 
-// =========== Helper Functions ===========
 const formatDate = (dateString: string | undefined): string => {
   if (!dateString) return 'N/A';
   return new Date(dateString).toLocaleString('th-TH', {
@@ -23,8 +21,15 @@ const formatFileSize = (bytes: number): string => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 };
 
-// =========== History Modal Component ===========
-const WorkflowHistoryModal = ({ workflow, onClose }: { workflow: RFAWorkflowStep[], onClose: () => void }) => {
+const WorkflowHistoryModal = ({ workflow, onClose, userRole }: { workflow: RFAWorkflowStep[], onClose: () => void, userRole?: string }) => {
+    
+    const filteredWorkflow = useMemo(() => {
+        if (userRole && APPROVER_ROLES.includes(userRole)) {
+            return workflow.filter(item => item.status !== STATUSES.PENDING_REVIEW);
+        }
+        return workflow;
+    }, [workflow, userRole]);
+
     return (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-[60] flex items-center justify-center p-4">
             <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col">
@@ -39,8 +44,8 @@ const WorkflowHistoryModal = ({ workflow, onClose }: { workflow: RFAWorkflowStep
                 </div>
                 <div className="p-6 overflow-y-auto">
                     <div className="border-l-2 border-gray-200 ml-2">
-                        {workflow.length > 0 ? (
-                            workflow.map((item, index) => (
+                        {filteredWorkflow.length > 0 ? (
+                            filteredWorkflow.map((item, index) => (
                             <div key={index} className="relative pl-6 pb-8 last:pb-0">
                                 <div className="absolute -left-[9px] top-1 w-4 h-4 bg-blue-500 rounded-full border-2 border-white"></div>
                                 <p className="font-semibold text-gray-800">{STATUS_LABELS[item.status] || item.status}</p>
@@ -84,7 +89,6 @@ const WorkflowHistoryModal = ({ workflow, onClose }: { workflow: RFAWorkflowStep
     );
 };
 
-// =========== Main Detail Modal Component ===========
 interface RFADetailModalProps {
   document: RFADocument | null
   onClose: () => void
@@ -428,19 +432,18 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
               </div>
             )}
 
-            {/* จะแสดงเมื่อสถานะเป็น REJECTED และ "ไม่ใช่" ฉบับล่าสุด */}
             {document.status === STATUSES.REJECTED && !document.isLatest && (
               <div className="p-4 bg-red-50 text-red-800 rounded-lg flex items-center">
                 <AlertTriangle size={24} className="mr-3 flex-shrink-0 text-red-600" />
                 <div>
                   <h4 className="font-bold">เอกสารฉบับนี้ถูกแทนที่แล้ว</h4>
                   <p className="text-sm text-red-700">
-                    ได้มีการสร้างเอกสารฉบับใหม่ (REV-{String((document.revisionNumber || 0) + 1).padStart(2, '0')}) จากเอกสารฉบับนี้แล้ว
+                    ได้มีการสร้างเอกสารฉบับใหม่ <strong>(REV-{String((document.revisionNumber || 0) + 1).padStart(2, '0')})</strong> จากเอกสารฉบับนี้แล้ว
                   </p>
                 </div>
               </div>
             )}
-            
+
             {isRevisionFlow && (
               <div className="p-4 border-t bg-yellow-50 rounded-b-lg">
                   <h3 className="text-lg font-bold text-yellow-800 mb-4">สร้างเอกสารฉบับแก้ไข (Create New Revision)</h3>
@@ -606,6 +609,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
         <WorkflowHistoryModal 
             workflow={document.workflow || []} 
             onClose={() => setShowHistory(false)} 
+            userRole={user?.role}
         />
       )}
     </>
