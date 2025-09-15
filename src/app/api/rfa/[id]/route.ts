@@ -93,12 +93,10 @@ export async function PUT(
         const userRole = userData.role;
     
         const body = await request.json();
-        // ✅ ใช้ชื่อ newFiles ตามโค้ดเดิมของคุณเพื่อให้ Frontend ทำงานได้ต่อเนื่อง
         const { action, comments, newFiles } = body; 
     
         if (!action) return NextResponse.json({ error: 'Action is required' }, { status: 400 });
     
-        // ✅ Validation: บังคับแนบไฟล์สำหรับทุก Action ของ CM และ Site Admin
         if (!newFiles || !Array.isArray(newFiles) || newFiles.length === 0) {
             return NextResponse.json({ error: 'Attaching new files is required for this action' }, { status: 400 });
         }
@@ -111,8 +109,13 @@ export async function PUT(
         let newStatus = docData.status;
         let canPerformAction = false;
     
-        // --- ✅ Logic Workflow ส่วนนี้ถูกต้องและครอบคลุมทุกฝ่ายแล้ว ---
         switch (action) {
+          // ✅ [ACTION ใหม่] สำหรับ BIM ส่งงานที่สถานะ "แก้ไข" กลับไป "รอตรวจสอบ"
+          case 'SUBMIT_REVISION':
+            canPerformAction = CREATOR_ROLES.includes(userRole) && docData.status === STATUSES.REVISION_REQUIRED && docData.createdBy === userId;
+            if (canPerformAction) newStatus = STATUSES.PENDING_REVIEW;
+            break;
+
           case 'SEND_TO_CM':
             canPerformAction = REVIEWER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_REVIEW;
             if (canPerformAction) newStatus = STATUSES.PENDING_CM_APPROVAL;
@@ -120,12 +123,6 @@ export async function PUT(
     
           case 'REQUEST_REVISION':
             canPerformAction = REVIEWER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_REVIEW;
-            if (canPerformAction) newStatus = STATUSES.REVISION_REQUIRED;
-            break;
-
-          // --- CM Actions ---
-          case 'APPROVE_REVISION_REQUIRED':
-            canPerformAction = APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL;
             if (canPerformAction) newStatus = STATUSES.REVISION_REQUIRED;
             break;
             
@@ -143,6 +140,11 @@ export async function PUT(
             canPerformAction = APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL;
             if (canPerformAction) newStatus = STATUSES.APPROVED_WITH_COMMENTS;
             break;
+
+          case 'APPROVE_REVISION_REQUIRED':
+             canPerformAction = APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL;
+             if (canPerformAction) newStatus = STATUSES.REVISION_REQUIRED;
+             break;
     
           default:
             return NextResponse.json({ success: false, error: 'Invalid action' }, { status: 400 });

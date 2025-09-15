@@ -17,7 +17,6 @@ import {
   Menu,
   X
 } from 'lucide-react'
-// --- 1. Import ค่าคงที่ ROLES จาก workflow.ts ---
 import { CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES } from '@/lib/config/workflow'
 
 
@@ -40,20 +39,17 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
   const [showRfaDropdown, setShowRfaDropdown] = useState(false)
   const [userSites, setUserSites] = useState<SiteData[]>([])
   
-  // --- 2. ปรับปรุง Logic การเช็คสิทธิ์ให้ใช้ค่าจากไฟล์ Config ---
   const isRFAAuthorized = () => {
     if (!user) return false;
-    // รวมทุก Role ที่มีสิทธิ์เข้าถึง RFA/RFI จากไฟล์ Config
     const authorizedRoles = [
       ...CREATOR_ROLES, 
       ...REVIEWER_ROLES, 
       ...APPROVER_ROLES, 
-      'Admin' // Admin มีสิทธิ์เสมอ
+      'Admin'
     ];
     return authorizedRoles.includes(user.role);
   }
 
-  // (ส่วนที่เหลือของไฟล์ไม่ต้องแก้ไข)
   useEffect(() => {
     const fetchUserSites = async () => {
       if (!user?.sites || user.sites.length === 0) return
@@ -110,13 +106,12 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
         />
       )}
       <div className={`
-        fixed lg:static inset-y-0 left-0 z-50
+        fixed inset-y-0 left-0 z-20
         w-64 bg-gradient-to-b from-amber-50 to-orange-50 
         border-r border-orange-200
         transform transition-transform duration-300 ease-in-out
-        ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-        ${!isOpen ? 'lg:w-0 lg:overflow-hidden' : ''}
-        flex flex-col h-full
+        ${isOpen ? 'translate-x-0' : '-translate-x-full'}
+        flex flex-col h-screen pt-16 
       `}>
         
         <div className="bg-gradient-to-r from-orange-600 to-orange-700 text-white p-4 lg:p-6">

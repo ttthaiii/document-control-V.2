@@ -2,7 +2,7 @@
 
 // (ส่วน ROLES เหมือนเดิม)
 export const CREATOR_ROLES = ['BIM', 'ME', 'SN'];
-export const REVIEWER_ROLES = ['Adminsite', 'Adminsite2', 'OE', 'PE'];
+export const REVIEWER_ROLES = ['Site Admin', 'Adminsite2', 'OE', 'PE'];
 export const APPROVER_ROLES = ['CM'];
 export const OBSERVER_ALL_ROLES = ['PM'];
 export const OBSERVER_FINISHED_ROLES = ['SE'];

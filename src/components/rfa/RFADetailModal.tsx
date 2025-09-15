@@ -1,11 +1,11 @@
-// src/components/rfa/RFADetailModal.tsx (แก้ไขแล้ว)
+// src/components/rfa/RFADetailModal.tsx (แก้ไขสมบูรณ์)
 'use client'
 
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { RFADocument, RFAPermissions, RFAWorkflowStep, RFAFile } from '@/types/rfa'
 import { X, Paperclip, Clock, User, Check, Send, AlertTriangle, FileText, Download, History, MessageSquare, Edit3, Upload, Loader2, ThumbsUp, ThumbsDown } from 'lucide-react'
 import { useAuth } from '@/lib/auth/useAuth'
-import { STATUS_LABELS, STATUSES } from '@/lib/config/workflow'
+import { STATUS_LABELS, STATUSES, CREATOR_ROLES } from '@/lib/config/workflow'
 
 // =========== Helper Functions ===========
 const formatDate = (dateString: string | undefined): string => {
@@ -22,7 +22,6 @@ const formatFileSize = (bytes: number): string => {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 };
-
 
 // =========== History Modal Component ===========
 const WorkflowHistoryModal = ({ workflow, onClose }: { workflow: RFAWorkflowStep[], onClose: () => void }) => {
@@ -101,48 +100,88 @@ interface UploadedFile {
     error?: string;
 }
 
-export default function RFADetailModal({ document, onClose, onUpdate }: RFADetailModalProps) {
-  const { firebaseUser } = useAuth();
+export default function RFADetailModal({ document: initialDoc, onClose, onUpdate }: RFADetailModalProps) {
+  const { user, firebaseUser } = useAuth();
+  const [document, setDocument] = useState<RFADocument | null>(initialDoc);
+  const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  
   const [comment, setComment] = useState('');
   const [newFiles, setNewFiles] = useState<UploadedFile[]>([]);
+
+  const [revisionComment, setRevisionComment] = useState('');
+  const [revisionFiles, setRevisionFiles] = useState<UploadedFile[]>([]);
+  
+  useEffect(() => {
+    const fetchFullDocument = async () => {
+      if (!initialDoc || !firebaseUser) {
+        setIsLoading(false);
+        return;
+      }
+      setIsLoading(true);
+      try {
+        const token = await firebaseUser.getIdToken();
+        const response = await fetch(`/api/rfa/${initialDoc.id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const result = await response.json();
+        if (result.success) {
+          setDocument(result.document);
+        } else {
+          console.error("Failed to fetch full document:", result.error);
+          setDocument(initialDoc);
+        }
+      } catch (error) {
+        console.error("Error fetching full document:", error);
+        setDocument(initialDoc);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchFullDocument();
+  }, [initialDoc, firebaseUser]);
+
+  const latestCommentItem = useMemo(() => {
+    if (!document?.workflow || document.workflow.length === 0) return null;
+    return [...document.workflow].reverse().find(step => step.comments && step.comments.trim() !== '');
+  }, [document?.workflow]);
+
+  if (isLoading) {
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+            <Loader2 className="w-12 h-12 text-white animate-spin" />
+        </div>
+    );
+  }
 
   if (!document) return null;
 
   const permissions = document.permissions || {} as RFAPermissions;
   const latestFiles = document.files || [];
-
-  const latestCommentItem = useMemo(() => {
-    if (!document.workflow || document.workflow.length === 0) {
-      return null;
-    }
-    return [...document.workflow].reverse().find(step => step.comments && step.comments.trim() !== '');
-  }, [document.workflow]);
-
-  // ✅ KEY CHANGE: Updated the logic to remove the commenter's name
+  const isCreator = document.createdBy === user?.id;
+  
+  const isResubmissionFlow = document.status === STATUSES.REVISION_REQUIRED && isCreator;
+  const isRevisionFlow = document.status === STATUSES.REJECTED && isCreator;
+  
+  const newRevisionNumber = (document.revisionNumber || 0) + 1;
+  const newDocumentNumber = `${document.documentNumber.split('-REV')[0]}-REV${String(newRevisionNumber).padStart(2, '0')}`;
   const displayDetailOrComment = latestCommentItem?.comments || document.description;
-  const displayLabel = latestCommentItem 
-    ? `ความคิดเห็นล่าสุด` 
-    : 'รายละเอียดเพิ่มเติม';
-
-  // ... (All other functions remain unchanged) ...
+  const displayLabel = latestCommentItem ? `ความคิดเห็นล่าสุด` : 'รายละเอียดเพิ่มเติม';
+  
   const uploadTempFile = async (file: File): Promise<Partial<UploadedFile>> => {
     try {
         if (!firebaseUser) throw new Error('กรุณาล็อกอินก่อนอัปโหลดไฟล์');
-
         const token = await firebaseUser.getIdToken();
         const formData = new FormData();
         formData.append('file', file);
-
         const response = await fetch('/api/rfa/upload-temp-file', {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}` },
             body: formData
         });
-
         const result = await response.json();
-
         if (result.success) {
             return { status: 'success', progress: 100, uploadedData: result.fileData };
         } else {
@@ -153,7 +192,7 @@ export default function RFADetailModal({ document, onClose, onUpdate }: RFADetai
     }
   };
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>, target: 'action' | 'revision' | 'resubmission') => {
     const files = Array.from(event.target.files || []);
     if (!files.length) return;
 
@@ -164,18 +203,23 @@ export default function RFADetailModal({ document, onClose, onUpdate }: RFADetai
       progress: 0
     }));
     
-    setNewFiles(prev => [...prev, ...uploadedFileObjects]);
+    const setFiles = target === 'revision' ? setRevisionFiles : setNewFiles;
+    
+    setFiles(prev => [...prev, ...uploadedFileObjects]);
     
     uploadedFileObjects.forEach(async (fileObj) => {
-        setNewFiles(prev => prev.map(f => f.id === fileObj.id ? { ...f, status: 'uploading' } : f));
+        setFiles(prev => prev.map(f => f.id === fileObj.id ? { ...f, status: 'uploading' } : f));
         const result = await uploadTempFile(fileObj.file);
-        setNewFiles(prev => prev.map(f => f.id === fileObj.id ? { ...f, ...result } : f));
+        setFiles(prev => prev.map(f => f.id === fileObj.id ? { ...f, ...result } : f));
     });
     event.target.value = '';
   };
-
-  const removeNewFile = async (index: number) => {
-    const fileToRemove = newFiles[index];
+  
+  const removeFile = async (index: number, target: 'action' | 'revision' | 'resubmission') => {
+    const files = target === 'revision' ? revisionFiles : newFiles;
+    const setFiles = target === 'revision' ? setRevisionFiles : setNewFiles;
+    
+    const fileToRemove = files[index];
     if (fileToRemove.status === 'success' && fileToRemove.uploadedData?.filePath) {
         try {
             const token = await firebaseUser?.getIdToken();
@@ -188,8 +232,9 @@ export default function RFADetailModal({ document, onClose, onUpdate }: RFADetai
             console.error("Failed to delete temp file:", error);
         }
     }
-    setNewFiles(prev => prev.filter((_, i) => i !== index));
+    setFiles(prev => prev.filter((_, i) => i !== index));
   };
+
 
   const handleAction = async (action: string) => {
     const successfulUploads = newFiles.filter(f => f.status === 'success');
@@ -215,13 +260,6 @@ export default function RFADetailModal({ document, onClose, onUpdate }: RFADetai
 
       const result = await response.json();
       if (result.success) {
-        const updatedDocResponse = await fetch(`/api/rfa/${document.id}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const updatedDocResult = await updatedDocResponse.json();
-        if (updatedDocResult.success) {
-          onUpdate(updatedDocResult.document);
-        }
         alert(`ดำเนินการ "${action}" สำเร็จ!`);
         onClose();
       } else {
@@ -233,7 +271,45 @@ export default function RFADetailModal({ document, onClose, onUpdate }: RFADetai
       setIsSubmitting(false);
     }
   };
+  
+  const handleCreateRevision = async () => {
+    const successfulUploads = revisionFiles.filter(f => f.status === 'success');
+    if (successfulUploads.length === 0) {
+      alert('กรุณาแนบไฟล์ฉบับแก้ไขอย่างน้อย 1 ไฟล์');
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const token = await firebaseUser?.getIdToken();
+      const payload = {
+        originalDocId: document.id,
+        uploadedFiles: successfulUploads.map(f => f.uploadedData),
+        comments: revisionComment
+      };
 
+      const response = await fetch(`/api/rfa/create_revision`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        alert(`สร้างเอกสารฉบับแก้ไข ${newDocumentNumber} สำเร็จ!`);
+        onClose();
+      } else {
+        throw new Error(result.error || 'เกิดข้อผิดพลาดในการสร้าง Revision');
+      }
+    } catch (error) {
+      alert(`เกิดข้อผิดพลาด: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleResubmitRevision = async () => {
+    await handleAction('SUBMIT_REVISION');
+  };
 
   return (
     <>
@@ -308,8 +384,109 @@ export default function RFADetailModal({ document, onClose, onUpdate }: RFADetai
             </div>
           </div>
           
-          {(permissions.canSendToCm || permissions.canApprove) && (
-            <div className="p-4 border-t bg-gray-50 rounded-b-lg">
+          <div className="p-4 border-t bg-gray-50 rounded-b-lg">
+            
+            {isResubmissionFlow && (
+              <div className="space-y-4">
+                <h3 className="text-lg font-bold text-blue-800">ส่งเอกสารที่แก้ไข (Submit Revision)</h3>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-1 block">แสดงความคิดเห็น (Optional)</label>
+                  <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..." className="w-full p-2 border rounded-md text-sm" rows={2}/>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-1 block">แนบไฟล์ที่แก้ไขแล้ว (จำเป็น)</label>
+                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
+                      <input type="file" multiple onChange={(e) => handleFileUpload(e, 'resubmission')} className="hidden" id="resubmit-file-upload" />
+                      <label htmlFor="resubmit-file-upload" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
+                          <Upload size={16} className="mr-2"/>
+                          คลิกเพื่อเลือกไฟล์
+                      </label>
+                  </div>
+                  <div className="mt-2 space-y-2">
+                      {newFiles.map((fileObj, index) => (
+                          <div key={fileObj.id} className="flex items-center text-sm p-2 bg-gray-100 rounded">
+                              <FileText className="w-4 h-4 mr-2 text-gray-500" />
+                              <span className="flex-1 truncate">{fileObj.file.name}</span>
+                              {fileObj.status === 'uploading' && <Loader2 className="w-4 h-4 animate-spin text-blue-500" />}
+                              {fileObj.status === 'success' && <Check className="w-4 h-4 text-green-500" />}
+                              {fileObj.status === 'error' && <span title={fileObj.error}><AlertTriangle className="w-4 h-4 text-red-500" /></span>}
+                              <button onClick={() => removeFile(index, 'resubmission')} className="ml-2 text-gray-500 hover:text-red-600"><X size={16} /></button>
+                          </div>
+                      ))}
+                  </div>
+                </div>
+                <div className="flex justify-end">
+                  <button
+                      onClick={handleResubmitRevision}
+                      disabled={isSubmitting || newFiles.filter(f => f.status === 'success').length === 0}
+                      className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-300"
+                  >
+                      {isSubmitting ? <Loader2 className="animate-spin mr-2"/> : <Send size={16} className="mr-2" />}
+                      ส่งกลับไปตรวจสอบ
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {isRevisionFlow && (
+              <div className="p-4 border-t bg-yellow-50 rounded-b-lg">
+                  <h3 className="text-lg font-bold text-yellow-800 mb-4">สร้างเอกสารฉบับแก้ไข (Create New Revision)</h3>
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                        <p><strong>เอกสารเดิม:</strong> {document.documentNumber}</p>
+                        <p><strong>เอกสารใหม่:</strong> {newDocumentNumber}</p>
+                    </div>
+                    <div>
+                        <label className="text-sm font-medium text-gray-700 mb-1 block">แนบไฟล์ที่แก้ไขแล้ว (จำเป็น)</label>
+                        <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
+                            <input type="file" multiple onChange={(e) => handleFileUpload(e, 'revision')} className="hidden" id="revision-file-upload" />
+                            <label htmlFor="revision-file-upload" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
+                                <Upload size={16} className="mr-2"/>
+                                คลิกเพื่อเลือกไฟล์
+                            </label>
+                        </div>
+                        <div className="mt-2 space-y-2">
+                            {revisionFiles.map((fileObj, index) => (
+                                <div key={fileObj.id} className="flex items-center text-sm p-2 bg-gray-100 rounded">
+                                    <FileText className="w-4 h-4 mr-2 text-gray-500" />
+                                    <span className="flex-1 truncate">{fileObj.file.name}</span>
+                                    {fileObj.status === 'uploading' && <Loader2 className="w-4 h-4 animate-spin text-blue-500" />}
+                                    {fileObj.status === 'success' && <Check className="w-4 h-4 text-green-500" />}
+                                    {fileObj.status === 'error' && (
+                                      <span title={fileObj.error}>
+                                        <AlertTriangle className="w-4 h-4 text-red-500" />
+                                      </span>
+                                    )}
+                                    <button onClick={() => removeFile(index, 'revision')} className="ml-2 text-gray-500 hover:text-red-600"><X size={16} /></button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    <div>
+                        <label className="text-sm font-medium text-gray-700 mb-1 block">หมายเหตุการแก้ไข (Optional)</label>
+                        <textarea
+                            value={revisionComment}
+                            onChange={(e) => setRevisionComment(e.target.value)}
+                            placeholder="เช่น แก้ไขตาม Comment จาก CM..."
+                            className="w-full p-2 border rounded-md text-sm"
+                            rows={2}
+                        />
+                    </div>
+                    <div className="flex justify-end">
+                        <button
+                            onClick={handleCreateRevision}
+                            disabled={isSubmitting || revisionFiles.filter(f => f.status === 'success').length === 0}
+                            className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-300"
+                        >
+                            {isSubmitting ? <Loader2 className="animate-spin mr-2"/> : <Send size={16} className="mr-2" />}
+                            ส่งเอกสารฉบับแก้ไข
+                        </button>
+                    </div>
+                </div>
+              </div>
+            )}
+            
+            {!isRevisionFlow && !isResubmissionFlow && (permissions.canSendToCm || permissions.canApprove) && (
               <div className="space-y-4">
                   <div>
                       <label className="text-sm font-medium text-gray-700 mb-1 block">แสดงความคิดเห็น (Optional)</label>
@@ -324,7 +501,7 @@ export default function RFADetailModal({ document, onClose, onUpdate }: RFADetai
                   <div>
                     <label className="text-sm font-medium text-gray-700 mb-1 block">แนบไฟล์ใหม่ (จำเป็น)</label>
                     <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
-                        <input type="file" multiple onChange={handleFileUpload} className="hidden" id="action-file-upload" />
+                        <input type="file" multiple onChange={(e) => handleFileUpload(e, 'action')} className="hidden" id="action-file-upload" />
                         <label htmlFor="action-file-upload" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
                             <Upload size={16} className="mr-2"/>
                             คลิกเพื่อเลือกไฟล์
@@ -342,15 +519,12 @@ export default function RFADetailModal({ document, onClose, onUpdate }: RFADetai
                                     <AlertTriangle className="w-4 h-4 text-red-500" />
                                   </span>
                                 )}
-                                <button onClick={() => removeNewFile(index)} className="ml-2 text-gray-500 hover:text-red-600">
-                                    <X size={16} />
-                                </button>
+                                <button onClick={() => removeFile(index, 'action')} className="ml-2 text-gray-500 hover:text-red-600"><X size={16} /></button>
                             </div>
                         ))}
                     </div>
                   </div>
                   
-                  {/* Site Admin Actions */}
                   {permissions.canSendToCm && (
                     <div className="flex justify-end space-x-3">
                       <button
@@ -372,7 +546,6 @@ export default function RFADetailModal({ document, onClose, onUpdate }: RFADetai
                     </div>
                   )}
 
-                  {/* CM Actions */}
                   {permissions.canApprove && (
                     <div className="flex flex-wrap justify-end gap-3">
                        <button
@@ -411,8 +584,9 @@ export default function RFADetailModal({ document, onClose, onUpdate }: RFADetai
                   )}
 
               </div>
-            </div>
-          )}
+            )}
+            
+          </div>
         </div>
       </div>
       {showHistory && (

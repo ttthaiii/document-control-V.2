@@ -1,4 +1,3 @@
-// src/components/rfa/DashboardStats.tsx (แก้ไขแล้ว)
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -8,7 +7,6 @@ import { STATUSES, STATUS_LABELS } from '@/lib/config/workflow';
 import { Loader2 } from 'lucide-react';
 import { RFADocument } from '@/types/rfa';
 
-// ... (Interfaces and constants remain the same) ...
 interface StatsData {
   responsibleParty: { [key: string]: number };
   categories: { [key: string]: number };
@@ -37,7 +35,6 @@ const CustomTooltip = ({ active, payload }: any) => {
       </div>
     );
   }
-
   return null;
 };
 
@@ -75,11 +72,12 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
     const docsForStats = allDocuments; 
       
     const newStats: StatsData = {
-      responsibleParty: { BIM: 0, SITE: 0, CM: 0, APPROVED: 0 },
+      responsibleParty: { BIM: 0, SITE: 0, CM: 0, APPROVED: 0, REJECTED: 0 },
       categories: {},
     };
 
     for (const doc of docsForStats) {
+      // ✅ [FIX] แยก Logic การนับสถานะออกจากกัน
       switch (doc.status) {
         case STATUSES.PENDING_REVIEW:
             newStats.responsibleParty.SITE += 1;
@@ -89,7 +87,10 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
             break;
         case STATUSES.REVISION_REQUIRED:
         case STATUSES.APPROVED_REVISION_REQUIRED:
-            newStats.responsibleParty.BIM += 1;
+            newStats.responsibleParty.BIM += 1; // "แก้ไข" อยู่ที่ BIM
+            break;
+        case STATUSES.REJECTED:
+             newStats.responsibleParty.REJECTED += 1; // "ไม่อนุมัติ" แยกออกมานับโดยเฉพาะ
             break;
         case STATUSES.APPROVED:
         case STATUSES.APPROVED_WITH_COMMENTS:
@@ -97,7 +98,6 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
             break;
       }
 
-      // ✅ KEY CHANGE: Consistently use doc.category.id for aggregation key
       const categoryId = doc.category?.id || 'N/A';
       if (categoryId !== 'N/A') {
           newStats.categories[categoryId] = (newStats.categories[categoryId] || 0) + 1;
@@ -108,15 +108,16 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
 
   const responsiblePartyData = useMemo(() => {
     if (!stats) return [];
+    // ✅ [FIX] เพิ่มข้อมูลสถานะ "ไม่อนุมัติ" สำหรับแสดงบน Chart
     return [
       { name: STATUS_LABELS[STATUSES.PENDING_REVIEW], value: stats.responsibleParty.SITE, statusKey: STATUSES.PENDING_REVIEW, color: STATUS_COLORS[STATUSES.PENDING_REVIEW] },
       { name: STATUS_LABELS[STATUSES.PENDING_CM_APPROVAL], value: stats.responsibleParty.CM, statusKey: STATUSES.PENDING_CM_APPROVAL, color: STATUS_COLORS[STATUSES.PENDING_CM_APPROVAL] },
       { name: STATUS_LABELS[STATUSES.REVISION_REQUIRED], value: stats.responsibleParty.BIM, statusKey: STATUSES.REVISION_REQUIRED, color: STATUS_COLORS[STATUSES.REVISION_REQUIRED] },
       { name: STATUS_LABELS[STATUSES.APPROVED], value: stats.responsibleParty.APPROVED, statusKey: STATUSES.APPROVED, color: STATUS_COLORS[STATUSES.APPROVED] },
+      { name: STATUS_LABELS[STATUSES.REJECTED], value: stats.responsibleParty.REJECTED, statusKey: STATUSES.REJECTED, color: STATUS_COLORS[STATUSES.REJECTED] }
     ].filter(item => item.value > 0);
   }, [stats]);
 
-  // ✅ KEY CHANGE: Logic updated to map from categoryId (the key) to its details
   const categoryData = useMemo(() => {
     if (!stats) return [];
     return Object.entries(stats.categories)
@@ -124,7 +125,7 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
         const categoryDetails = categories.find(c => c.id === categoryId);
         return {
           id: categoryId,
-          name: categoryDetails?.categoryCode || categoryId, // Display code, fallback to ID
+          name: categoryDetails?.categoryCode || categoryId,
           value: value as number,
           color: getColorForString(categoryDetails?.categoryCode || categoryId)
         };
@@ -132,7 +133,6 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
       .filter(item => item.value > 0);
   }, [stats, categories]);
 
-  // ... (The rest of the file remains the same) ...
   const { displayData: displayResponsibleData, total: displayTotalResponsible } = useMemo(() => {
     const total = responsiblePartyData.reduce((sum, item) => sum + item.value, 0);
     return { displayData: responsiblePartyData, total };
@@ -150,7 +150,7 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
     const statusKey = data.payload.statusKey;
     onChartFilter('status', activeFilters.status === statusKey ? 'ALL' : statusKey);
   };
-
+  
   const handleCategoryClick = (data: any) => {
     const categoryId = data.payload.id;
     onChartFilter('categoryId', activeFilters.categoryId === categoryId ? 'ALL' : categoryId);
@@ -163,7 +163,6 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
   return (
     <div className="relative grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
       <div>
-          {/* Responsible Party Chart */}
           <div className="bg-white p-6 rounded-lg shadow">
             <h3 className="text-lg font-semibold text-gray-800 mb-4 text-center">สถานะตามผู้รับผิดชอบ</h3>
             <div className="relative w-full h-[300px]">
@@ -214,7 +213,6 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
       </div>
       
       <div>
-          {/* Category Chart */}
           <div className="bg-white p-6 rounded-lg shadow">
             <h3 className="text-lg font-semibold text-gray-800 mb-4 text-center">สถานะตามหมวดหมู่</h3>
             <div className="relative w-full h-[300px]">

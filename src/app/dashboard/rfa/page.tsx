@@ -108,6 +108,12 @@ function RFAContent() {
   useEffect(() => {
     let docs = [...allDocuments];
     
+    // 1. กรอง isLatest ก่อนเสมอ ถ้าไม่ได้เลือก "แสดงทุกฉบับ"
+    if (!filters.showAllRevisions) {
+      docs = docs.filter(doc => doc.isLatest === true);
+    }
+
+    // 2. จากนั้นจึงกรองตามเงื่อนไขอื่นๆ
     if (filters.rfaType !== 'ALL') {
       docs = docs.filter(doc => doc.rfaType === filters.rfaType);
     }
@@ -118,18 +124,7 @@ function RFAContent() {
       docs = docs.filter(doc => doc.category?.id === filters.categoryId);
     }
     
-    if (!filters.showAllRevisions) {
-        const latestDocsMap = new Map<string, RFADocument>();
-        docs.forEach(doc => {
-            const baseNumber = doc.documentNumber.split('-REV')[0];
-            const existing = latestDocsMap.get(baseNumber);
-            if (!existing || doc.revisionNumber > existing.revisionNumber) {
-                latestDocsMap.set(baseNumber, doc);
-            }
-        });
-        docs = Array.from(latestDocsMap.values());
-    }
-
+    // 3. กรองตามการค้นหาเป็นลำดับสุดท้าย
     if (searchTerm.trim()) {
         const search = searchTerm.toLowerCase();
         docs = docs.filter((doc: RFADocument) => 
@@ -140,7 +135,6 @@ function RFAContent() {
 
     setFilteredDocuments(docs);
   }, [searchTerm, allDocuments, filters]);
-
 
   const loadCategories = async () => {
     if (!firebaseUser) return;

@@ -46,7 +46,7 @@ export async function POST(req: Request) {
             
             // 1. คำนวณ Revision ใหม่
             const newRevisionNumber = (originalData.revisionNumber || 0) + 1;
-            const newDocumentNumber = `${originalData.documentNumber.split('-REV')[0]}-REV${String(newRevisionNumber).padStart(2, '0')}`;
+             const newDocumentNumber = originalData.documentNumber;
 
             // 2. ย้ายไฟล์ใหม่จาก Temp ไปยัง Permanent Storage
             const finalFilesData = [];
