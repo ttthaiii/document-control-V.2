@@ -101,17 +101,17 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
     <>
       {isOpen && (
         <div 
-          className="lg:hidden fixed inset-0 bg-black bg-opacity-50 z-40"
+          className="lg:hidden fixed inset-0 bg-black bg-opacity-50 z-30" 
           onClick={onToggle}
         />
       )}
       <div className={`
-        fixed inset-y-0 left-0 z-20
-        w-64 bg-gradient-to-b from-amber-50 to-orange-50 
+        fixed inset-y-0 left-0 z-40
+        w-64 bg-gradient-to-b from-amber-50 to-orange-50
         border-r border-orange-200
         transform transition-transform duration-300 ease-in-out
         ${isOpen ? 'translate-x-0' : '-translate-x-full'}
-        flex flex-col h-screen pt-16 
+        flex flex-col h-screen pt-16
       `}>
         
         <div className="bg-gradient-to-r from-orange-600 to-orange-700 text-white p-4 lg:p-6">
