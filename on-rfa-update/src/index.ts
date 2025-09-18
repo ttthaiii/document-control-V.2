@@ -6,7 +6,7 @@ import { getBimTrackingDb } from "./lib/firebase/admin";
 // 🔽 **จุดแก้ไข:** ประกาศเฉพาะตัวแปรที่ไม่ใช่ Secret 🔽
 defineString("TTSDOC_PROJECT_ID");
 defineString("TTSDOC_CLIENT_EMAIL");
-defineString("TTSDOC_STORAGE_BUCKET");
+defineString("NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET");
 
 defineString("BIM_TRACKING_PROJECT_ID");
 defineString("BIM_TRACKING_CLIENT_EMAIL");

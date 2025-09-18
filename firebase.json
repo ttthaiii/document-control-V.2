@@ -1,18 +1,7 @@
 {
-  "hosting": {
-    "source": ".",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
-    "frameworksBackend": {
-      "region": "asia-southeast1"
-    }
-  },
   "functions": [
     {
-      "source": "functions",
+      "source": "on-rfa-update",
       "codebase": "default",
       "ignore": [
         "node_modules",
@@ -25,5 +14,16 @@
         "npm --prefix \"$RESOURCE_DIR\" run build"
       ]
     }
-  ]
+  ],
+  "hosting": {
+    "source": ".",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "frameworksBackend": {
+      "region": "asia-southeast1"
+    }
+  }
 }

@@ -3,9 +3,9 @@ import admin from "firebase-admin";
 // --- Config for Project 1: ttsdoc-v2 (Document System) ---
 const ttsdocConfig = {
   credential: admin.credential.cert({
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+    projectId: process.env.TTSDOC_PROJECT_ID, // <--- แก้ไข
+    clientEmail: process.env.TTSDOC_CLIENT_EMAIL, // <--- แก้ไข
+    privateKey: process.env.TTSDOC_PRIVATE_KEY?.replace(/\\n/g, "\n"), // <--- แก้ไข
   }),
   storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
 };
