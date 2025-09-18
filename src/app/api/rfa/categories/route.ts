@@ -1,11 +1,13 @@
 // src/app/api/rfa/categories/route.ts (แก้ไขแล้ว)
 import { NextRequest, NextResponse } from 'next/server'
-import { adminDb } from '@/lib/firebase/admin'
-import { getAuth } from 'firebase-admin/auth'
+// 🔽 1. เปลี่ยน import: นำเข้า adminDb และ adminAuth
+import { adminDb, adminAuth } from '@/lib/firebase/admin' 
+
+// 🗑️ 2. ลบ import ของ getAuth ที่ไม่ได้ใช้แล้ว
+// import { getAuth } from 'firebase-admin/auth'
 
 export async function GET(request: NextRequest) {
   try {
-    // (ส่วนการยืนยันตัวตนและดึงข้อมูล User ยังคงเดิม)
     const authHeader = request.headers.get('authorization')
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json(
@@ -14,7 +16,10 @@ export async function GET(request: NextRequest) {
       )
     }
     const token = authHeader.split('Bearer ')[1]
-    const decodedToken = await getAuth().verifyIdToken(token)
+    
+    // 🔽 3. เปลี่ยนจาก getAuth() มาใช้ adminAuth ที่ import เข้ามา
+    const decodedToken = await adminAuth.verifyIdToken(token)
+    
     const userId = decodedToken.uid
     const userDoc = await adminDb.collection('users').doc(userId).get()
     if (!userDoc.exists) {
@@ -29,8 +34,6 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const rfaType = searchParams.get('rfaType')
 
-    // --- ✅ 1. แก้ไข Validation ---
-    // อนุญาตให้ rfaType เป็น 'ALL' ได้
     if (!rfaType) {
       return NextResponse.json(
         { success: false, error: 'Missing rfaType parameter' },
@@ -41,15 +44,12 @@ export async function GET(request: NextRequest) {
     const categories: any[] = []
 
     for (const siteId of userSites) {
-      // สร้าง Query เริ่มต้น
       let categoriesQuery: any = adminDb
         .collection('sites')
         .doc(siteId)
         .collection('categories')
         .where('active', '==', true)
 
-      // --- ✅ 2. เพิ่มเงื่อนไขการกรอง ---
-      // จะกรองด้วย rfaType ก็ต่อเมื่อไม่ใช่ 'ALL'
       if (rfaType !== 'ALL') {
         categoriesQuery = categoriesQuery.where('rfaTypes', 'array-contains', rfaType);
       }
@@ -69,7 +69,6 @@ export async function GET(request: NextRequest) {
       })
     }
     
-    // (ส่วนการ Sort และ Response ยังคงเดิม)
     categories.sort((a, b) => {
       if (a.sequence !== b.sequence) {
         return a.sequence - b.sequence

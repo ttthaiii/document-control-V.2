@@ -27,6 +27,7 @@ yarn-error.log*
 
 # local env files
 .env*.local
+.env*.ttsdocumentcontrol
 
 # vercel
 .vercel
@@ -52,3 +53,6 @@ firebase-keys/
 # OS
 .DS_Store
 Thumbs.db
+
+keys/
+node_modules/

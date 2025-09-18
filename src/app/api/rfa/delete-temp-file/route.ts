@@ -1,14 +1,17 @@
-// src/app/api/rfa/delete-temp-file/route.ts
+// src/app/api/rfa/delete-temp-file/route.ts (แก้ไขแล้ว)
 import { NextResponse } from "next/server";
-import { adminBucket } from "@/lib/firebase/admin";
-import { getAuth } from "firebase-admin/auth";
+import { adminBucket, adminAuth } from "@/lib/firebase/admin"; // 🔽 1. Import adminAuth เข้ามา
+
+// 🗑️ 2. ลบ getAuth ที่ไม่ได้ใช้แล้วออกไป
+// import { getAuth } from "firebase-admin/auth";
 
 async function verifyIdTokenFromHeader(req: Request): Promise<string | null> {
   const authHeader = req.headers.get("authorization") || "";
   const match = authHeader.match(/^Bearer (.+)$/i);
   if (!match) return null;
   try {
-    const decoded = await getAuth().verifyIdToken(match[1]);
+    // 🔽 3. เปลี่ยนไปใช้ adminAuth ที่เรา import เข้ามา 🔽
+    const decoded = await adminAuth.verifyIdToken(match[1]);
     return decoded.uid;
   } catch {
     return null;
@@ -28,7 +31,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing filePath" }, { status: 400 });
     }
     
-    // ✅ ตรวจสอบเพื่อความปลอดภัยสูงสุด: User ต้องเป็นเจ้าของไฟล์เท่านั้นถึงจะลบได้
     if (!filePath.startsWith(`temp/${uid}/`)) {
         return NextResponse.json({ error: "Permission denied." }, { status: 403 });
     }
@@ -40,7 +42,7 @@ export async function POST(req: Request) {
 
   } catch (err: any) {
     console.error("Temp file delete Error:", err);
-    if (err.code === 404) {
+    if ((err as any).code === 404) {
         return NextResponse.json({ success: true, message: "File already deleted." });
     }
     return NextResponse.json({ error: "Internal Server Error", details: err.message }, { status: 500 });

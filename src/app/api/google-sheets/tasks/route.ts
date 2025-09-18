@@ -1,35 +1,62 @@
-// app/api/google-sheets/tasks/route.ts (ไฟล์ใหม่)
+// app/api/google-sheets/tasks/route.ts (เวอร์ชันสำหรับดีบัก)
 import { NextRequest, NextResponse } from 'next/server';
-import { googleSheetsService } from '@/lib/google-sheets/service';
-import { adminAuth } from '@/lib/firebase/admin';
+import { adminAuth, bimTrackingDb } from '@/lib/firebase/admin';
 
 export async function POST(request: NextRequest) {
   try {
-    // ตรวจสอบ auth token
     const authHeader = request.headers.get('authorization');
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Authorization required' }, { status: 401 });
     }
+    const token = await adminAuth.verifyIdToken(authHeader.split('Bearer ')[1]);
 
-    const token = authHeader.split('Bearer ')[1];
-    const decodedToken = await adminAuth.verifyIdToken(token);
-
-    // รับ parameters
-    const { sheetId, projectName, category, sheetName } = await request.json();
+    const { projectName, category } = await request.json();
     
-    if (!sheetId || !projectName || !category) {
-      return NextResponse.json({ 
-        error: 'Sheet ID, Project Name and Category are required' 
-      }, { status: 400 });
+    // --- 🔽 เพิ่ม Log จุดที่ 1: ดูว่า Frontend ส่งอะไรมา 🔽 ---
+    console.log(`[TASKS_DEBUG] Received projectName: "${projectName}", category: "${category}"`);
+
+    if (!projectName || !category) {
+        return NextResponse.json({ error: 'Project Name and Category are required' }, { status: 400 });
     }
 
-    // ดึงชื่องาน
-    const tasks = await googleSheetsService.getTasksByProjectAndCategory(
-      sheetId,
-      projectName,
-      category,
-      sheetName || 'DB_TaskOverview'
-    );
+    const projectsQuery = bimTrackingDb.collection('projects').where('name', '==', projectName).limit(1);
+    const projectsSnapshot = await projectsQuery.get();
+
+    if (projectsSnapshot.empty) {
+        console.log(`[TASKS_DEBUG] Project with name "${projectName}" not found.`);
+        return NextResponse.json({ success: true, data: { tasks: [] } });
+    }
+    const projectId = projectsSnapshot.docs[0].id;
+    console.log(`[TASKS_DEBUG] Found project ID: "${projectId}"`);
+
+
+    const tasksQuery = bimTrackingDb.collection('tasks')
+      .where('projectId', '==', projectId)
+      .where('taskCategory', '==', category)
+      .where('link', '==', '');
+      
+    const tasksSnapshot = await tasksQuery.get();
+
+    // --- 🔽 เพิ่ม Log จุดที่ 2: ดูว่า query แล้วเจอเอกสารกี่อัน 🔽 ---
+    console.log(`[TASKS_DEBUG] Query executed. Found ${tasksSnapshot.size} task(s).`);
+
+    if (tasksSnapshot.empty) {
+        return NextResponse.json({ success: true, data: { tasks: [] } });
+    }
+
+    const tasks = tasksSnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+            taskUid: doc.id,
+            taskCategory: data.taskCategory || '',
+            taskName: data.taskName || '',
+            projectName: data.projectName || '',
+            // เพิ่ม field อื่นๆ ที่อาจมี
+            startDate: data.startDate || '',
+            finishDate: data.finishDate || '',
+            percentComplete: data.percentComplete || 0
+        };
+    });
 
     return NextResponse.json({
       success: true,
@@ -38,17 +65,14 @@ export async function POST(request: NextRequest) {
         projectName,
         category,
         totalTasks: tasks.length,
-        userId: decodedToken.uid
+        userId: token.uid
       }
     });
 
   } catch (error: any) {
-    console.error('❌ Google Sheets tasks API error:', error);
+    console.error('❌ Firestore tasks API error:', error);
     return NextResponse.json(
-      { 
-        success: false, 
-        error: error.message 
-      }, 
+      { success: false, error: error.message }, 
       { status: 500 }
     );
   }

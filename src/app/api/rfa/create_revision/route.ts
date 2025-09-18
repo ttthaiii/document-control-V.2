@@ -1,7 +1,9 @@
 // src/app/api/rfa/create_revision/route.ts (แก้ไขแล้ว)
 import { NextResponse } from "next/server";
-import { adminDb, adminBucket } from "@/lib/firebase/admin";
-import { getAuth } from "firebase-admin/auth";
+// 🔽 1. Import adminAuth เข้ามาด้วย 🔽
+import { adminDb, adminBucket, adminAuth } from "@/lib/firebase/admin";
+// 🗑️ 2. ลบ getAuth ที่ไม่ได้ใช้แล้วออกไป 🗑️
+// import { getAuth } from "firebase-admin/auth";
 import { FieldValue, Transaction } from 'firebase-admin/firestore';
 import { STATUSES } from '@/lib/config/workflow';
 
@@ -10,7 +12,8 @@ async function verifyIdTokenFromHeader(req: Request): Promise<string | null> {
     const match = authHeader.match(/^Bearer (.+)$/i);
     if (!match) return null;
     try {
-        const decoded = await getAuth().verifyIdToken(match[1]);
+        // 🔽 3. เปลี่ยนไปใช้ adminAuth ที่เรา import เข้ามา 🔽
+        const decoded = await adminAuth.verifyIdToken(match[1]);
         return decoded.uid;
     } catch {
         return null;
@@ -44,11 +47,9 @@ export async function POST(req: Request) {
 
             const originalData = originalDoc.data()!;
             
-            // 1. คำนวณ Revision ใหม่
             const newRevisionNumber = (originalData.revisionNumber || 0) + 1;
-             const newDocumentNumber = originalData.documentNumber;
+            const newDocumentNumber = originalData.documentNumber;
 
-            // 2. ย้ายไฟล์ใหม่จาก Temp ไปยัง Permanent Storage
             const finalFilesData = [];
             const cdnUrlBase = "https://ttsdoc-cdn.ttthaiii30.workers.dev";
             for (const tempFile of uploadedFiles) {
@@ -67,7 +68,6 @@ export async function POST(req: Request) {
                 });
             }
 
-            // 3. สร้างเอกสารฉบับใหม่ (New Revision)
             const newRfaRef = adminDb.collection("rfaDocuments").doc();
             const newStatus = STATUSES.PENDING_REVIEW;
 
@@ -94,8 +94,6 @@ export async function POST(req: Request) {
                 }],
             });
 
-            // 4. อัปเดตเอกสารฉบับเก่า
-            // ✅ KEY CHANGE: ไม่เปลี่ยนสถานะ แต่กำหนดให้ isLatest เป็น false
             transaction.update(originalRfaRef, {
                 isLatest: false,
                 updatedAt: FieldValue.serverTimestamp(),

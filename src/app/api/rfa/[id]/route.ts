@@ -1,55 +1,53 @@
-// src/app/api/rfa/[id]/route.ts
-import { NextRequest, NextResponse } from 'next/server'
-import { adminDb, adminBucket } from '@/lib/firebase/admin'
-import { getAuth } from 'firebase-admin/auth'
-import { FieldValue } from 'firebase-admin/firestore'
+// src/app/api/rfa/[id]/route.ts (แก้ไขแล้ว)
+import { NextRequest, NextResponse } from 'next/server';
+// 🔽 1. Import adminAuth เข้ามาด้วย 🔽
+import { adminDb, adminBucket, adminAuth } from '@/lib/firebase/admin';
+// 🗑️ 2. ลบ getAuth ที่ไม่ได้ใช้แล้วออกไป 🗑️
+// import { getAuth } from 'firebase-admin/auth';
+import { FieldValue } from 'firebase-admin/firestore';
 import { CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUSES } from '@/lib/config/workflow';
 import { RFAFile } from '@/types/rfa';
 
-// --- GET Function (โค้ดเดิมของคุณ สมบูรณ์แล้ว) ---
+// --- GET Function ---
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const authHeader = request.headers.get('authorization')
+    const authHeader = request.headers.get('authorization');
     if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json(
-        { success: false, error: 'Missing or invalid authorization header' },
-        { status: 401 }
-      )
+      return NextResponse.json({ success: false, error: 'Missing or invalid authorization header' }, { status: 401 });
     }
 
-    const token = authHeader.split('Bearer ')[1]
-    const decodedToken = await getAuth().verifyIdToken(token)
-    const userId = decodedToken.uid
+    const token = authHeader.split('Bearer ')[1];
+    // 🔽 3. เปลี่ยนไปใช้ adminAuth 🔽
+    const decodedToken = await adminAuth.verifyIdToken(token);
+    const userId = decodedToken.uid;
 
-    const userDoc = await adminDb.collection('users').doc(userId).get()
+    const userDoc = await adminDb.collection('users').doc(userId).get();
     if (!userDoc.exists) {
-      return NextResponse.json({ success: false, error: 'User not found' }, { status: 404 })
+      return NextResponse.json({ success: false, error: 'User not found' }, { status: 404 });
     }
-    const userData = userDoc.data()!
-    const userRole = userData.role
-    const userSites = userData.sites || []
+    const userData = userDoc.data()!;
+    const userRole = userData.role;
+    const userSites = userData.sites || [];
 
-    const rfaDoc = await adminDb.collection('rfaDocuments').doc(params.id).get()
+    const rfaDoc = await adminDb.collection('rfaDocuments').doc(params.id).get();
     if (!rfaDoc.exists) {
-      return NextResponse.json({ success: false, error: 'RFA document not found' }, { status: 404 })
+      return NextResponse.json({ success: false, error: 'RFA document not found' }, { status: 404 });
     }
-    const rfaData = rfaDoc.data()!
+    const rfaData = rfaDoc.data()!;
 
     if (!userSites.includes(rfaData.siteId)) {
-      return NextResponse.json({ success: false, error: 'Access denied to this site' }, { status: 403 })
+      return NextResponse.json({ success: false, error: 'Access denied to this site' }, { status: 403 });
     }
     
+    // ... (ส่วนที่เหลือของ GET function เหมือนเดิม) ...
     const siteInfo = { id: rfaData.siteId, name: rfaData.siteName || 'N/A' };
-
-    // ✅ FIX: ปรับ Logic การดึง categoryCode ให้เหมือนกับหน้า List
     const categoryInfo = { 
       id: rfaData.categoryId, 
       categoryCode: rfaData.taskData?.taskCategory || rfaData.categoryId || 'N/A' 
     };
-
     const permissions = {
       canView: true,
       canEdit: CREATOR_ROLES.includes(userRole) && rfaData.status === STATUSES.REVISION_REQUIRED,
@@ -58,26 +56,18 @@ export async function GET(
       canApprove: APPROVER_ROLES.includes(userRole) && rfaData.status === STATUSES.PENDING_CM_APPROVAL,
       canReject: APPROVER_ROLES.includes(userRole) && rfaData.status === STATUSES.PENDING_CM_APPROVAL,
       canDownloadFiles: true
-    }
-
-    const responseData = {
-      id: rfaDoc.id,
-      ...rfaData,
-      site: siteInfo,
-      category: categoryInfo,
-      permissions
     };
+    const responseData = { id: rfaDoc.id, ...rfaData, site: siteInfo, category: categoryInfo, permissions };
 
-    return NextResponse.json({ success: true, document: responseData })
+    return NextResponse.json({ success: true, document: responseData });
 
   } catch (error) {
-    console.error('Error fetching RFA document:', error)
-    return NextResponse.json({ success: false, error: 'Internal server error' }, { status: 500 })
+    console.error('Error fetching RFA document:', error);
+    return NextResponse.json({ success: false, error: 'Internal server error' }, { status: 500 });
   }
 }
 
-
-// --- PUT Function (โค้ดเดิมของคุณที่ปรับปรุงและยืนยันความถูกต้องแล้ว) ---
+// --- PUT Function ---
 export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -88,69 +78,59 @@ export async function PUT(
           return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
         const token = authHeader.split('Bearer ')[1];
-        const decodedToken = await getAuth().verifyIdToken(token);
+        // 🔽 3. เปลี่ยนไปใช้ adminAuth 🔽
+        const decodedToken = await adminAuth.verifyIdToken(token);
         const userId = decodedToken.uid;
     
         const userDoc = await adminDb.collection('users').doc(userId).get();
         if (!userDoc.exists) return NextResponse.json({ error: 'User not found' }, { status: 404 });
         
+        // ... (ส่วนที่เหลือของ PUT function เหมือนเดิมทั้งหมด) ...
         const userData = userDoc.data()!;
         const userRole = userData.role;
-    
         const body = await request.json();
         const { action, comments, newFiles } = body; 
-    
         if (!action) return NextResponse.json({ error: 'Action is required' }, { status: 400 });
-    
         if (!newFiles || !Array.isArray(newFiles) || newFiles.length === 0) {
             return NextResponse.json({ error: 'Attaching new files is required for this action' }, { status: 400 });
         }
-    
         const rfaDocRef = adminDb.collection('rfaDocuments').doc(params.id);
         const rfaDoc = await rfaDocRef.get();
         if (!rfaDoc.exists) return NextResponse.json({ error: 'RFA document not found' }, { status: 404 });
-        
         const docData = rfaDoc.data()!;
         let newStatus = docData.status;
         let canPerformAction = false;
-    
+        
+        // Switch case for actions
         switch (action) {
-          // ✅ [ACTION ใหม่] สำหรับ BIM ส่งงานที่สถานะ "แก้ไข" กลับไป "รอตรวจสอบ"
           case 'SUBMIT_REVISION':
             canPerformAction = CREATOR_ROLES.includes(userRole) && docData.status === STATUSES.REVISION_REQUIRED && docData.createdBy === userId;
             if (canPerformAction) newStatus = STATUSES.PENDING_REVIEW;
             break;
-
           case 'SEND_TO_CM':
             canPerformAction = REVIEWER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_REVIEW;
             if (canPerformAction) newStatus = STATUSES.PENDING_CM_APPROVAL;
             break;
-    
           case 'REQUEST_REVISION':
             canPerformAction = REVIEWER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_REVIEW;
             if (canPerformAction) newStatus = STATUSES.REVISION_REQUIRED;
             break;
-            
           case 'APPROVE':
             canPerformAction = APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL;
             if (canPerformAction) newStatus = STATUSES.APPROVED;
             break;
-    
           case 'REJECT':
             canPerformAction = APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL;
             if (canPerformAction) newStatus = STATUSES.REJECTED;
             break;
-            
           case 'APPROVE_WITH_COMMENTS':
             canPerformAction = APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL;
             if (canPerformAction) newStatus = STATUSES.APPROVED_WITH_COMMENTS;
             break;
-
           case 'APPROVE_REVISION_REQUIRED':
              canPerformAction = APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL;
              if (canPerformAction) newStatus = STATUSES.REVISION_REQUIRED;
              break;
-    
           default:
             return NextResponse.json({ success: false, error: 'Invalid action' }, { status: 400 });
         }
@@ -159,7 +139,6 @@ export async function PUT(
           return NextResponse.json({ success: false, error: 'Permission denied for this action or invalid document status' }, { status: 403 });
         }
     
-        // --- ✅ Logic การย้ายไฟล์จาก temp ไปยัง final destination ถูกต้องแล้ว ---
         const finalFilesData: RFAFile[] = [];
         const cdnUrlBase = "https://ttsdoc-cdn.ttthaiii30.workers.dev";
     
@@ -173,11 +152,9 @@ export async function PUT(
             const timestamp = Date.now();
             const destinationPath = `sites/${docData.siteId}/rfa/${docData.documentNumber}/${timestamp}_${originalName}`;
             
-            // ใช้ move เพื่อประสิทธิภาพที่ดีกว่า
             await adminBucket.file(sourcePath).move(destinationPath);
             
             finalFilesData.push({
-                // Type assertion to match RFAFile
                 fileName: originalName,
                 fileUrl: `${cdnUrlBase}/${destinationPath}`,
                 filePath: destinationPath,
@@ -188,7 +165,6 @@ export async function PUT(
             });
         }
     
-        // --- ✅ Logic การสร้าง Workflow Entry ถูกต้องแล้ว (รองรับ comment ที่เป็น optional) ---
         const workflowEntry = {
           action,
           status: newStatus,
@@ -196,15 +172,14 @@ export async function PUT(
           userName: userData.email,
           role: userRole,
           timestamp: new Date().toISOString(),
-          comments: comments || '', // ใช้ค่าว่างถ้าไม่มี comment
+          comments: comments || '',
           files: finalFilesData,
         };
     
-        // --- ✅ Logic การอัปเดต Firestore ถูกต้องแล้ว ---
         await rfaDocRef.update({
           status: newStatus,
           currentStep: newStatus,
-          files: finalFilesData, // อัปเดตไฟล์ชุดล่าสุด
+          files: finalFilesData,
           workflow: FieldValue.arrayUnion(workflowEntry),
           updatedAt: FieldValue.serverTimestamp(),
         });

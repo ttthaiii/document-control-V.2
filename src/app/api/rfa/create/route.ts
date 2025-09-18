@@ -1,15 +1,17 @@
 // src/app/api/rfa/create/route.ts
 import { NextResponse } from "next/server";
-import { adminDb, adminBucket } from "@/lib/firebase/admin";
-import { getAuth } from "firebase-admin/auth";
+// 🔽 1. Import adminAuth เข้ามาด้วย 🔽
+import { adminDb, adminBucket, adminAuth } from "@/lib/firebase/admin"; 
+// 🗑️ 2. ลบ getAuth ที่ไม่ได้ใช้แล้วออกไป 🗑️
+// import { getAuth } from "firebase-admin/auth";
 import { FieldValue } from 'firebase-admin/firestore';
 import { REVIEWER_ROLES, STATUSES } from '@/lib/config/workflow';
 
+// ... (ฟังก์ชัน toSlugId, ensureCategory ไม่ต้องแก้ไข) ...
 function toSlugId(input: string): string {
   if (!input) return '';
   return input.trim().replace(/[^\p{L}\p{N}]+/gu, "_").replace(/^_+|_+$/g, "").toUpperCase();
 }
-
 async function ensureCategory(siteId: string, categoryIdOrName: string, defaults?: Partial<{ name: string; description: string; createdBy: string; rfaType: string; }>): Promise<{ id: string; created: boolean }> {
     const docId = toSlugId(categoryIdOrName);
     const ref = adminDb.doc(`sites/${siteId}/categories/${docId}`);
@@ -17,7 +19,6 @@ async function ensureCategory(siteId: string, categoryIdOrName: string, defaults
     if (snap.exists) {
         return { id: docId, created: false };
     }
-    
     await ref.set({
         name: defaults?.name ?? categoryIdOrName,
         categoryCode: categoryIdOrName,
@@ -31,19 +32,20 @@ async function ensureCategory(siteId: string, categoryIdOrName: string, defaults
     return { id: docId, created: true };
 }
 
+
 async function verifyIdTokenFromHeader(req: Request): Promise<string | null> {
     const authHeader = req.headers.get("authorization") || "";
     const match = authHeader.match(/^Bearer (.+)$/i);
     if (!match) return null;
     try {
-        const decoded = await getAuth().verifyIdToken(match[1]);
+        // 🔽 3. เปลี่ยนไปใช้ adminAuth ที่เรา import เข้ามา 🔽
+        const decoded = await adminAuth.verifyIdToken(match[1]);
         return decoded.uid;
     } catch {
         return null;
     }
 }
 
-// ✅ FIX 1: แก้ไขฟังก์ชันนี้ให้คืนค่า body โดยตรง
 async function readRequest(req: Request): Promise<any> {
     return req.json().catch(() => ({}));
 }
@@ -52,12 +54,12 @@ async function readRequest(req: Request): Promise<any> {
 export async function POST(req: Request) {
   const uid = await verifyIdTokenFromHeader(req);
   if (!uid) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    // แก้ไข: ส่ง Response ที่มี success: false กลับไปเพื่อให้ Frontend จับ Error ได้ง่ายขึ้น
+    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 
   let docId: string | null = null;
   const tempFilePathsToDelete: string[] = [];
-
 
   try {
     const userDoc = await adminDb.collection('users').doc(uid).get();

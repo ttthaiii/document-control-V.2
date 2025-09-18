@@ -1,31 +1,41 @@
-// app/api/google-sheets/projects/route.ts (ไฟล์ใหม่)
+// app/api/google-sheets/projects/route.ts (แก้ไขแล้ว)
 import { NextRequest, NextResponse } from 'next/server';
-import { googleSheetsService } from '@/lib/google-sheets/service';
-import { adminAuth } from '@/lib/firebase/admin';
+// 🔽 1. เปลี่ยน import: นำเข้า bimTrackingDb และ adminAuth
+import { adminAuth, bimTrackingDb } from '@/lib/firebase/admin'; 
+
+// 🗑️ 2. ลบ import ของ googleSheetsService ที่ไม่ได้ใช้แล้ว
+// import { googleSheetsService } from '@/lib/google-sheets/service';
 
 export async function POST(request: NextRequest) {
   try {
-    // ตรวจสอบ auth token
+    // --- ส่วนการยืนยันตัวตนยังคงเหมือนเดิม ---
     const authHeader = request.headers.get('authorization');
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Authorization required' }, { status: 401 });
     }
-
     const token = authHeader.split('Bearer ')[1];
     const decodedToken = await adminAuth.verifyIdToken(token);
 
-    // รับ parameters
-    const { sheetId, sheetName } = await request.json();
+    // --- 🔽 3. เปลี่ยน Logic การดึงข้อมูล ---
+    // ไม่ต้องใช้ sheetId จาก body อีกต่อไป
+    // const { sheetId, sheetName } = await request.json();
     
-    if (!sheetId) {
-      return NextResponse.json({ error: 'Sheet ID is required' }, { status: 400 });
+    // Query ไปยัง collection 'projects' ใน Firestore ของ BIM-Tracking
+    const projectsSnapshot = await bimTrackingDb.collection('projects').get();
+
+    if (projectsSnapshot.empty) {
+      return NextResponse.json({
+        success: true,
+        data: {
+          projects: [],
+          totalProjects: 0,
+          userId: decodedToken.uid
+        }
+      });
     }
 
-    // ดึงรายชื่อโครงการ
-    const projects = await googleSheetsService.getAvailableProjects(
-      sheetId, 
-      sheetName || 'DB_TaskOverview'
-    );
+    // Map ข้อมูลที่ได้จาก Firestore ให้อยู่ในรูปแบบที่ Frontend ต้องการ (array of strings)
+    const projects = projectsSnapshot.docs.map(doc => doc.data().name);
 
     return NextResponse.json({
       success: true,
@@ -37,7 +47,7 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error: any) {
-    console.error('❌ Google Sheets projects API error:', error);
+    console.error('❌ Firestore projects API error:', error);
     return NextResponse.json(
       { 
         success: false, 

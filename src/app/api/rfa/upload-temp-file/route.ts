@@ -1,14 +1,17 @@
-// src/app/api/rfa/upload-temp-file/route.ts
+// src/app/api/rfa/upload-temp-file/route.ts (แก้ไขแล้ว)
 import { NextResponse } from "next/server";
-import { adminBucket } from "@/lib/firebase/admin";
-import { getAuth } from "firebase-admin/auth";
+import { adminBucket, adminAuth } from "@/lib/firebase/admin"; // 🔽 1. Import adminAuth เข้ามา
+
+// 🗑️ 2. ลบ getAuth ที่ไม่ได้ใช้แล้วออกไป
+// import { getAuth } from "firebase-admin/auth";
 
 async function verifyIdTokenFromHeader(req: Request): Promise<string | null> {
   const authHeader = req.headers.get("authorization") || "";
   const match = authHeader.match(/^Bearer (.+)$/i);
   if (!match) return null;
   try {
-    const decoded = await getAuth().verifyIdToken(match[1]);
+    // 🔽 3. เปลี่ยนไปใช้ adminAuth ที่เรา import เข้ามา 🔽
+    const decoded = await adminAuth.verifyIdToken(match[1]);
     return decoded.uid;
   } catch {
     return null;
@@ -31,7 +34,6 @@ export async function POST(req: Request) {
 
     const timestamp = Date.now();
     const originalName = file.name || "file";
-    // เก็บไฟล์ใน path ชั่วคราวที่ไม่ซ้ำกันโดยใช้ UID ของ user
     const tempPath = `temp/${uid}/${timestamp}_${originalName}`;
     
     const fileRef = adminBucket.file(tempPath);
@@ -41,7 +43,6 @@ export async function POST(req: Request) {
       contentType: file.type || "application/octet-stream",
     });
 
-    // ส่ง URL ของ CDN และข้อมูลที่จำเป็นกลับไปให้ Frontend
     const cdnUrlBase = "https://ttsdoc-cdn.ttthaiii30.workers.dev";
     const fileUrl = `${cdnUrlBase}/${tempPath}`;
 
@@ -50,7 +51,7 @@ export async function POST(req: Request) {
       fileData: {
         fileName: originalName,
         fileUrl: fileUrl,
-        filePath: tempPath, // ส่ง path กลับไปเพื่อให้ใช้ในการลบหรือย้ายไฟล์
+        filePath: tempPath,
         size: file.size,
         contentType: file.type,
       },
