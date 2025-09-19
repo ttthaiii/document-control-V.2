@@ -96,6 +96,7 @@ interface RFADetailModalProps {
   document: RFADocument | null
   onClose: () => void
   onUpdate: (updatedDocument: RFADocument) => void
+  showOverlay?: boolean // <-- เพิ่มบรรทัดนี้
 }
 
 interface UploadedFile {
@@ -107,7 +108,7 @@ interface UploadedFile {
     error?: string;
 }
 
-export default function RFADetailModal({ document: initialDoc, onClose, onUpdate }: RFADetailModalProps) {
+export default function RFADetailModal({ document: initialDoc, onClose, onUpdate,showOverlay = true}: RFADetailModalProps) {
   const { user, firebaseUser } = useAuth();
   const [document, setDocument] = useState<RFADocument | null>(initialDoc);
   const [isLoading, setIsLoading] = useState(true);
@@ -318,9 +319,11 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     await handleAction('SUBMIT_REVISION');
   };
 
+  const overlayClasses = showOverlay ? 'bg-black bg-opacity-50' : ''  
+ 
   return (
     <>
-      <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+      <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${overlayClasses}`}>
         <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
           <div className="flex justify-between items-center p-4 border-b">
             <div className="flex items-center space-x-4">

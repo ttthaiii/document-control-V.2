@@ -47,8 +47,9 @@ export const onRfaUpdate = onDocumentWritten(
       
       await taskRef.update({
         link: rfaDocumentUrl,
-        documentNumber: newData.documentNumber, // <-- เพิ่ม documentNumber
-        rev: newData.revisionNumber,      // <-- เพิ่ม rev (แปลงเป็น String "R" + เลข)
+        documentNumber: newData.documentNumber,
+        rev: newData.revisionNumber,
+        currentStep: newData.currentStep, // <-- เพิ่มสถานะเอกสาร
       });
 
       logger.log(`✅ Successfully updated link for task ${taskUid}. URL: ${rfaDocumentUrl}`);

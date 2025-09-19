@@ -6,8 +6,9 @@ import { useAuth } from '@/lib/auth/useAuth'
 import Sidebar from './Sidebar'
 import { Menu, Bell, Building2 } from 'lucide-react'
 
-interface LayoutProps {
-  children: React.ReactNode
+// ✅ แก้ไขตรงนี้: เพิ่ม React.PropsWithChildren เพื่อให้รับ prop อื่นๆ ได้
+interface LayoutProps extends React.PropsWithChildren {
+  // สามารถเพิ่ม props อื่นๆ ที่ Layout นี้ใช้โดยตรงได้ที่นี่
 }
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
@@ -37,13 +38,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             <button className="p-2 rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors">
               <Bell size={18} />
             </button>
-            
+
             {user && (
               <span className="hidden sm:block text-sm text-gray-600">
                 👋 สวัสดี, {user.email.split('@')[0]}
               </span>
             )}
-            
+
             <div className="hidden md:flex items-center space-x-2 text-gray-600">
               <Building2 size={18} />
               <span className="text-sm font-medium">
@@ -56,7 +57,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
       <div className="flex">
         <Sidebar isOpen={isSidebarOpen} onToggle={toggleSidebar} />
-        
+
         <main 
           className={`
             flex-1 transition-all duration-300 ease-in-out pt-16

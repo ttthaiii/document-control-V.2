@@ -1,1 +1,1 @@
-self.__INTERCEPTION_ROUTE_REWRITE_MANIFEST="[]";
+self.__INTERCEPTION_ROUTE_REWRITE_MANIFEST='[{"source":"/dashboard/rfa/rfa/:id","destination":"/dashboard/rfa/(.)rfa/:id","has":[{"type":"header","key":"Next-Url","value":"\\\\/dashboard\\\\/rfa(?:\\\\/(.*))?[\\\\/#\\\\?]?"}]}]';

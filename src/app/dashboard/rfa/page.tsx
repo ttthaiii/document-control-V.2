@@ -432,7 +432,8 @@ function RFAContent() {
           ) : (
             <RFAListTable
               documents={filteredDocuments}
-              onDocumentClick={setSelectedDocument}
+              // เปลี่ยนจาก setSelectedDocument เป็น router.push
+              onDocumentClick={(doc) => router.push(`/rfa/${doc.id}`)}
               getStatusColor={getStatusColor}
               statusLabels={STATUS_LABELS}
               getRFATypeColor={getRFATypeColor}
@@ -456,7 +457,7 @@ function RFAContent() {
             </div>
           )}
 
-          {/* Detail Modal */}
+          {/* Detail Modal 
           {selectedDocument && (
             <RFADetailModal
               document={selectedDocument}
@@ -465,7 +466,7 @@ function RFAContent() {
                 setSelectedDocument(updatedDoc) 
               }}
             />
-          )}
+          )}*/}
         </div>
       </Layout>
     </AuthGuard>
