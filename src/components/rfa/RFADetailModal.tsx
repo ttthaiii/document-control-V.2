@@ -2,9 +2,10 @@
 
 import React, { useState, useMemo, useEffect } from 'react'
 import { RFADocument, RFAPermissions, RFAWorkflowStep, RFAFile } from '@/types/rfa'
-import { X, Paperclip, Clock, User, Check, Send, AlertTriangle, FileText, Download, History, MessageSquare, Edit3, Upload, Loader2, ThumbsUp, ThumbsDown } from 'lucide-react'
+import { X, Paperclip, Clock, User, Check, Send, AlertTriangle, FileText, Download, History, MessageSquare, Edit3, Upload, Loader2, ThumbsUp, ThumbsDown, Eye } from 'lucide-react'
 import { useAuth } from '@/lib/auth/useAuth'
-import { STATUS_LABELS, STATUSES, CREATOR_ROLES, APPROVER_ROLES } from '@/lib/config/workflow' // ✅ แก้ไข: เพิ่ม APPROVER_ROLES
+import { STATUS_LABELS, STATUSES, CREATOR_ROLES, APPROVER_ROLES } from '@/lib/config/workflow'
+import PDFViewerModal from './PDFPreviewModal'
 
 const formatDate = (dateString: string | undefined): string => {
   if (!dateString) return 'N/A';
@@ -12,7 +13,6 @@ const formatDate = (dateString: string | undefined): string => {
     day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
   });
 };
-
 const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -20,12 +20,9 @@ const formatFileSize = (bytes: number): string => {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 };
-
 const WorkflowHistoryModal = ({ workflow, onClose, userRole }: { workflow: RFAWorkflowStep[], onClose: () => void, userRole?: string }) => {
-    
     const filteredWorkflow = useMemo(() => {
         if (userRole && APPROVER_ROLES.includes(userRole)) {
-            // ✅ KEY CHANGE: เพิ่ม STATUSES.REVISION_REQUIRED ในการกรอง
             const statusesToHide = [STATUSES.PENDING_REVIEW, STATUSES.REVISION_REQUIRED];
             return workflow.filter(item => !statusesToHide.includes(item.status));
         }
@@ -96,9 +93,8 @@ interface RFADetailModalProps {
   document: RFADocument | null
   onClose: () => void
   onUpdate: (updatedDocument: RFADocument) => void
-  showOverlay?: boolean // <-- เพิ่มบรรทัดนี้
+  showOverlay?: boolean
 }
-
 interface UploadedFile {
     id: string;
     file: File;
@@ -114,13 +110,14 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  
   const [comment, setComment] = useState('');
   const [newFiles, setNewFiles] = useState<UploadedFile[]>([]);
-
   const [revisionComment, setRevisionComment] = useState('');
   const [revisionFiles, setRevisionFiles] = useState<UploadedFile[]>([]);
   
+  // ✅ 4. State นี้ยังคงใช้เหมือนเดิม แต่จะควบคุม Modal ตัวใหม่
+  const [previewFile, setPreviewFile] = useState<RFAFile | null>(null);
+
   useEffect(() => {
     const fetchFullDocument = async () => {
       if (!initialDoc || !firebaseUser) {
@@ -137,17 +134,14 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
         if (result.success) {
           setDocument(result.document);
         } else {
-          console.error("Failed to fetch full document:", result.error);
           setDocument(initialDoc);
         }
       } catch (error) {
-        console.error("Error fetching full document:", error);
         setDocument(initialDoc);
       } finally {
         setIsLoading(false);
       }
     };
-
     fetchFullDocument();
   }, [initialDoc, firebaseUser]);
 
@@ -373,27 +367,44 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
               </h4>
               <ul className="space-y-2">
                 {latestFiles.length > 0 ? (
-                   latestFiles.map((file, index) => (
-                    <li key={index} className="flex items-center justify-between bg-gray-50 p-2 rounded-md">
-                      <div className="flex items-center min-w-0">
-                        <FileText className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
-                        <div className="flex flex-col min-w-0">
-                          <span className="text-sm font-medium text-gray-800 truncate">{file.fileName}</span>
-                          <span className="text-xs text-gray-500">{formatFileSize(file.size)}</span>
+                  latestFiles.map((file, index) => {
+                    const isPdf = file.contentType === 'application/pdf' || file.fileName.toLowerCase().endsWith('.pdf');
+                    return (
+                      <li key={index} className="flex items-center justify-between bg-gray-50 p-2 rounded-md">
+                        <div className="flex items-center min-w-0">
+                          <FileText className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
+                          <div className="flex flex-col min-w-0">
+                            <span className="text-sm font-medium text-gray-800 truncate">{file.fileName}</span>
+                            <span className="text-xs text-gray-500">{formatFileSize(file.size)}</span>
+                          </div>
                         </div>
-                      </div>
-                      <a href={file.fileUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 p-2 rounded-full hover:bg-blue-100 flex-shrink-0 ml-2">
-                        <Download size={18} />
-                      </a>
-                    </li>
-                  ))
+                        {isPdf ? (
+                          <button 
+                            onClick={() => setPreviewFile(file)}
+                            className="text-blue-600 hover:text-blue-800 p-2 rounded-full hover:bg-blue-100 flex-shrink-0 ml-2"
+                            title="Preview File"
+                          >
+                            <Eye size={18} />
+                          </button>
+                        ) : (
+                          <a 
+                            href={file.fileUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="text-blue-600 hover:text-blue-800 p-2 rounded-full hover:bg-blue-100 flex-shrink-0 ml-2"
+                            title="Download File"
+                          >
+                            <Download size={18} />
+                          </a>
+                        )}
+                      </li>
+                    )})
                 ) : (
                   <p className="text-sm text-gray-500">ไม่มีไฟล์แนบในฉบับล่าสุด</p>
                 )}
               </ul>
             </div>
           </div>
-          
           <div className="p-4 border-t bg-gray-50 rounded-b-lg">
             
             {isResubmissionFlow && (
@@ -606,9 +617,13 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                   )}
 
               </div>
-            )}
-            
+            )}           
           </div>
+          <PDFViewerModal
+            isOpen={!!previewFile}
+            file={previewFile}
+            onClose={() => setPreviewFile(null)}
+          />
         </div>
       </div>
       {showHistory && (

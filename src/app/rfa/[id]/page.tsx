@@ -1,67 +1,79 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useEffect, useState } from 'react'
+import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from '@/lib/firebase/client'
-
-// ✅ 1. นำ Layout กลับมา
-import Layout from '@/components/layout/Layout'
-import RFADetailModal from '@/components/rfa/RFADetailModal'
-import { AuthGuard } from '@/lib/components/shared/AuthGuard'
-import { RFADocument } from '@/types/rfa'
 import { Loader2 } from 'lucide-react'
 
-function RFADetailFallbackPage() {
+export default function RFADirectLinkHandlerPage() {
   const router = useRouter()
   const params = useParams()
-
-  const [document, setDocument] = useState<RFADocument | null>(null)
-  const [loading, setLoading] = useState(true)
+  const searchParams = useSearchParams()
   const [error, setError] = useState<string | null>(null)
 
-  const id = params.id as string
-
   useEffect(() => {
-    if (!id) return;
-    // ... (โค้ดดึงข้อมูลเหมือนเดิม) ...
-    const fetchDocument = async () => {
-      setLoading(true)
-      try {
-        const docRef = doc(db, 'rfaDocuments', id)
-        const docSnap = await getDoc(docRef)
-        if (docSnap.exists()) {
-          setDocument({ id: docSnap.id, ...docSnap.data() } as RFADocument)
-        } else { setError('ไม่พบเอกสาร') }
-      } catch (err) { setError('เกิดข้อผิดพลาดในการโหลดข้อมูล') }
-      finally { setLoading(false) }
+    const docId = params.id as string
+    if (!docId) {
+      setError("ไม่พบ ID ของเอกสารใน URL")
+      return
     }
-    fetchDocument()
-  }, [id])
 
-  const handleClose = () => router.back()
+    const fetchTypeAndRedirect = async () => {
+      try {
+        // 1. ดึงข้อมูลเอกสารจาก Firestore เพื่อหา rfaType
+        const docRef = doc(db, 'rfaDocuments', docId)
+        const docSnap = await getDoc(docRef)
 
-  // ✅ 2. แสดงทุกอย่างภายใต้ <Layout> เสมอ
-  // นี่คือหน้าตาที่ถูกต้องสำหรับ Fallback
+        if (docSnap.exists()) {
+          const docData = docSnap.data()
+          const rfaType = docData.rfaType // เช่น "RFA-MAT"
+
+          if (rfaType) {
+            // 2. สร้าง URL ใหม่ที่สมบูรณ์ โดยมีทั้ง type และ docId
+            const currentQuery = new URLSearchParams(searchParams.toString())
+            currentQuery.set('type', rfaType)
+            currentQuery.set('docId', docId)
+
+            // 3. Redirect ไปยังหน้า Dashboard ที่ถูกต้อง
+            router.replace(`/dashboard/rfa?${currentQuery.toString()}`)
+          } else {
+            setError("ไม่สามารถระบุประเภทของเอกสารได้")
+          }
+        } else {
+          setError("ไม่พบเอกสารที่คุณต้องการ")
+        }
+      } catch (err) {
+        console.error("Redirect Error:", err)
+        setError("เกิดข้อผิดพลาดในการเปิดเอกสาร")
+      }
+    }
+
+    fetchTypeAndRedirect()
+  }, [params.id, router, searchParams])
+
+  // ระหว่างที่กำลังดึงข้อมูลและ Redirect ให้แสดงหน้า Loading
   return (
-    <Layout>
-      {/* พื้นหลังจะเป็นหน้า Dashboard ที่ว่างเปล่า แต่มี Layout ครบ */}
-      <RFADetailModal
-        document={document}
-        onClose={handleClose}
-        onUpdate={(updatedDoc) => setDocument(updatedDoc)}
-        // loading และ error ถูกจัดการภายใน Modal แล้ว
-      />
-    </Layout>
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="text-center">
+        {error ? (
+          <>
+            <h2 className="text-xl font-bold text-red-700 mb-2">เกิดข้อผิดพลาด</h2>
+            <p className="text-red-600">{error}</p>
+            <button 
+              onClick={() => router.push('/dashboard')}
+              className="mt-4 bg-gray-200 px-4 py-2 rounded"
+            >
+              กลับสู่ Dashboard
+            </button>
+          </>
+        ) : (
+          <>
+            <Loader2 className="w-12 h-12 animate-spin text-blue-500 mx-auto" />
+            <p className="mt-4 text-gray-600">กำลังเปิดเอกสาร...</p>
+          </>
+        )}
+      </div>
+    </div>
   )
-}
-
-export default function RFADetailPage() {
-    return (
-        <Suspense fallback={<div>Loading Page...</div>}>
-            <AuthGuard>
-                <RFADetailFallbackPage />
-            </AuthGuard>
-        </Suspense>
-    )
 }

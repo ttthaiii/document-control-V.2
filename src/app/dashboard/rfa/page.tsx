@@ -14,6 +14,7 @@ import { STATUSES, STATUS_LABELS, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES 
 import { Plus, Search, RefreshCw, User } from 'lucide-react'
 import { db } from '@/lib/firebase/client'
 import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore'
+import SmartRFAModal from '@/components/rfa/SmartRFAModal'
 
 type CreatorRole = typeof CREATOR_ROLES[number];
 
@@ -46,7 +47,7 @@ function RFAContent() {
   const [allDocuments, setAllDocuments] = useState<RFADocument[]>([]);
   // const [filteredDocuments, setFilteredDocuments] = useState<RFADocument[]>([]); // <-- จะถูกแทนที่ด้วย useMemo
   const [loading, setLoading] = useState(true)
-  const [selectedDocument, setSelectedDocument] = useState<RFADocument | null>(null)
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('')
   const [categories, setCategories] = useState<Category[]>([]);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -83,6 +84,25 @@ function RFAContent() {
       { value: 'CM', label: 'CM' },
     ];
   }, [user]);
+
+  useEffect(() => {
+    const docIdFromUrl = searchParams.get('docId');
+    if (docIdFromUrl) {
+      setSelectedDocumentId(docIdFromUrl);
+    }
+  }, [searchParams]);
+
+  const handleDocumentClick = (doc: RFADocument) => {
+    setSelectedDocumentId(doc.id);
+  };
+
+  const handleCloseModal = () => {
+    setSelectedDocumentId(null);
+    // เมื่อปิด Modal, กลับไปยัง URL เดิมที่ไม่มี docId
+    const currentQuery = new URLSearchParams(window.location.search);
+    currentQuery.delete('docId');
+    router.push(`/dashboard/rfa?${currentQuery.toString()}`);
+  };
 
   useEffect(() => {
     const typeFromUrl = (searchParams.get('type') as Filters['rfaType']) || 'ALL';
@@ -432,8 +452,7 @@ function RFAContent() {
           ) : (
             <RFAListTable
               documents={filteredDocuments}
-              // เปลี่ยนจาก setSelectedDocument เป็น router.push
-              onDocumentClick={(doc) => router.push(`/rfa/${doc.id}`)}
+              onDocumentClick={handleDocumentClick}
               getStatusColor={getStatusColor}
               statusLabels={STATUS_LABELS}
               getRFATypeColor={getRFATypeColor}
@@ -457,16 +476,10 @@ function RFAContent() {
             </div>
           )}
 
-          {/* Detail Modal 
-          {selectedDocument && (
-            <RFADetailModal
-              document={selectedDocument}
-              onClose={() => setSelectedDocument(null)}
-              onUpdate={(updatedDoc) => {
-                setSelectedDocument(updatedDoc) 
-              }}
-            />
-          )}*/}
+        <SmartRFAModal
+          documentId={selectedDocumentId}
+          onClose={handleCloseModal}
+        />
         </div>
       </Layout>
     </AuthGuard>
