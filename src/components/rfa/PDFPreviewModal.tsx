@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react'
 import { RFAFile } from '@/types/rfa'
-import { X, Download, Maximize, Minimize, ExternalLink } from 'lucide-react'
+import { X, Maximize, Minimize } from 'lucide-react'
 
 interface PDFPreviewModalProps {
   isOpen: boolean
@@ -73,27 +73,6 @@ export default function PDFPreviewModal({ isOpen, file, onClose }: PDFPreviewMod
           </div>
           
           <div className="flex items-center space-x-2">
-            <a 
-              href={file.fileUrl} 
-              download={file.fileName} 
-              target="_blank" 
-              rel="noopener noreferrer" 
-              className="text-gray-500 hover:text-gray-800 p-2 rounded-md hover:bg-gray-200 transition-colors"
-              title="ดาวน์โหลด"
-            >
-              <Download size={16} />
-            </a>
-            
-            <a 
-              href={file.fileUrl} 
-              target="_blank" 
-              rel="noopener noreferrer" 
-              className="text-gray-500 hover:text-gray-800 p-2 rounded-md hover:bg-gray-200 transition-colors"
-              title="เปิดในหน้าต่างใหม่"
-            >
-              <ExternalLink size={16} />
-            </a>
-            
             {!isMobile && (
               <button 
                 onClick={() => setIsFullscreen(!isFullscreen)} 
