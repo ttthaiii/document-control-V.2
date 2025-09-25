@@ -1,6 +1,5 @@
 'use client';
 import { AuthGuard } from '@/lib/components/shared/AuthGuard';
-import Layout from '@/components/layout/Layout';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth/useAuth';
 
@@ -9,7 +8,6 @@ function DashboardContent() {
   const { user } = useAuth();
 
   return (
-    <Layout>
       <div className="max-w-7xl mx-auto">
         {/* Page Title */}
         <div className="mb-8">
@@ -81,7 +79,6 @@ function DashboardContent() {
           </div>
         </div>
       </div>
-    </Layout>
   );
 }
 
