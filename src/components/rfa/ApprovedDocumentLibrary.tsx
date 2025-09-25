@@ -1,27 +1,23 @@
-// src/components/rfa/ApprovedDocumentLibrary.tsx (Fully Implemented with Preview)
+// src/components/rfa/ApprovedDocumentLibrary.tsx
 
 'use client'
 
 import React, { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '@/lib/auth/useAuth'
-import { Site, Category, RFADocument, RFAFile } from '@/types/rfa' // Import RFAFile
-import { Search, Building, Tag, Loader2, FileText, Calendar } from 'lucide-react'
+import { Site, Category, RFADocument, RFAFile } from '@/types/rfa'
+import { Search, Building, Tag, Loader2, FileText, Calendar, Download, Eye } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { STATUS_LABELS } from '@/lib/config/workflow'
 import PDFPreviewModal from './PDFPreviewModal'
 
-// Helper function to format date
 const formatDate = (date: any): string => {
   if (!date) return 'N/A';
-  // Handle Firebase Timestamp object serialized by Next.js API
   if (date._seconds) {
     return new Date(date._seconds * 1000).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' });
   }
-  // Handle Firestore Timestamp object on the client
   if (typeof date.toDate === 'function') {
     return date.toDate().toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' });
   }
-  // Handle ISO strings or other date strings
   const d = new Date(date);
   if (isNaN(d.getTime())) {
     return 'Invalid Date';
@@ -29,40 +25,22 @@ const formatDate = (date: any): string => {
   return d.toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' });
 };
 
-// Helper hook for responsive design
 const useIsMobile = () => {
   const [isMobile, setIsMobile] = useState(false);
-
   useEffect(() => {
-    // ฟังก์ชันนี้จะทำงานในฝั่ง Client เท่านั้น
-    const checkScreenSize = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
-    
-    // เรียกใช้ครั้งแรกเพื่อให้ State ถูกตั้งค่า
+    const checkScreenSize = () => setIsMobile(window.innerWidth < 768);
     checkScreenSize();
-    
-    // เพิ่ม Event Listener เพื่อตรวจจับการเปลี่ยนแปลงขนาดหน้าจอ
     window.addEventListener('resize', checkScreenSize);
-
-    // Cleanup function: ลบ Event Listener ออกเมื่อ Component ถูก unmount
     return () => window.removeEventListener('resize', checkScreenSize);
-  }, []); // dependency array ว่างเปล่า ทำให้ useEffect นี้ทำงานแค่ครั้งเดียวหลัง mount
-
+  }, []);
   return isMobile;
 };
 
-
-// Main Component
 export default function ApprovedDocumentLibrary() {
   const { user, firebaseUser } = useAuth();
   const isMobile = useIsMobile();
-  const router = useRouter();
 
-  // ✅ 1. เพิ่ม State เพื่อตรวจสอบว่า Component ถูก Mount ในฝั่ง Client แล้วหรือยัง
   const [hasMounted, setHasMounted] = useState(false);
-
-  // States for filters, data, etc. (No changes)
   const [sites, setSites] = useState<Site[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -72,29 +50,82 @@ export default function ApprovedDocumentLibrary() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<RFAFile | null>(null);
-  const [isFetchingPreview, setIsFetchingPreview] = useState(false);
- 
-  // ✅ 2. ใช้ useEffect เพื่อตั้งค่า hasMounted เป็น true
-  // useEffect นี้จะทำงาน *หลังจาก* การ render ครั้งแรกในฝั่ง Client เท่านั้น
+
   useEffect(() => {
     setHasMounted(true);
   }, []);
 
-  // Fetch filter data (No changes)
   useEffect(() => {
-    const fetchFilterData = async () => { /* ... */ };
-    if (firebaseUser) fetchFilterData();
+    const fetchFilterData = async () => {
+      if (!firebaseUser) return;
+      try {
+        const token = await firebaseUser.getIdToken();
+        const [sitesResponse, categoriesResponse] = await Promise.all([
+          fetch('/api/sites', { headers: { 'Authorization': `Bearer ${token}` } }),
+          fetch('/api/rfa/categories?rfaType=ALL', { headers: { 'Authorization': `Bearer ${token}` } })
+        ]);
+
+        if (!sitesResponse.ok || !categoriesResponse.ok) throw new Error('Failed to fetch filter data');
+        
+        const sitesData = await sitesResponse.json();
+        const categoriesData = await categoriesResponse.json();
+
+        setSites(sitesData.sites || []);
+        const uniqueCategories = Array.from(new Map(categoriesData.categories.map((cat: Category) => [cat.categoryCode, cat])).values());
+        setCategories(uniqueCategories as Category[]);
+      } catch (err) {
+        setError('ไม่สามารถโหลดข้อมูล Filter ได้');
+        console.error(err);
+      }
+    };
+    fetchFilterData();
   }, [firebaseUser]);
 
-  // Fetch documents list (No changes)
   useEffect(() => {
-    const fetchDocuments = async () => { /* ... */ };
-    if (firebaseUser) fetchDocuments();
+    const fetchDocuments = async () => {
+      if (!user || !firebaseUser) return;
+      setIsLoading(true);
+      setError(null);
+      
+      const params = new URLSearchParams({
+        view: 'approved',
+        siteId: selectedSite,
+        categoryId: selectedCategory,
+      });
+
+      try {
+        const token = await firebaseUser.getIdToken();
+        const response = await fetch(`/api/rfa/list?${params.toString()}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!response.ok) {
+            const errorBody = await response.json();
+            throw new Error(errorBody.error || `API failed: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        setDocuments(data.documents || []);
+
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'ไม่สามารถโหลดข้อมูลเอกสารได้');
+        console.error(err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    const handler = setTimeout(() => {
+        fetchDocuments();
+    }, 300);
+
+    return () => {
+        clearTimeout(handler);
+    };
+
   }, [firebaseUser, user, selectedSite, selectedCategory]);
 
-  // Client-side search logic (No changes)
   const filteredDocuments = useMemo(() => {
-     if (!searchTerm) return documents;
+    if (!searchTerm) return documents;
     const lowercasedFilter = searchTerm.toLowerCase();
     return documents.filter(doc =>
       doc.title.toLowerCase().includes(lowercasedFilter) ||
@@ -102,128 +133,117 @@ export default function ApprovedDocumentLibrary() {
     );
   }, [searchTerm, documents]);
 
-  const handleRowClick = async (docId: string) => {
-    if (!firebaseUser) return;
-    setIsFetchingPreview(true);
-    try {
-      const token = await firebaseUser.getIdToken();
-      const res = await fetch(`/api/rfa/${docId}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const result = await res.json();
-
-      if (result.success && result.document.files && result.document.files.length > 0) {
-        const fileToPreview = result.document.files[0]; // เอาไฟล์แรกของฉบับล่าสุด
-        const isPdf = fileToPreview.contentType === 'application/pdf' || fileToPreview.fileName.toLowerCase().endsWith('.pdf');
-
-        if (isPdf) {
-          setPreviewFile(fileToPreview);
-        } else {
-          // ถ้าไม่ใช่ PDF ให้ดาวน์โหลดเลย
-          window.open(fileToPreview.fileUrl, '_blank');
-        }
-      } else {
-        alert('ไม่พบไฟล์แนบสำหรับเอกสารนี้');
-      }
-    } catch (e) {
-      alert('เกิดข้อผิดพลาดในการดึงข้อมูลไฟล์');
-      console.error(e);
-    } finally {
-      setIsFetchingPreview(false);
+  const handleFileClick = (file: RFAFile) => {
+    const isPdf = file.contentType === 'application/pdf' || file.fileName.toLowerCase().endsWith('.pdf');
+    if (isPdf) {
+      setPreviewFile(file);
+    } else {
+      window.open(file.fileUrl, '_blank');
     }
   };
 
-  // UI Rendering
   return (
     <>
-    <div className="bg-white rounded-lg shadow">
-      {/* Header and Filters */}
-      <div className="p-4 border-b">
-        <h2 className="text-xl font-bold text-gray-800 mb-4">
-          📚 คลังเอกสารอนุมัติ (Approved Document Library)
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <input type="text" placeholder="ค้นหา..." className="w-full pl-10 pr-4 py-2 border rounded-lg"
-              value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+      <div className="bg-white rounded-lg shadow">
+        <div className="p-4 border-b">
+          <h2 className="text-xl font-bold text-gray-800 mb-4">
+            📚 คลังเอกสารอนุมัติ (Approved Document Library)
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <input type="text" placeholder="ค้นหา..." className="w-full pl-10 pr-4 py-2 border rounded-lg"
+                value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+            </div>
+            <div className="relative">
+               <Building className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+               <select className="w-full pl-10 pr-4 py-2 border rounded-lg appearance-none"
+                 value={selectedSite} onChange={(e) => setSelectedSite(e.target.value)}>
+                  <option value="ALL">ทุกโครงการ</option>
+                  {sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
+               </select>
+            </div>
+            <div className="relative">
+               <Tag className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+               <select className="w-full pl-10 pr-4 py-2 border rounded-lg appearance-none"
+                  value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)}>
+                  <option value="ALL">ทุกหมวดงาน</option>
+                   {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.categoryCode}</option>)}
+               </select>
+            </div>
           </div>
-          <div className="relative">
-             <Building className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-             <select className="w-full pl-10 pr-4 py-2 border rounded-lg appearance-none"
-               value={selectedSite} onChange={(e) => setSelectedSite(e.target.value)}>
-                <option value="ALL">ทุกโครงการ</option>
-                {sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
-             </select>
-          </div>
-          <div className="relative">
-             <Tag className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-             <select className="w-full pl-10 pr-4 py-2 border rounded-lg appearance-none"
-                value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)}>
-                <option value="ALL">ทุกหมวดงาน</option>
-                 {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.categoryCode}</option>)}
-             </select>
-          </div>
+          {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
         </div>
-        {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
-      </div>
 
-      {/* Document List Area */}
         <div className="p-4">
-          {isLoading ? (
+          {isLoading || !hasMounted ? (
             <div className="text-center py-16"><Loader2 className="w-8 h-8 animate-spin text-gray-400 mx-auto"/></div>
-          ) : (
-            // ✅ 3. เพิ่มเงื่อนไข !hasMounted
-            // ในการ render ครั้งแรกบน Client, ส่วนนี้จะแสดง Loading
-            // ซึ่งจะตรงกับที่ Server render (ที่ไม่สามารถแสดง Table หรือ Card ได้)
-            // ทำให้ Hydration Error หายไป
-            !hasMounted ? (
-              <div className="text-center py-16"><Loader2 className="w-8 h-8 animate-spin text-gray-400 mx-auto"/></div>
-            ) : filteredDocuments.length === 0 ? (
-              <div className="text-center py-16 border-2 border-dashed rounded-lg"><p className="text-gray-500">ไม่พบเอกสารที่อนุมัติแล้ว</p></div>
-            ) : isMobile ? (
-              // Mobile View: Cards
-              <div className="space-y-3">
-                {filteredDocuments.map(doc => (
-                  <div key={doc.id} className="bg-gray-50 border rounded-lg p-4 cursor-pointer"
-                       onClick={() => handleRowClick(doc.id)}>
-                    <p className="font-semibold text-blue-700 truncate">{doc.documentNumber}</p>
-                    <p className="text-sm text-gray-800 line-clamp-2 mt-1 h-10">{doc.title}</p>
-                    <div className="flex justify-between items-center mt-2 text-xs text-gray-500">
-                      <span className="px-2 py-1 bg-green-100 text-green-800 rounded">{STATUS_LABELS[doc.status] || doc.status}</span>
-                      <span>{formatDate(doc.updatedAt)}</span>
-                    </div>
+          ) : filteredDocuments.length === 0 ? (
+            <div className="text-center py-16 border-2 border-dashed rounded-lg"><p className="text-gray-500">ไม่พบเอกสารที่อนุมัติแล้ว</p></div>
+          ) : isMobile ? (
+            <div className="space-y-3">
+              {filteredDocuments.map(doc => (
+                <div key={doc.id} className="bg-gray-50 border rounded-lg p-4 space-y-3">
+                  <div>
+                    <p className="font-semibold text-gray-800 truncate">{doc.documentNumber}</p>
+                    <p className="text-sm text-gray-600 line-clamp-2 mt-1">{doc.title}</p>
                   </div>
-                ))}
-              </div>
-            ) : (
-              // Desktop View: Table
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">เลขที่เอกสาร</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">หัวข้อเรื่อง</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">สถานะ</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">วันที่อนุมัติ</th>
+                  {doc.files && doc.files.length > 0 && (
+                     <button
+                        onClick={() => handleFileClick(doc.files[0])}
+                        className="w-full flex items-center justify-center text-sm bg-white border border-gray-300 rounded-md p-2 hover:bg-gray-100 transition-colors"
+                      >
+                       {doc.files[0].fileName.toLowerCase().endsWith('.pdf') ? <Eye className="w-4 h-4 mr-2 text-red-500"/> : <Download className="w-4 h-4 mr-2 text-blue-500"/>}
+                       <span className="truncate">{doc.files[0].fileName}</span>
+                     </button>
+                  )}
+                  <div className="flex justify-between items-center pt-2 border-t text-xs text-gray-500">
+                    <span className="px-2 py-1 bg-green-100 text-green-800 rounded font-medium">{STATUS_LABELS[doc.status] || doc.status}</span>
+                    <span>{formatDate(doc.updatedAt)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">เลขที่เอกสาร</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">หัวข้อเรื่อง</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ไฟล์แนบ</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">สถานะ</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">วันที่อนุมัติ</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {filteredDocuments.map(doc => (
+                    <tr key={doc.id}>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-800">{doc.documentNumber}</td>
+                      <td className="px-6 py-4 text-sm text-gray-700">{doc.title}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                        {doc.files && doc.files.length > 0 ? (
+                           <button
+                             onClick={() => handleFileClick(doc.files[0])}
+                             className="flex items-center text-blue-600 hover:text-blue-800 hover:underline"
+                             title={doc.files[0].fileName}
+                           >
+                            <FileText className="w-4 h-4 mr-2 flex-shrink-0"/>
+                            <span className="truncate max-w-[250px]">{doc.files[0].fileName}</span>
+                          </button>
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                        <span className="px-2 py-1 bg-green-100 text-green-800 rounded font-medium">{STATUS_LABELS[doc.status] || doc.status}</span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(doc.updatedAt)}</td>
                     </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {filteredDocuments.map(doc => (
-                      <tr key={doc.id} className="hover:bg-gray-50 cursor-pointer" 
-                          onClick={() => handleRowClick(doc.id)}>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-700">{doc.documentNumber}</td>
-                        <td className="px-6 py-4 text-sm text-gray-800">{doc.title}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm">
-                          <span className="px-2 py-1 bg-green-100 text-green-800 rounded">{STATUS_LABELS[doc.status] || doc.status}</span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(doc.updatedAt)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </div>
@@ -233,11 +253,6 @@ export default function ApprovedDocumentLibrary() {
         file={previewFile}
         onClose={() => setPreviewFile(null)}
       />
-      {isFetchingPreview && (
-         <div className="fixed inset-0 bg-black bg-opacity-50 z-[70] flex items-center justify-center">
-            <Loader2 className="w-12 h-12 text-white animate-spin" />
-        </div>
-      )}
     </>
   );
 }

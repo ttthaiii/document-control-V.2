@@ -1,12 +1,10 @@
-// src/app/api/rfa/list/route.ts (with Debugging)
+// src/app/api/rfa/list/route.ts
+
 import { NextRequest, NextResponse } from 'next/server'
 import { adminDb, adminAuth } from '@/lib/firebase/admin'
 import { STATUSES } from '@/lib/config/workflow';
 
 export async function GET(request: NextRequest) {
-  // ✅ 1. เพิ่ม Log เพื่อดูว่า API ถูกเรียกใช้หรือไม่
-  console.log("\n--- [API LOG] Received request for approved documents ---");
-
   try {
     const authHeader = request.headers.get('authorization')
     if (!authHeader?.startsWith('Bearer ')) {
@@ -24,7 +22,6 @@ export async function GET(request: NextRequest) {
     const userSites = userData.sites || [];
 
     if (userSites.length === 0) {
-      console.log("[API LOG] User has no assigned sites. Returning empty array.");
       return NextResponse.json({ success: true, documents: [] });
     }
     
@@ -32,18 +29,12 @@ export async function GET(request: NextRequest) {
     const view = searchParams.get('view');
     
     if (view !== 'approved') {
-        return NextResponse.json({ success: false, error: 'Invalid view parameter' }, { status: 400 });
+        return NextResponse.json({ success: false, error: 'Invalid view parameter for this endpoint' }, { status: 400 });
     }
-
-    // ✅ 2. เพิ่ม Log เพื่อดู Filter ที่ได้รับ
-    const siteId = searchParams.get('siteId');
-    const categoryId = searchParams.get('categoryId');
-    console.log(`[API LOG] Filters received: siteId=${siteId}, categoryId=${categoryId}`);
-
 
     let firestoreQuery: FirebaseFirestore.Query = adminDb.collection('rfaDocuments');
 
-    // บังคับเงื่อนไข `isLatest` และ `status`
+    // 1. บังคับเงื่อนไข `isLatest` และ `status` เสมอ
     const approvedStatuses = [
       STATUSES.APPROVED,
       STATUSES.APPROVED_WITH_COMMENTS,
@@ -53,45 +44,56 @@ export async function GET(request: NextRequest) {
                         .where('isLatest', '==', true)
                         .where('status', 'in', approvedStatuses);
 
-    // กรองตาม Site
+    // 2. กรองตาม Site
+    const siteId = searchParams.get('siteId');
     if (siteId && siteId !== 'ALL') {
       if (userSites.includes(siteId)) {
         firestoreQuery = firestoreQuery.where('siteId', '==', siteId);
       } else {
-        console.log(`[API LOG] Access denied for requested siteId: ${siteId}. Returning empty array.`);
         return NextResponse.json({ success: true, documents: [] });
       }
     } else {
       firestoreQuery = firestoreQuery.where('siteId', 'in', userSites);
     }
 
-    // กรองตาม Category
+    // 3. กรองตาม Category
+    const categoryId = searchParams.get('categoryId');
     if (categoryId && categoryId !== 'ALL') {
         firestoreQuery = firestoreQuery.where('categoryId', '==', categoryId);
     }
 
+    // 4. เรียงลำดับ
     firestoreQuery = firestoreQuery.orderBy('updatedAt', 'desc');
-    
-    console.log("[API LOG] Executing Firestore query...");
+
     const documentsSnapshot = await firestoreQuery.get();
-
-    // ✅ 3. เพิ่ม Log เพื่อดูผลลัพธ์จากการ Query
-    console.log(`[API LOG] Query finished. Found ${documentsSnapshot.size} documents.`);
-
     const documents: any[] = [];
+    
     documentsSnapshot.forEach(doc => {
-      documents.push({ id: doc.id, ...doc.data() });
+      const documentData = doc.data();
+      
+      documents.push({
+        id: doc.id,
+        documentNumber: documentData.documentNumber,
+        title: documentData.title,
+        status: documentData.status,
+        updatedAt: documentData.updatedAt,
+        rfaType: documentData.rfaType,
+        site: { id: documentData.siteId, name: documentData.siteName || 'N/A' },
+        category: { id: documentData.categoryId, categoryCode: documentData.taskData?.taskCategory || documentData.categoryId || 'N/A' },
+        files: documentData.files || [],
+      });
     });
     
-    console.log("[API LOG] Sending successful response to client.");
     return NextResponse.json({
       success: true,
       documents: documents,
     });
 
   } catch (error) {
-    // ✅ 4. เพิ่ม Log เพื่อจับ Error ทุกชนิด
-    console.error('--- [API LOG] UNEXPECTED ERROR ---', error);
+    console.error('Error fetching approved RFA documents:', error);
+    if (error instanceof Error && error.message.includes('FAILED_PRECONDITION')) {
+        return NextResponse.json({ success: false, error: 'Firestore query requires a composite index. Please check the server logs for the creation link.' }, { status: 400 });
+    }
     const errorMessage = error instanceof Error ? error.message : 'Internal Server Error';
     return NextResponse.json({ success: false, error: errorMessage }, { status: 500 });
   }
