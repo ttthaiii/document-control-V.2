@@ -1,4 +1,16 @@
 // src/types/rfa.ts
+export interface Site {
+  id: string;
+  name: string;
+}
+
+export interface Category {
+  id: string;
+  siteId: string;
+  categoryCode: string;
+  categoryName: string;
+}
+
 export interface RFAFile {
   fileName: string
   fileUrl: string
