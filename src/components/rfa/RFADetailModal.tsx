@@ -361,6 +361,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 )}
             </div>
             
+            {/* 🎯🎯🎯 START: โค้ดส่วนที่แก้ไข 🎯🎯🎯 */}
             <div>
               <h4 className="text-md font-semibold mb-2 flex items-center">
                 <Paperclip size={16} className="mr-2"/> ไฟล์แนบ (ฉบับล่าสุด) ({latestFiles.length})
@@ -369,41 +370,51 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 {latestFiles.length > 0 ? (
                   latestFiles.map((file, index) => {
                     const isPdf = file.contentType === 'application/pdf' || file.fileName.toLowerCase().endsWith('.pdf');
-                    return (
-                      <li key={index} className="flex items-center justify-between bg-gray-50 p-2 rounded-md">
-                        <div className="flex items-center min-w-0">
-                          <FileText className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
-                          <div className="flex flex-col min-w-0">
-                            <span className="text-sm font-medium text-gray-800 truncate">{file.fileName}</span>
-                            <span className="text-xs text-gray-500">{formatFileSize(file.size)}</span>
-                          </div>
+
+                    // สร้าง Component สำหรับเนื้อหาไฟล์เพื่อ Reusability
+                    const FileContent = () => (
+                      <div className="flex items-center min-w-0">
+                        <FileText className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-sm font-medium text-blue-600 group-hover:text-blue-800 group-hover:underline truncate">{file.fileName}</span>
+                          <span className="text-xs text-gray-500">{formatFileSize(file.size)}</span>
                         </div>
+                      </div>
+                    );
+
+                    return (
+                      <li key={index} className="bg-gray-50 rounded-md">
                         {isPdf ? (
+                          // ถ้าเป็น PDF: ใช้ <button> เพื่อเปิด Modal
                           <button 
                             onClick={() => setPreviewFile(file)}
-                            className="text-blue-600 hover:text-blue-800 p-2 rounded-full hover:bg-blue-100 flex-shrink-0 ml-2"
-                            title="Preview File"
+                            className="w-full text-left p-2 rounded-md hover:bg-blue-100 group transition-colors duration-200"
+                            title={`ดูตัวอย่างไฟล์ ${file.fileName}`}
                           >
-                            <Eye size={18} />
+                            <FileContent />
                           </button>
                         ) : (
+                          // ถ้าไม่ใช่ PDF: ใช้ <a> เพื่อดาวน์โหลด
                           <a 
                             href={file.fileUrl} 
+                            download={file.fileName} // เพิ่ม attribute 'download'
                             target="_blank" 
                             rel="noopener noreferrer" 
-                            className="text-blue-600 hover:text-blue-800 p-2 rounded-full hover:bg-blue-100 flex-shrink-0 ml-2"
-                            title="Download File"
+                            className="w-full text-left p-2 rounded-md hover:bg-blue-100 group transition-colors duration-200 flex"
+                            title={`ดาวน์โหลด ${file.fileName}`}
                           >
-                            <Download size={18} />
+                            <FileContent />
                           </a>
                         )}
                       </li>
-                    )})
+                    )
+                  })
                 ) : (
                   <p className="text-sm text-gray-500">ไม่มีไฟล์แนบในฉบับล่าสุด</p>
                 )}
               </ul>
             </div>
+            {/* 🎯🎯🎯 END: โค้ดส่วนที่แก้ไข 🎯🎯🎯 */}
           </div>
           <div className="p-4 border-t bg-gray-50 rounded-b-lg">
             
