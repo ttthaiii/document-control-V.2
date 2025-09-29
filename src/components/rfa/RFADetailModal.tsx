@@ -2,7 +2,8 @@
 
 import React, { useState, useMemo, useEffect } from 'react'
 import { RFADocument, RFAPermissions, RFAWorkflowStep, RFAFile } from '@/types/rfa'
-import { X, Paperclip, Clock, User, Check, Send, AlertTriangle, FileText, Download, History, MessageSquare, Edit3, Upload, Loader2, ThumbsUp, ThumbsDown, Eye } from 'lucide-react'
+import { X, Paperclip, Clock, User, Check, Send, AlertTriangle, FileText, Download, History, MessageSquare, Edit3, Upload, ThumbsUp, ThumbsDown, Eye } from 'lucide-react'
+import Spinner from '@/components/shared/Spinner';
 import { useAuth } from '@/lib/auth/useAuth'
 import { STATUS_LABELS, STATUSES, CREATOR_ROLES, APPROVER_ROLES } from '@/lib/config/workflow'
 import PDFViewerModal from './PDFPreviewModal'
@@ -153,7 +154,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   if (isLoading) {
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
-            <Loader2 className="w-12 h-12 text-white animate-spin" />
+            <Spinner className="h-12 w-12 text-white" />
         </div>
     );
   }
@@ -439,7 +440,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                           <div key={fileObj.id} className="flex items-center text-sm p-2 bg-gray-100 rounded">
                               <FileText className="w-4 h-4 mr-2 text-gray-500" />
                               <span className="flex-1 truncate">{fileObj.file.name}</span>
-                              {fileObj.status === 'uploading' && <Loader2 className="w-4 h-4 animate-spin text-blue-500" />}
+                              {fileObj.status === 'uploading' && <Spinner className="w-4 h-4 mr-2" /> }
                               {fileObj.status === 'success' && <Check className="w-4 h-4 text-green-500" />}
                               {fileObj.status === 'error' && <span title={fileObj.error}><AlertTriangle className="w-4 h-4 text-red-500" /></span>}
                               <button onClick={() => removeFile(index, 'resubmission')} className="ml-2 text-gray-500 hover:text-red-600"><X size={16} /></button>
@@ -453,7 +454,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                       disabled={isSubmitting || newFiles.filter(f => f.status === 'success').length === 0}
                       className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-300"
                   >
-                      {isSubmitting ? <Loader2 className="animate-spin mr-2"/> : <Send size={16} className="mr-2" />}
+                      {isSubmitting ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />}
                       ส่งกลับไปตรวจสอบ
                   </button>
                 </div>
@@ -494,7 +495,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                                 <div key={fileObj.id} className="flex items-center text-sm p-2 bg-gray-100 rounded">
                                     <FileText className="w-4 h-4 mr-2 text-gray-500" />
                                     <span className="flex-1 truncate">{fileObj.file.name}</span>
-                                    {fileObj.status === 'uploading' && <Loader2 className="w-4 h-4 animate-spin text-blue-500" />}
+                                    {fileObj.status === 'uploading' && <Spinner className="w-4 h-4 mr-2" /> }
                                     {fileObj.status === 'success' && <Check className="w-4 h-4 text-green-500" />}
                                     {fileObj.status === 'error' && (
                                       <span title={fileObj.error}>
@@ -522,7 +523,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                             disabled={isSubmitting || revisionFiles.filter(f => f.status === 'success').length === 0}
                             className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-300"
                         >
-                            {isSubmitting ? <Loader2 className="animate-spin mr-2"/> : <Send size={16} className="mr-2" />}
+                            {isSubmitting ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />}
                             ส่งเอกสารฉบับแก้ไข
                         </button>
                     </div>
@@ -556,7 +557,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                             <div key={fileObj.id} className="flex items-center text-sm p-2 bg-gray-100 rounded">
                                 <FileText className="w-4 h-4 mr-2 text-gray-500" />
                                 <span className="flex-1 truncate">{fileObj.file.name}</span>
-                                {fileObj.status === 'uploading' && <Loader2 className="w-4 h-4 animate-spin text-blue-500" />}
+                                {fileObj.status === 'uploading' && <Spinner className="w-4 h-4 mr-2" /> }
                                 {fileObj.status === 'success' && <Check className="w-4 h-4 text-green-500" />}
                                 {fileObj.status === 'error' && (
                                   <span title={fileObj.error}>

@@ -5,7 +5,8 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '@/lib/auth/useAuth'
 import { Site, Category, RFADocument, RFAFile } from '@/types/rfa'
-import { Search, Building, Tag, Loader2, FileText, Calendar, Download, Eye } from 'lucide-react'
+import { Search, Building, Tag, FileText, Calendar, Download, Eye } from 'lucide-react' // ลบ Loader2
+import Spinner from '@/components/shared/Spinner'
 import { useRouter } from 'next/navigation'
 import { STATUS_LABELS } from '@/lib/config/workflow'
 import PDFPreviewModal from './PDFPreviewModal'
@@ -177,7 +178,7 @@ export default function ApprovedDocumentLibrary() {
 
         <div className="p-4">
           {isLoading || !hasMounted ? (
-            <div className="text-center py-16"><Loader2 className="w-8 h-8 animate-spin text-gray-400 mx-auto"/></div>
+            <div className="text-center py-16"><Spinner /></div>
           ) : filteredDocuments.length === 0 ? (
             <div className="text-center py-16 border-2 border-dashed rounded-lg"><p className="text-gray-500">ไม่พบเอกสารที่อนุมัติแล้ว</p></div>
           ) : isMobile ? (

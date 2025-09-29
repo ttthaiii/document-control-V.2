@@ -4,9 +4,11 @@ import React, { useState, useEffect } from 'react'
 import { FileText, Calendar, User, Clock, Building, Tag, GitCommit } from 'lucide-react'
 import { RFADocument } from '@/types/rfa'
 import { STATUSES, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES } from '@/lib/config/workflow'
+import Spinner from '@/components/shared/Spinner'
 
 interface RFAListTableProps {
   documents: RFADocument[]
+  isLoading: boolean
   onDocumentClick: (document: RFADocument) => void
   getStatusColor: (status: string) => string
   statusLabels: { [key: string]: string }
@@ -37,6 +39,7 @@ const convertToDate = (date: any): Date | null => {
 
 export default function RFAListTable({
   documents,
+  isLoading,
   onDocumentClick,
   getStatusColor,
   statusLabels,
@@ -51,6 +54,25 @@ export default function RFAListTable({
     return () => window.removeEventListener('resize', checkIsMobile)
   }, [])
 
+  if (isLoading) {
+    return (
+      <div className="w-full h-96 flex justify-center items-center bg-white rounded-lg shadow">
+        <Spinner />
+      </div>
+    );
+  }
+  
+  // เพิ่มเงื่อนไขสำหรับแสดงผลเมื่อไม่มีข้อมูล
+  if (!documents || documents.length === 0) {
+    return (
+      <div className="w-full h-96 flex flex-col justify-center items-center bg-white rounded-lg shadow text-center">
+        <FileText className="w-16 h-16 text-gray-300 mb-4" />
+        <h3 className="text-xl font-semibold text-gray-700">ไม่พบเอกสาร</h3>
+        <p className="text-gray-500 mt-1">ลองเปลี่ยนตัวกรองหรือสร้างเอกสารใหม่</p>
+      </div>
+    );
+  }
+    
   const formatDate = (date: any) => {
     const d = convertToDate(date);
     if (!d) return 'Invalid Date';

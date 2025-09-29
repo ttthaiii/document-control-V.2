@@ -1,6 +1,7 @@
 import { Inter } from 'next/font/google'
 import './globals.css'
 import { AuthProvider } from '@/lib/auth/useAuth'
+import { LoadingProvider } from '@/lib/context/LoadingContext'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -18,7 +19,9 @@ export default function RootLayout({
     <html lang="th">
       <body>
         <AuthProvider>
-          {children}
+          <LoadingProvider> {/* 👈 2. นำไปครอบ children */}
+            {children}
+          </LoadingProvider>
         </AuthProvider>
       </body>
     </html>

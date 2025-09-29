@@ -2,9 +2,10 @@
 
 import React, { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { FileText, Upload, X, Loader2, Check, AlertTriangle } from 'lucide-react'
+import { FileText, Upload, X, Check, AlertTriangle } from 'lucide-react'
 import { useGoogleSheets } from '@/lib/hooks/useGoogleSheets'
 import { useAuth } from '@/lib/auth/useAuth'
+import Spinner from '@/components/shared/Spinner'
 
 interface Category {
   id: string;
@@ -529,7 +530,7 @@ export default function CreateRFAForm({
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
                     หมวดงาน (จาก Google Sheets)
-                    {sheetsLoading && <Loader2 className="w-4 h-4 ml-2 animate-spin text-gray-400" />}
+                    {sheetsLoading && <Spinner className="w-4 h-4 ml-2" />}
                   </label>
                   <select 
                     value={formData.selectedCategory} 
@@ -601,7 +602,7 @@ export default function CreateRFAForm({
                           {fileObj.file.name}
                         </span>
                         <div className="flex items-center ml-3">
-                          {fileObj.status === 'uploading' && <Loader2 className="w-4 h-4 animate-spin text-blue-500" />}
+                          {fileObj.status === 'uploading' && <Spinner className="w-4 h-4" />}
                           {fileObj.status === 'success' && <Check className="w-4 h-4 text-green-500" />}
                           {fileObj.status === 'error' && (
                             <span title={fileObj.error}>

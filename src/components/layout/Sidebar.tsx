@@ -1,10 +1,11 @@
 // src/components/layout/Sidebar.tsx (แก้ไขแล้ว)
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth/useAuth'
+import { useLoading } from '@/lib/context/LoadingContext'
 import { 
   FileText, 
   HelpCircle, 
@@ -35,10 +36,11 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { user, logout } = useAuth()
-  
+  const { showLoader } = useLoading() // 👈 2. เรียกใช้ hook
+
   const [showRfaDropdown, setShowRfaDropdown] = useState(false)
-  const [userSites, setUserSites] = useState<SiteData[]>([])
   
+  // (ฟังก์ชัน isRFAAuthorized, userSites, useEffect, handleLogout, toggleRfaDropdown, isPathActive ทั้งหมดเหมือนเดิม)
   const isRFAAuthorized = () => {
     if (!user) return false;
     const authorizedRoles = [
@@ -50,25 +52,14 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
     return authorizedRoles.includes(user.role);
   }
 
-  useEffect(() => {
-    const fetchUserSites = async () => {
-      if (!user?.sites || user.sites.length === 0) return
-      
-      try {
-        const sites = user.sites.map((siteId: string, index: number) => ({
-          id: siteId,
-          name: `Site ${index + 1}`
-        }))
-        setUserSites(sites)
-      } catch (error) {
-        console.error('Error fetching sites:', error)
-      }
-    }
-
-    if (user) {
-      fetchUserSites()
-    }
-  }, [user])
+  // ใช้ useMemo แทน
+  const userSites = useMemo(() => {
+    if (!user?.sites || user.sites.length === 0) return []
+    return user.sites.map((siteId: string, index: number) => ({
+      id: siteId,
+      name: `Site ${index + 1}`
+    }))
+  }, [user?.sites])
 
   useEffect(() => {
     if (pathname.includes('/rfa') || pathname.includes('/dashboard/rfa')) {
@@ -76,12 +67,17 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
     }
   }, [pathname])
 
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
+
   const handleLogout = async () => {
     try {
+      setIsLoggingOut(true)
       await logout()
       router.push('/')
     } catch (error) {
       console.error('Logout error:', error)
+    } finally {
+      setIsLoggingOut(false)
     }
   }
 
@@ -143,6 +139,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
           
           <Link
             href="/dashboard"
+            onClick={showLoader}
             className={`
               flex items-center px-3 py-2 rounded-lg transition-colors
               ${isPathActive('/dashboard') && pathname === '/dashboard'
@@ -179,6 +176,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
                 <div className="ml-6 space-y-1 border-l-2 border-orange-200 pl-4">
                   <Link
                     href="/dashboard/rfa?type=RFA-SHOP"
+                    onClick={showLoader}
                     className={`
                       flex items-center gap-3 px-3 py-2 rounded-md text-sm
                       transition-colors duration-200
@@ -194,6 +192,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
 
                   <Link
                     href="/dashboard/rfa?type=RFA-GEN"
+                    onClick={showLoader}
                     className={`
                       flex items-center gap-3 px-3 py-2 rounded-md text-sm
                       transition-colors duration-200
@@ -209,6 +208,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
 
                   <Link
                     href="/dashboard/rfa?type=RFA-MAT"
+                    onClick={showLoader}
                     className={`
                       flex items-center gap-3 px-3 py-2 rounded-md text-sm
                       transition-colors duration-200
@@ -229,6 +229,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
           {isRFAAuthorized() && (
             <Link
               href="/rfi"
+              onClick={showLoader}
               className={`
                 flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
                 transition-colors duration-200
@@ -245,6 +246,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
 
           <Link
             href="/work-request"
+            onClick={showLoader}
             className={`
               flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
               transition-colors duration-200
@@ -262,15 +264,16 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
         <div className="p-4 border-t border-orange-200">
           <button
             onClick={handleLogout}
-            className="
+            disabled={isLoggingOut} // เพิ่ม
+            className={`
               w-full flex items-center justify-center gap-2 
               px-4 py-2.5 rounded-lg text-sm font-medium
-              bg-red-500 hover:bg-red-600 text-white
-              transition-colors duration-200
-            "
+              ${isLoggingOut ? 'bg-red-400 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600'} 
+              text-white transition-colors duration-200
+            `}
           >
             <LogOut size={16} />
-            <span>ออกจากระบบ</span>
+            <span>{isLoggingOut ? 'กำลังออก...' : 'ออกจากระบบ'}</span>
           </button>
         </div>
       </div>
