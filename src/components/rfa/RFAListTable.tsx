@@ -107,23 +107,26 @@ export default function RFAListTable({
       case STATUSES.PENDING_REVIEW:
         return { name: 'Site', role: 'Site' };
 
+      // 👇 --- จุดที่แก้ไข --- 👇
+      case STATUSES.SENT_TO_EXTERNAL_CM:
+        return { name: 'CM (ภายนอก)', role: 'CM' };
+      
+      case STATUSES.PENDING_FINAL_APPROVAL:
+        return { name: 'Site', role: 'Site' };
+      // --- สิ้นสุดจุดที่แก้ไข ---
+
       case STATUSES.PENDING_CM_APPROVAL:
         return { name: 'CM', role: 'CM' };
 
       case STATUSES.REVISION_REQUIRED:
       case STATUSES.APPROVED_REVISION_REQUIRED:
-        // สถานะที่ต้องแก้ไข ผู้สร้างรับผิดชอบเสมอ
         return { name: doc.createdByInfo?.role || 'Creator', role: doc.createdByInfo?.role || 'Creator' };
 
-      // ✅ FIX: เพิ่ม Logic ตรวจสอบสถานะ "ไม่อนุมัติ" โดยเฉพาะ
       case STATUSES.REJECTED:
-        // ถ้าเป็นฉบับล่าสุด (ยังไม่มี Rev. ใหม่) ให้ส่งกลับไปที่ผู้สร้าง
-        // ถ้าไม่ใช่ฉบับล่าสุดแล้ว ถือว่าจบกระบวนการของ Rev. นี้
         return doc.isLatest 
           ? { name: doc.createdByInfo?.role || 'Creator', role: doc.createdByInfo?.role || 'Creator' }
           : { name: 'เสร็จสิ้น', role: 'Completed' };
 
-      // สถานะที่เสร็จสิ้นโดยสมบูรณ์
       case STATUSES.APPROVED:
       case STATUSES.APPROVED_WITH_COMMENTS:
         return { name: 'เสร็จสิ้น', role: 'Completed' };

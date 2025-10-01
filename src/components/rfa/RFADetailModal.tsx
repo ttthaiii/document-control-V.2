@@ -1,13 +1,14 @@
 'use client'
 
 import React, { useState, useMemo, useEffect } from 'react'
-import { RFADocument, RFAPermissions, RFAWorkflowStep, RFAFile } from '@/types/rfa'
+import { RFADocument, RFAPermissions, RFAWorkflowStep, RFAFile, RFASite } from '@/types/rfa' // 👈 1. เพิ่ม RFASite
 import { X, Paperclip, Clock, User, Check, Send, AlertTriangle, FileText, Download, History, MessageSquare, Edit3, Upload, ThumbsUp, ThumbsDown, Eye } from 'lucide-react'
 import Spinner from '@/components/shared/Spinner';
 import { useAuth } from '@/lib/auth/useAuth'
-import { STATUS_LABELS, STATUSES, CREATOR_ROLES, APPROVER_ROLES } from '@/lib/config/workflow'
-import PDFViewerModal from './PDFPreviewModal'
+import { STATUS_LABELS, STATUSES, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUS_COLORS } from '@/lib/config/workflow'
+import PDFPreviewModal from './PDFPreviewModal'
 
+// --- (Helper Functions: formatDate, formatFileSize, WorkflowHistoryModal ไม่มีการเปลี่ยนแปลง) ---
 const formatDate = (dateString: string | undefined): string => {
   if (!dateString) return 'N/A';
   return new Date(dateString).toLocaleString('th-TH', {
@@ -44,7 +45,6 @@ const WorkflowHistoryModal = ({ workflow, onClose, userRole }: { workflow: RFAWo
                 </div>
                 <div className="p-6 overflow-y-auto">
                     <div className="border-l-2 border-gray-200 ml-2">
-                        {/* ✅ ใช้ filteredWorkflow ที่ผ่านการกรองแล้ว */}
                         {filteredWorkflow.length > 0 ? (
                             filteredWorkflow.map((item, index) => (
                             <div key={index} className="relative pl-6 pb-8 last:pb-0">
@@ -105,9 +105,20 @@ interface UploadedFile {
     error?: string;
 }
 
+// 👇 เพิ่ม type สำหรับ site ที่มีข้อมูล cmSystemType
+interface SiteWithSystemType extends RFASite {
+    cmSystemType?: 'INTERNAL' | 'EXTERNAL';
+}
+// 👇 เพิ่ม type สำหรับ document ที่มีข้อมูลใหม่
+interface FullRFADocument extends RFADocument {
+    site: SiteWithSystemType;
+    creatorRole?: 'BIM' | 'ME' | 'SN';
+}
+
+
 export default function RFADetailModal({ document: initialDoc, onClose, onUpdate,showOverlay = true}: RFADetailModalProps) {
   const { user, firebaseUser } = useAuth();
-  const [document, setDocument] = useState<RFADocument | null>(initialDoc);
+  const [document, setDocument] = useState<FullRFADocument | null>(initialDoc as FullRFADocument); // 👈 2. กำหนด Type ใหม่
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -115,8 +126,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const [newFiles, setNewFiles] = useState<UploadedFile[]>([]);
   const [revisionComment, setRevisionComment] = useState('');
   const [revisionFiles, setRevisionFiles] = useState<UploadedFile[]>([]);
-  
-  // ✅ 4. State นี้ยังคงใช้เหมือนเดิม แต่จะควบคุม Modal ตัวใหม่
   const [previewFile, setPreviewFile] = useState<RFAFile | null>(null);
 
   useEffect(() => {
@@ -133,12 +142,12 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
         });
         const result = await response.json();
         if (result.success) {
-          setDocument(result.document);
+          setDocument(result.document); // 👈 3. API จะส่งข้อมูล cmSystemType และ creatorRole กลับมาด้วย
         } else {
-          setDocument(initialDoc);
+          setDocument(initialDoc as FullRFADocument);
         }
       } catch (error) {
-        setDocument(initialDoc);
+        setDocument(initialDoc as FullRFADocument);
       } finally {
         setIsLoading(false);
       }
@@ -146,6 +155,8 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     fetchFullDocument();
   }, [initialDoc, firebaseUser]);
 
+
+  // --- (useMemo, Loading/Error states, Helper functions: upload, remove, handleAction etc. ไม่มีการเปลี่ยนแปลง) ---
   const latestCommentItem = useMemo(() => {
     if (!document?.workflow || document.workflow.length === 0) return null;
     return [...document.workflow].reverse().find(step => step.comments && step.comments.trim() !== '');
@@ -240,10 +251,14 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
 
 
   const handleAction = async (action: string) => {
-    const successfulUploads = newFiles.filter(f => f.status === 'success');
-    if (successfulUploads.length === 0) {
-        alert('กรุณาแนบไฟล์ใหม่สำหรับขั้นตอนนี้ก่อนดำเนินการ');
-        return;
+    // สำหรับ action ที่ไม่ต้องแนบไฟล์ใหม่
+    const noFileActions = ['APPROVE', 'APPROVE_WITH_COMMENTS', 'REJECT', 'APPROVE_REVISION_REQUIRED'];
+    if (!noFileActions.includes(action)) {
+        const successfulUploads = newFiles.filter(f => f.status === 'success');
+        if (successfulUploads.length === 0) {
+            alert('กรุณาแนบไฟล์ใหม่สำหรับขั้นตอนนี้ก่อนดำเนินการ');
+            return;
+        }
     }
 
     setIsSubmitting(true);
@@ -252,7 +267,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       const payload = {
           action,
           comments: comment,
-          newFiles: successfulUploads.map(f => f.uploadedData)
+          newFiles: newFiles.filter(f => f.status === 'success').map(f => f.uploadedData)
       };
 
       const response = await fetch(`/api/rfa/${document.id}`, {
@@ -313,42 +328,73 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const handleResubmitRevision = async () => {
     await handleAction('SUBMIT_REVISION');
   };
+  
+  // --- 👇 4. สร้างตัวแปรเงื่อนไข (Conditional Flags) ---
+  const { role: userRole } = user || {};
+  const { status, creatorRole } = document;
+  const cmSystemType = document.site?.cmSystemType || 'INTERNAL';
+
+  // เงื่อนไขสำหรับ Site Admin
+  const isSiteReviewing = userRole === 'Site Admin' && status === STATUSES.PENDING_REVIEW;
+  const isSiteFinalApproving_BimFlow = userRole === 'Site Admin' && creatorRole === 'BIM' && status === STATUSES.PENDING_FINAL_APPROVAL;
+  const isSiteForExternalCmFlow = userRole === 'Site Admin' && cmSystemType === 'EXTERNAL' && creatorRole === 'BIM' && status === STATUSES.SENT_TO_EXTERNAL_CM;
+
+  // เงื่อนไขสำหรับ CM
+  const isCmApproving_BimFlow = userRole === 'CM' && creatorRole === 'BIM' && status === STATUSES.PENDING_CM_APPROVAL && cmSystemType === 'INTERNAL';
+  const isCmApproving_MeSnFlow = userRole === 'CM' && (creatorRole === 'ME' || creatorRole === 'SN') && status === STATUSES.PENDING_CM_APPROVAL;
+
 
   const overlayClasses = showOverlay ? 'bg-black bg-opacity-50' : ''  
  
   return (
     <>
       <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${overlayClasses}`}>
+        {/* --- (ส่วน Header และ Content ด้านบน ไม่มีการเปลี่ยนแปลง) --- */}
         <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
-          <div className="flex justify-between items-center p-4 border-b">
-            <div className="flex items-center space-x-4">
-                <div>
-                    <h3 className="text-lg font-bold text-blue-600">{document.runningNumber || 'RFA Document'}</h3>
-                    <p className="text-sm text-gray-500">{document.documentNumber}</p>
-                </div>
-                <button 
-                    onClick={() => setShowHistory(true)}
-                    className="flex items-center text-sm text-gray-500 hover:text-blue-600"
-                >
-                    <History size={16} className="mr-1"/> ดูประวัติ
-                </button>
+          <div className="flex justify-between items-start p-4 border-b">
+            {/* Left Side: Document Info */}
+            <div>
+              <div className="flex items-baseline space-x-3">
+                <h3 className="text-lg font-bold text-blue-600">{document.documentNumber}</h3>
+                <h2 className="text-xl font-semibold text-gray-800">{document.title}</h2>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">{document.runningNumber || 'RFA Document'}</p>
             </div>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-              <X size={24} />
-            </button>
+
+            {/* Right Side: Actions */}
+            <div className="flex items-center space-x-4">
+              <button
+                  onClick={() => setShowHistory(true)}
+                  className="flex items-center text-sm text-gray-500 hover:text-blue-600"
+              >
+                  <History size={16} className="mr-1"/> ดูประวัติ
+              </button>
+              <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+                <X size={24} />
+              </button>
+            </div>
           </div>
 
           <div className="p-6 overflow-y-auto space-y-6">
             <div className="bg-gray-50 p-4 rounded-lg">
-                <h2 className="text-xl font-semibold text-gray-800 mb-2">{document.title}</h2>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                    <div>
-                        <strong className="text-gray-500 block">สถานะ:</strong>
-                        <span className="font-semibold">{STATUS_LABELS[document.status] || document.status}</span>
-                    </div>
+                  <div>
+                      <strong className="text-gray-500 block mb-1">สถานะ:</strong>
+                      <span 
+                        className="px-3 py-1 text-xs font-bold text-white rounded-full"
+                        style={{ backgroundColor: STATUS_COLORS[document.status] || '#6c757d' }}
+                      >
+                        {STATUS_LABELS[document.status] || document.status}
+                      </span>
+                  </div>
                     <div>
                         <strong className="text-gray-500 block">หมวดงาน:</strong>
                         <span>{document.category.categoryCode}</span>
+                    </div>
+                    {/* ✅ [ADD] เพิ่มการแสดงผลชื่อโครงการ */}
+                    <div>
+                        <strong className="text-gray-500 block">โครงการ:</strong>
+                        <span>{document.site?.name || 'N/A'}</span>
                     </div>
                 </div>
 
@@ -362,7 +408,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 )}
             </div>
             
-            {/* 🎯🎯🎯 START: โค้ดส่วนที่แก้ไข 🎯🎯🎯 */}
             <div>
               <h4 className="text-md font-semibold mb-2 flex items-center">
                 <Paperclip size={16} className="mr-2"/> ไฟล์แนบ (ฉบับล่าสุด) ({latestFiles.length})
@@ -371,14 +416,12 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 {latestFiles.length > 0 ? (
                   latestFiles.map((file, index) => {
                     const isPdf = file.contentType === 'application/pdf' || file.fileName.toLowerCase().endsWith('.pdf');
-
-                    // สร้าง Component สำหรับเนื้อหาไฟล์เพื่อ Reusability
                     const FileContent = () => (
                       <div className="flex items-center min-w-0">
                         <FileText className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
                         <div className="flex flex-col min-w-0">
                           <span className="text-sm font-medium text-blue-600 group-hover:text-blue-800 group-hover:underline truncate">{file.fileName}</span>
-                          <span className="text-xs text-gray-500">{formatFileSize(file.size)}</span>
+                          <span className="text-xs text-gray-500">{formatFileSize(file.fileSize)}</span>
                         </div>
                       </div>
                     );
@@ -386,7 +429,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                     return (
                       <li key={index} className="bg-gray-50 rounded-md">
                         {isPdf ? (
-                          // ถ้าเป็น PDF: ใช้ <button> เพื่อเปิด Modal
                           <button 
                             onClick={() => setPreviewFile(file)}
                             className="w-full text-left p-2 rounded-md hover:bg-blue-100 group transition-colors duration-200"
@@ -395,10 +437,9 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                             <FileContent />
                           </button>
                         ) : (
-                          // ถ้าไม่ใช่ PDF: ใช้ <a> เพื่อดาวน์โหลด
                           <a 
                             href={file.fileUrl} 
-                            download={file.fileName} // เพิ่ม attribute 'download'
+                            download={file.fileName}
                             target="_blank" 
                             rel="noopener noreferrer" 
                             className="w-full text-left p-2 rounded-md hover:bg-blue-100 group transition-colors duration-200 flex"
@@ -415,10 +456,12 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 )}
               </ul>
             </div>
-            {/* 🎯🎯🎯 END: โค้ดส่วนที่แก้ไข 🎯🎯🎯 */}
           </div>
+          
+          {/* --- 👇 5. Action Buttons (UI ที่แก้ไขใหม่ทั้งหมด) 👇 --- */}
           <div className="p-4 border-t bg-gray-50 rounded-b-lg">
             
+            {/* --- Flow: Creator (BIM/ME/SN) --- */}
             {isResubmissionFlow && (
               <div className="space-y-4">
                 <h3 className="text-lg font-bold text-blue-800">ส่งเอกสารที่แก้ไข (Submit Revision)</h3>
@@ -530,112 +573,76 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 </div>
               </div>
             )}
-            
-            {!isRevisionFlow && !isResubmissionFlow && (permissions.canSendToCm || permissions.canApprove) && (
+
+            {/* --- Flow: Site Admin --- */}
+            {(isSiteReviewing || isSiteFinalApproving_BimFlow || isSiteForExternalCmFlow) && (
               <div className="space-y-4">
-                  <div>
-                      <label className="text-sm font-medium text-gray-700 mb-1 block">แสดงความคิดเห็น (Optional)</label>
-                      <textarea
-                        value={comment}
-                        onChange={(e) => setComment(e.target.value)}
-                        placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..."
-                        className="w-full p-2 border rounded-md text-sm"
-                        rows={2}
-                      />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 mb-1 block">แนบไฟล์ใหม่ (จำเป็น)</label>
-                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
-                        <input type="file" multiple onChange={(e) => handleFileUpload(e, 'action')} className="hidden" id="action-file-upload" />
-                        <label htmlFor="action-file-upload" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
-                            <Upload size={16} className="mr-2"/>
-                            คลิกเพื่อเลือกไฟล์
-                        </label>
-                    </div>
-                    <div className="mt-2 space-y-2">
-                        {newFiles.map((fileObj, index) => (
-                            <div key={fileObj.id} className="flex items-center text-sm p-2 bg-gray-100 rounded">
-                                <FileText className="w-4 h-4 mr-2 text-gray-500" />
-                                <span className="flex-1 truncate">{fileObj.file.name}</span>
-                                {fileObj.status === 'uploading' && <Spinner className="w-4 h-4 mr-2" /> }
-                                {fileObj.status === 'success' && <Check className="w-4 h-4 text-green-500" />}
-                                {fileObj.status === 'error' && (
-                                  <span title={fileObj.error}>
-                                    <AlertTriangle className="w-4 h-4 text-red-500" />
-                                  </span>
-                                )}
-                                <button onClick={() => removeFile(index, 'action')} className="ml-2 text-gray-500 hover:text-red-600"><X size={16} /></button>
-                            </div>
-                        ))}
-                    </div>
-                  </div>
-                  
-                  {permissions.canSendToCm && (
-                    <div className="flex justify-end space-x-3">
-                      <button
-                        onClick={() => handleAction('REQUEST_REVISION')}
-                        disabled={isSubmitting || newFiles.filter(f => f.status === 'success').length === 0}
-                        className="flex items-center px-4 py-2 text-sm font-medium text-white bg-yellow-500 rounded-lg hover:bg-yellow-600 disabled:bg-gray-300"
-                      >
-                        <Edit3 size={16} className="mr-2" />
-                        ขอแก้ไข
+                <h3 className="text-lg font-bold text-blue-800">ดำเนินการ (Site Admin)</h3>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-1 block">แสดงความคิดเห็น (Optional)</label>
+                  <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..." className="w-full p-2 border rounded-md text-sm" rows={2}/>
+                </div>
+                {/* ปุ่มสำหรับ Site Admin */}
+                <div className="flex flex-wrap justify-end gap-3">
+                  {isSiteReviewing && (
+                    <>
+                      <button onClick={() => handleAction('REQUEST_REVISION')} disabled={isSubmitting} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-yellow-500 rounded-lg hover:bg-yellow-600 disabled:bg-gray-300">
+                        <Edit3 size={16} className="mr-2" /> ขอแก้ไข
                       </button>
-                      <button
-                        onClick={() => handleAction('SEND_TO_CM')}
-                        disabled={isSubmitting || newFiles.filter(f => f.status === 'success').length === 0}
-                        className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-300"
-                      >
-                        <Send size={16} className="mr-2" />
-                        ส่งให้ CM
-                      </button>
-                    </div>
+                      {cmSystemType === 'INTERNAL' ? (
+                        <button onClick={() => handleAction('SEND_TO_CM')} disabled={isSubmitting} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-300">
+                          <Send size={16} className="mr-2" /> ส่งให้ CM
+                        </button>
+                      ) : (
+                        <button onClick={() => handleAction('SEND_TO_EXTERNAL_CM')} disabled={isSubmitting} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-cyan-600 rounded-lg hover:bg-cyan-700 disabled:bg-gray-300">
+                          <Send size={16} className="mr-2" /> ส่งให้ CM (ภายนอก)
+                        </button>
+                      )}
+                    </>
                   )}
-
-                  {permissions.canApprove && (
-                    <div className="flex flex-wrap justify-end gap-3">
-                       <button
-                          onClick={() => handleAction('APPROVE')}
-                          disabled={isSubmitting || newFiles.filter(f => f.status === 'success').length === 0}
-                          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:bg-gray-300"
-                        >
-                          <ThumbsUp size={16} className="mr-2" />
-                          อนุมัติ (Approve)
+                  {(isSiteFinalApproving_BimFlow || isSiteForExternalCmFlow) && (
+                     <>
+                        <button onClick={() => handleAction('APPROVE')} disabled={isSubmitting} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:bg-gray-300">
+                          <ThumbsUp size={16} className="mr-2" /> อนุมัติ
                         </button>
-                        <button
-                          onClick={() => handleAction('APPROVE_WITH_COMMENTS')}
-                          disabled={isSubmitting || newFiles.filter(f => f.status === 'success').length === 0}
-                          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-gray-300"
-                        >
-                          <MessageSquare size={16} className="mr-2" />
-                          อนุมัติตามคอมเมนต์
+                        <button onClick={() => handleAction('APPROVE_WITH_COMMENTS')} disabled={isSubmitting} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-gray-300">
+                          <MessageSquare size={16} className="mr-2" /> อนุมัติตามคอมเมนต์ (ไม่แก้ไข)
                         </button>
-                        <button
-                          onClick={() => handleAction('APPROVE_REVISION_REQUIRED')}
-                          disabled={isSubmitting || newFiles.filter(f => f.status === 'success').length === 0}
-                          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-lg hover:bg-orange-600 disabled:bg-gray-300"
-                        >
-                          <Edit3 size={16} className="mr-2" />
-                          อนุมัติแต่ต้องแก้ไข
+                        <button onClick={() => handleAction('APPROVE_REVISION_REQUIRED')} disabled={isSubmitting} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-lg hover:bg-orange-600 disabled:bg-gray-300">
+                          <Edit3 size={16} className="mr-2" /> อนุมัติตามคอมเมนต์ (ต้องแก้ไข)
                         </button>
-                        <button
-                          onClick={() => handleAction('REJECT')}
-                          disabled={isSubmitting || newFiles.filter(f => f.status === 'success').length === 0}
-                          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:bg-gray-300"
-                        >
-                          <ThumbsDown size={16} className="mr-2" />
-                          ไม่อนุมัติ (Reject)
+                        <button onClick={() => handleAction('REJECT')} disabled={isSubmitting} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:bg-gray-300">
+                          <ThumbsDown size={16} className="mr-2" /> ไม่อนุมัติ
                         </button>
-                    </div>
+                     </>
                   )}
-
+                </div>
               </div>
-            )}           
+            )}
+
+            {/* --- Flow: CM --- */}
+            {(isCmApproving_BimFlow || isCmApproving_MeSnFlow) && (
+               <div className="space-y-4">
+                <h3 className="text-lg font-bold text-green-800">ดำเนินการ (CM)</h3>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-1 block">แสดงความคิดเห็น (Optional)</label>
+                  <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..." className="w-full p-2 border rounded-md text-sm" rows={2}/>
+                </div>
+                <div className="flex flex-wrap justify-end gap-3">
+                    <button onClick={() => handleAction('APPROVE')} disabled={isSubmitting} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:bg-gray-300">
+                      <ThumbsUp size={16} className="mr-2" /> อนุมัติ
+                    </button>
+                    <button onClick={() => handleAction('APPROVE_WITH_COMMENTS')} disabled={isSubmitting} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-gray-300">
+                      <MessageSquare size={16} className="mr-2" /> อนุมัติตามคอมเมนต์
+                    </button>
+                    <button onClick={() => handleAction('REJECT')} disabled={isSubmitting} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:bg-gray-300">
+                      <ThumbsDown size={16} className="mr-2" /> ไม่อนุมัติ
+                    </button>
+                </div>
+              </div>
+            )}
+            
           </div>
-          <PDFViewerModal
-            isOpen={!!previewFile}
-            file={previewFile}
-            onClose={() => setPreviewFile(null)}
-          />
         </div>
       </div>
       {showHistory && (
@@ -645,6 +652,11 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
             userRole={user?.role}
         />
       )}
+       <PDFPreviewModal
+            isOpen={!!previewFile}
+            file={previewFile}
+            onClose={() => setPreviewFile(null)}
+        />
     </>
   )
 }

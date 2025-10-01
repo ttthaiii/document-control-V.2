@@ -1,4 +1,4 @@
-// src/app/api/sites/route.ts (Corrected and Optimized Version)
+// src/app/api/sites/route.ts (แก้ไขแล้ว)
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth, adminDb } from '@/lib/firebase/admin';
 
@@ -19,19 +19,25 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'User profile not found' }, { status: 404 });
     }
 
-    // ✅ [KEY CHANGE] ดึง ID ของ Site ที่ User มีสิทธิ์จาก Profile โดยตรง
-    const userSiteIds = userProfile.sites || [];
+    let siteSnapshots: FirebaseFirestore.DocumentSnapshot[];
 
-    if (userSiteIds.length === 0) {
-      // ถ้า User ไม่มี Site เลย ก็ส่ง Array ว่างกลับไป
-      return NextResponse.json({ success: true, sites: [] });
+    // --- 👇 จุดที่แก้ไขคือตรงนี้ครับ 👇 ---
+    if (userProfile.role === 'Admin') {
+      // 1. ถ้าเป็น Admin: ให้ดึงข้อมูลจาก collection 'sites' มาทั้งหมด
+      const allSitesSnapshot = await adminDb.collection('sites').get();
+      siteSnapshots = allSitesSnapshot.docs;
+    } else {
+      // 2. ถ้าเป็น Role อื่น: ใช้ Logic เดิม คือดึงจาก userProfile.sites
+      const userSiteIds = userProfile.sites || [];
+      if (userSiteIds.length === 0) {
+        return NextResponse.json({ success: true, sites: [] });
+      }
+      const sitesPromises = userSiteIds.map((siteId: string) => 
+        adminDb.collection('sites').doc(siteId).get()
+      );
+      siteSnapshots = await Promise.all(sitesPromises);
     }
-
-    // ✅ ดึงข้อมูลเฉพาะ Site ที่มี ID ตรงกันเท่านั้น
-    const sitesPromises = userSiteIds.map((siteId: string) => 
-      adminDb.collection('sites').doc(siteId).get()
-    );
-    const siteSnapshots = await Promise.all(sitesPromises);
+    // --- สิ้นสุดจุดที่แก้ไข ---
 
     const sites = siteSnapshots
       .filter(doc => doc.exists) // กรองเอาเฉพาะ Site ที่มีอยู่จริง
