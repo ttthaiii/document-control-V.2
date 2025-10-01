@@ -10,7 +10,7 @@ import RFAListTable from '@/components/rfa/RFAListTable'
 import RFADetailModal from '@/components/rfa/RFADetailModal'
 import DashboardStats from '@/components/rfa/DashboardStats'
 import CreateRFAForm from '@/components/rfa/CreateRFAForm'
-import { RFADocument } from '@/types/rfa'
+import { RFADocument, Site } from '@/types/rfa'
 import { STATUSES, STATUS_LABELS, CREATOR_ROLES, APPROVER_ROLES } from '@/lib/config/workflow'
 import { Plus, Search, RefreshCw } from 'lucide-react'
 import { db } from '@/lib/firebase/client'
@@ -55,6 +55,7 @@ function RFAContent() {
     const [searchTerm, setSearchTerm] = useState('')
     const [categories, setCategories] = useState<Category[]>([]);
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+    const [sites, setSites] = useState<Site[]>([]);
 
     const [filters, setFilters] = useState<Filters>({
         rfaType: (searchParams.get('type') as Filters['rfaType']) || 'ALL',
@@ -157,6 +158,25 @@ function RFAContent() {
         return () => unsubscribe();
     }, [firebaseUser, user]);
 
+    useEffect(() => {
+        const fetchSites = async () => {
+          if (!firebaseUser) return;
+          try {
+            const token = await firebaseUser.getIdToken();
+            const response = await fetch('/api/sites', {
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await response.json();
+            if (data.success) {
+              setSites(data.sites || []);
+            }
+          } catch (error) {
+            console.error("Failed to load sites for filter:", error);
+          }
+        };
+        fetchSites();
+    }, [firebaseUser]);
+
     const filteredDocuments = useMemo(() => {
         const isCM = user && APPROVER_ROLES.includes(user.role);
         const statusesHiddenFromCM = [STATUSES.PENDING_REVIEW, STATUSES.REVISION_REQUIRED];
@@ -205,8 +225,8 @@ function RFAContent() {
         if (filters.rfaType !== 'ALL') {
         docsToShow = docsToShow.filter(doc => doc.rfaType === filters.rfaType);
         }
-        if (filters.status !== 'ALL') {
-        docsToShow = docsToShow.filter(doc => doc.status === filters.status);
+        if (filters.status !== 'ALL') { // ✅ [REVERT] เปลี่ยนเงื่อนไขกลับเป็นแบบเดิม
+        docsToShow = docsToShow.filter(doc => doc.status === filters.status); // ✅ [REVERT] ใช้ === เพื่อเปรียบเทียบ
         }
         if (filters.categoryId !== 'ALL') {
         docsToShow = docsToShow.filter(doc => doc.category?.id === filters.categoryId);
@@ -305,6 +325,12 @@ function RFAContent() {
         case STATUSES.PENDING_CM_APPROVAL: return 'text-orange-600 bg-orange-50'
         case STATUSES.PENDING_REVIEW: return 'text-blue-600 bg-blue-50'
         case STATUSES.REVISION_REQUIRED: return 'text-yellow-600 bg-yellow-50'
+        
+        // --- 👇 เพิ่ม 2 case นี้เข้าไป 👇 ---
+        case STATUSES.SENT_TO_EXTERNAL_CM: return 'text-cyan-600 bg-cyan-50'
+        case STATUSES.PENDING_FINAL_APPROVAL: return 'text-purple-600 bg-purple-50'
+        // --- สิ้นสุดจุดที่แก้ไข ---
+
         default: return 'text-gray-600 bg-gray-50'
         }
     }
@@ -332,7 +358,7 @@ function RFAContent() {
                     <span className="text-orange-600"> - {RFA_TYPE_DISPLAY_NAMES[filters.rfaType]}</span>
                     )}
                 </h1>
-                <p className="text-gray-600 mt-1">จัดการเอกสาร Request for Approval</p>
+                {/*<p className="text-gray-600 mt-1">จัดการเอกสาร Request for Approval</p>*/}
                 </div>
                 <div className="flex items-center space-x-3 mt-4 sm:mt-0">
                 <button onClick={() => {}} className="flex items-center px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200" disabled={loading}>
@@ -345,25 +371,38 @@ function RFAContent() {
                 </button>
                 </div>
             </div>
-            
-            <DashboardStats 
-                allDocuments={filteredDocuments}
-                onChartFilter={handleChartFilter}
-                activeFilters={filters}
-                categories={categories}
-            />
 
             {/* Filter Bar */}
             <div className="bg-white rounded-lg shadow mb-6 p-4">
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-                <div className="md:col-span-3">
+                
+                {/* Project Filter */}
+                <div className="md:col-span-2">
+                    <label htmlFor="site-filter" className="text-sm font-medium text-gray-700">โครงการ</label>
+                    <select
+                        id="site-filter"
+                        value={filters.siteId}
+                        onChange={(e) => handleFilterChange('siteId', e.target.value)}
+                        className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg"
+                    >
+                        <option value="ALL">ทุกโครงการ</option>
+                        {sites.map(site => (
+                            <option key={site.id} value={site.id}>
+                                {site.name}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+
+                {/* Search Filter */}
+                <div className="md:col-span-2">
                     <label htmlFor="search-filter" className="text-sm font-medium text-gray-700">ค้นหา</label>
                     <div className="relative mt-1">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                     <input
                         id="search-filter"
                         type="text"
-                        placeholder="เลขที่เอกสาร, ชื่อเอกสาร..."
+                        placeholder="เลขที่, ชื่อเอกสาร..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                         className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg"
@@ -371,12 +410,13 @@ function RFAContent() {
                     </div>
                 </div>
 
+                {/* Status Filter */}
                 <div className="md:col-span-2">
                     <label htmlFor="status-filter" className="text-sm font-medium text-gray-700">สถานะ</label>
                     <select
                         id="status-filter"
-                        value={filters.status}
-                        onChange={(e) => handleFilterChange('status', e.target.value)}
+                        value={filters.status} // ✅ [REVERT] ใช้ค่าจาก state ตรงๆ
+                        onChange={(e) => handleFilterChange('status', e.target.value)} // ✅ [REVERT] ใช้ logic เดิม
                         className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg"
                     >
                         <option value="ALL">ทุกสถานะ</option>
@@ -388,37 +428,40 @@ function RFAContent() {
                     </select>
                 </div>
                 
+                {/* Responsible Party Filter */}
                 <div className="md:col-span-2">
                     <label htmlFor="responsible-party-filter" className="text-sm font-medium text-gray-700">ผู้รับผิดชอบ</label>
                     <select
-                    id="responsible-party-filter"
-                    value={filters.responsibleParty}
-                    onChange={(e) => handleFilterChange('responsibleParty', e.target.value as Filters['responsibleParty'])}
-                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg"
+                        id="responsible-party-filter"
+                        value={filters.responsibleParty}
+                        onChange={(e) => handleFilterChange('responsibleParty', e.target.value as Filters['responsibleParty'])}
+                        className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg"
                     >
-                    {availableResponsibleParties.map(party => (
-                        <option key={party.value} value={party.value}>{party.label}</option>
-                    ))}
-                    </select>
-                </div>
-
-                <div className="md:col-span-2">
-                    <label htmlFor="category-filter" className="text-sm font-medium text-gray-700">หมวดงาน</label>
-                    <select 
-                    id="category-filter" 
-                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg"
-                    value={filters.categoryId}
-                    onChange={(e) => handleFilterChange('categoryId', e.target.value)}
-                    >
-                        <option value="ALL">ทุกหมวดงาน</option>
-                        {categories.map(cat => (
-                        <option key={cat.id} value={cat.id}>
-                            {cat.categoryCode}
-                        </option>
+                        {availableResponsibleParties.map(party => (
+                            <option key={party.value} value={party.value}>{party.label}</option>
                         ))}
                     </select>
                 </div>
 
+                {/* Category Filter */}
+                <div className="md:col-span-2">
+                    <label htmlFor="category-filter" className="text-sm font-medium text-gray-700">หมวดงาน</label>
+                    <select 
+                        id="category-filter" 
+                        className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg"
+                        value={filters.categoryId}
+                        onChange={(e) => handleFilterChange('categoryId', e.target.value)}
+                    >
+                        <option value="ALL">ทุกหมวดงาน</option>
+                        {categories.map(cat => (
+                            <option key={cat.id} value={cat.id}>
+                                {cat.categoryCode}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+
+                {/* Checkbox */}
                 <div className="md:col-span-1 flex items-center h-10">
                     <input
                         id="show-all-revisions"
@@ -429,14 +472,23 @@ function RFAContent() {
                     />
                     <label htmlFor="show-all-revisions" className="ml-2 text-sm text-gray-700">ทุกฉบับ</label>
                 </div>
-                <div className="md:col-span-2">
+                
+                {/* Reset Button */}
+                <div className="md:col-span-1">
                     <button onClick={resetFilters} className="w-full px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300">
                         รีเซ็ต
                     </button>
                 </div>
                 </div>
             </div>
-            
+
+            <DashboardStats 
+                allDocuments={filteredDocuments}
+                onChartFilter={handleChartFilter}
+                activeFilters={filters}
+                categories={categories}
+            />
+
             {/* Document Table */}
             {loading ? (
                 <div className="text-center p-8">กำลังโหลดเอกสาร...</div>
@@ -447,6 +499,7 @@ function RFAContent() {
             ) : (
                 <RFAListTable
                 documents={filteredDocuments}
+                isLoading={loading} // 👈 เพิ่ม prop นี้เข้าไป
                 onDocumentClick={handleDocumentClick}
                 getStatusColor={getStatusColor}
                 statusLabels={STATUS_LABELS}

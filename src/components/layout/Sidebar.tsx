@@ -16,7 +16,8 @@ import {
   ChevronRight,
   LogOut,
   Menu,
-  X
+  X,
+  Users
 } from 'lucide-react'
 import { CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES } from '@/lib/config/workflow'
 
@@ -261,6 +262,33 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
           </Link>
         </nav>
 
+        {/* 👇 2. เพิ่ม Section สำหรับ Admin 👇 */}
+        {user && user.role === 'Admin' && (
+          <div className="px-4 py-2">
+            <div className="border-t border-orange-200" />
+            <div className="mt-2 space-y-1">
+              <p className="px-3 text-xs font-semibold uppercase text-gray-500 tracking-wider pt-2">
+                Admin
+              </p>
+              <Link
+                href="/admin"
+                onClick={showLoader}
+                className={`
+                  flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
+                  transition-colors duration-200
+                  ${isPathActive('/admin') 
+                    ? 'bg-red-100 text-red-800' 
+                    : 'text-gray-700 hover:bg-red-50 hover:text-red-700'
+                  }
+                `}
+              >
+                <Users size={18} />
+                <span>Invite Users</span>
+              </Link>
+            </div>
+          </div>
+        )}
+        
         <div className="p-4 border-t border-orange-200">
           <button
             onClick={handleLogout}

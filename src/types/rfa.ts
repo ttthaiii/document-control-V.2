@@ -16,6 +16,7 @@ export interface RFAFile {
   fileUrl: string
   filePath: string
   size: number
+  fileSize: number;
   contentType: string
   uploadedAt: string
   uploadedBy: string
