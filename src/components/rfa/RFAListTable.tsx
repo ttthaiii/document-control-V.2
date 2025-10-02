@@ -106,10 +106,6 @@ export default function RFAListTable({
     switch (doc.status) {
       case STATUSES.PENDING_REVIEW:
         return { name: 'Site', role: 'Site' };
-
-      // 👇 --- จุดที่แก้ไข --- 👇
-      case STATUSES.SENT_TO_EXTERNAL_CM:
-        return { name: 'CM (ภายนอก)', role: 'CM' };
       
       case STATUSES.PENDING_FINAL_APPROVAL:
         return { name: 'Site', role: 'Site' };

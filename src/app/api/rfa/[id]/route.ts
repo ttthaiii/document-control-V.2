@@ -1,12 +1,10 @@
-// src/app/api/rfa/[id]/route.ts (แก้ไขแล้ว)
+// src/app/api/rfa/[id]/route.ts (ฉบับแก้ไขสมบูรณ์)
 import { NextRequest, NextResponse } from 'next/server';
 import { adminDb, adminBucket, adminAuth } from '@/lib/firebase/admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUSES } from '@/lib/config/workflow';
 import { RFAFile } from '@/types/rfa';
 
-// --- GET Function (ไม่มีการเปลี่ยนแปลง) ---
-// src/app/api/rfa/[id]/route.ts
 
 // --- GET Function (ฉบับแก้ไข) ---
 export async function GET(
@@ -14,7 +12,7 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    // --- ส่วนยืนยันตัวตน (Authentication) เหมือนเดิม ---
+    // --- ส่วนยืนยันตัวตน (Authentication) ---
     const authHeader = request.headers.get('authorization');
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json({ success: false, error: 'Missing or invalid authorization header' }, { status: 401 });
@@ -30,7 +28,7 @@ export async function GET(
     const userData = userDoc.data()!;
     const userSites = userData.sites || [];
 
-    // --- ส่วนดึงข้อมูล RFA หลัก เหมือนเดิม ---
+    // --- ส่วนดึงข้อมูล RFA หลัก ---
     const rfaDoc = await adminDb.collection('rfaDocuments').doc(params.id).get();
     if (!rfaDoc.exists) {
       return NextResponse.json({ success: false, error: 'RFA document not found' }, { status: 404 });
@@ -41,26 +39,28 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Access denied to this site' }, { status: 403 });
     }
     
-    // ✅ --- จุดแก้ไขสำคัญอยู่ตรงนี้ครับ --- ✅
-    let siteInfo = { id: rfaData.siteId, name: 'N/A' }; // 1. กำหนดค่าเริ่มต้น
+    // --- ดึงข้อมูล Site Info เพิ่มเติม ---
+    let siteInfo: any = { id: rfaData.siteId, name: 'N/A' };
     if (rfaData.siteId) {
-      // 2. นำ siteId ไปค้นหาข้อมูลจาก collection 'sites'
       const siteDoc = await adminDb.collection('sites').doc(rfaData.siteId).get();
       if (siteDoc.exists) {
-        // 3. ถ้าเจอ ให้สร้าง object siteInfo ที่สมบูรณ์
         siteInfo = { 
           id: siteDoc.id, 
-          name: siteDoc.data()?.name || 'Unknown Site' 
+          name: siteDoc.data()?.name || 'Unknown Site',
+          cmSystemType: siteDoc.data()?.cmSystemType || 'INTERNAL' // เพิ่ม cmSystemType
         };
       }
     }
-    // ✅ --- สิ้นสุดจุดแก้ไข ---
+    
+    // --- ดึงข้อมูล Creator Role ---
+    const creatorRole = rfaData.workflow?.[0]?.role || 'BIM';
 
-    // --- ส่วนที่เหลือเหมือนเดิม แต่จะใช้ siteInfo ที่เราสร้างขึ้นใหม่ ---
     const categoryInfo = { 
       id: rfaData.categoryId, 
       categoryCode: rfaData.taskData?.taskCategory || rfaData.categoryId || 'N/A' 
     };
+    
+    // Logic การกำหนด Permissions
     const permissions = {
       canView: true,
       canEdit: CREATOR_ROLES.includes(userData.role) && rfaData.status === STATUSES.REVISION_REQUIRED,
@@ -71,13 +71,13 @@ export async function GET(
       canDownloadFiles: true
     };
     
-    // 4. ส่ง responseData ที่มีข้อมูล site ที่ถูกต้องกลับไป
     const responseData = { 
         id: rfaDoc.id, 
         ...rfaData, 
-        site: siteInfo, // <--- ใช้ตัวแปรใหม่นี้
+        site: siteInfo, 
         category: categoryInfo, 
-        permissions 
+        permissions,
+        creatorRole: creatorRole, // ส่ง creatorRole ไปด้วย
     };
 
     return NextResponse.json({ success: true, document: responseData });
@@ -88,13 +88,13 @@ export async function GET(
   }
 }
 
-
-// --- 👇 PUT Function (แก้ไขใหม่ทั้งหมด) 👇 ---
+// --- PUT Function (ฉบับแก้ไขที่เก็บไฟล์ทั้งหมด) ---
 export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
     try {
+        // --- Authentication (เหมือนเดิม) ---
         const authHeader = request.headers.get('authorization');
         if (!authHeader?.startsWith('Bearer ')) {
           return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -118,144 +118,103 @@ export async function PUT(
         if (!rfaDoc.exists) return NextResponse.json({ error: 'RFA document not found' }, { status: 404 });
         
         const docData = rfaDoc.data()!;
-
-        // 1. ดึงข้อมูล Site และผู้สร้าง
         const siteDoc = await adminDb.collection('sites').doc(docData.siteId).get();
-        const siteData = siteDoc.data();
-        const cmSystemType = siteData?.cmSystemType || 'INTERNAL'; // Default to INTERNAL if not set
-        const creatorRole = docData.workflow?.[0]?.role || 'BIM';
+        const cmSystemType = siteDoc.data()?.cmSystemType || 'INTERNAL';
 
         let newStatus = docData.status;
         let canPerformAction = false;
         
-        // 2. Logic การตัดสินใจใหม่ทั้งหมด
-        // Flow: ME/SN -> CM (จบเลย)
-        if (['ME', 'SN'].includes(creatorRole)) {
-            if (userRole === 'CM' && docData.status === STATUSES.PENDING_CM_APPROVAL) {
-                switch(action) {
-                    case 'APPROVE': newStatus = STATUSES.APPROVED; canPerformAction = true; break;
-                    case 'APPROVE_WITH_COMMENTS': newStatus = STATUSES.APPROVED_WITH_COMMENTS; canPerformAction = true; break;
-                    case 'REJECT': newStatus = STATUSES.REJECTED; canPerformAction = true; break;
-                }
+        // --- 1. ตรวจสอบสิทธิ์ (Authorization) ---
+        if (userRole === 'Site Admin') {
+            if (docData.status === STATUSES.PENDING_REVIEW && (action === 'SEND_TO_CM' || action === 'REQUEST_REVISION')) {
+                canPerformAction = true;
             }
-        } 
-        // Flow: BIM -> ...
-        else if (creatorRole === 'BIM') {
-            // โครงการที่ CM มีระบบของตัวเอง
-            if (cmSystemType === 'EXTERNAL') {
-                if (userRole === 'Site Admin') {
-                    if (docData.status === STATUSES.PENDING_REVIEW) {
-                        if (action === 'SEND_TO_EXTERNAL_CM') {
-                            newStatus = STATUSES.SENT_TO_EXTERNAL_CM;
-                            canPerformAction = true;
-                        }
-                    } else if (docData.status === STATUSES.SENT_TO_EXTERNAL_CM) {
-                        switch(action) {
-                            case 'APPROVE': newStatus = STATUSES.APPROVED; canPerformAction = true; break;
-                            case 'APPROVE_WITH_COMMENTS': newStatus = STATUSES.APPROVED_WITH_COMMENTS; canPerformAction = true; break;
-                            case 'APPROVE_REVISION_REQUIRED': newStatus = STATUSES.APPROVED_REVISION_REQUIRED; canPerformAction = true; break;
-                            case 'REJECT': newStatus = STATUSES.REJECTED; canPerformAction = true; break;
-                        }
-                    }
-                }
+            else if (docData.status === STATUSES.PENDING_CM_APPROVAL && cmSystemType === 'EXTERNAL' && ['APPROVE', 'APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED', 'REJECT'].includes(action)) {
+                canPerformAction = true;
             }
-            // โครงการที่ CM ใช้ระบบร่วมกับเรา
-            else { // cmSystemType === 'INTERNAL'
-                if (userRole === 'Site Admin') {
-                    if (docData.status === STATUSES.PENDING_REVIEW) {
-                        if (action === 'SEND_TO_CM') {
-                            newStatus = STATUSES.PENDING_CM_APPROVAL;
-                            canPerformAction = true;
-                        }
-                    } else if (docData.status === STATUSES.PENDING_FINAL_APPROVAL) {
-                         switch(action) {
-                            case 'APPROVE': newStatus = STATUSES.APPROVED; canPerformAction = true; break;
-                            case 'APPROVE_WITH_COMMENTS': newStatus = STATUSES.APPROVED_WITH_COMMENTS; canPerformAction = true; break;
-                            case 'APPROVE_REVISION_REQUIRED': newStatus = STATUSES.APPROVED_REVISION_REQUIRED; canPerformAction = true; break;
-                            case 'REJECT': newStatus = STATUSES.REJECTED; canPerformAction = true; break;
-                        }
-                    }
-                } else if (userRole === 'CM' && docData.status === STATUSES.PENDING_CM_APPROVAL) {
-                    switch(action) {
-                        case 'APPROVE':
-                        case 'APPROVE_WITH_COMMENTS':
-                            newStatus = STATUSES.PENDING_FINAL_APPROVAL; // กลับไปให้ SITE
-                            canPerformAction = true;
-                            break;
-                        case 'REJECT':
-                            newStatus = STATUSES.REJECTED;
-                            canPerformAction = true;
-                            break;
-                    }
-                }
+            else if (docData.status === STATUSES.PENDING_FINAL_APPROVAL && cmSystemType === 'INTERNAL' && ['APPROVE', 'APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED', 'REJECT'].includes(action)) {
+                canPerformAction = true;
+            }
+        }
+        else if (userRole === 'CM' && docData.status === STATUSES.PENDING_CM_APPROVAL && cmSystemType === 'INTERNAL') {
+            if (['APPROVE', 'APPROVE_WITH_COMMENTS', 'REJECT'].includes(action)) {
+                canPerformAction = true;
+            }
+        }
+        else if (CREATOR_ROLES.includes(userRole) && docData.createdBy === userId) {
+            if (docData.status === STATUSES.REVISION_REQUIRED && action === 'SUBMIT_REVISION') {
+                canPerformAction = true;
             }
         }
 
-        // Logic เดิมสำหรับส่งกลับไปแก้ไข (ใช้ได้กับทุก Flow)
-        if (action === 'REQUEST_REVISION' && REVIEWER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_REVIEW) {
-            newStatus = STATUSES.REVISION_REQUIRED;
-            canPerformAction = true;
-        }
-        if (action === 'SUBMIT_REVISION' && CREATOR_ROLES.includes(userRole) && docData.status === STATUSES.REVISION_REQUIRED && docData.createdBy === userId) {
-            newStatus = STATUSES.PENDING_REVIEW;
-            canPerformAction = true;
-        }
-    
         if (!canPerformAction) {
-          return NextResponse.json({ success: false, error: 'Permission denied for this action or invalid document status' }, { status: 403 });
+          return NextResponse.json({ success: false, error: 'Permission denied for this action or invalid document status.' }, { status: 403 });
         }
         
-        // 3. ส่วนของการจัดการไฟล์ (เหมือนเดิม แต่ตรวจสอบ newFiles)
-        let finalFilesData: RFAFile[] = docData.files || []; // เริ่มจากไฟล์เดิม
+        // --- 2. กำหนดสถานะใหม่ (New Status) ---
+        switch(action) {
+            case 'SEND_TO_CM': newStatus = STATUSES.PENDING_CM_APPROVAL; break;
+            case 'REQUEST_REVISION': newStatus = STATUSES.REVISION_REQUIRED; break;
+            case 'SUBMIT_REVISION': newStatus = STATUSES.PENDING_REVIEW; break;
+            case 'REJECT': newStatus = STATUSES.REJECTED; break;
+            case 'APPROVE_REVISION_REQUIRED': newStatus = STATUSES.APPROVED_REVISION_REQUIRED; break;
+            
+            case 'APPROVE':
+                if (userRole === 'CM' && cmSystemType === 'INTERNAL') {
+                    newStatus = STATUSES.PENDING_FINAL_APPROVAL;
+                } else {
+                    newStatus = STATUSES.APPROVED;
+                }
+                break;
+            case 'APPROVE_WITH_COMMENTS':
+                if (userRole === 'CM' && cmSystemType === 'INTERNAL') {
+                    newStatus = STATUSES.PENDING_FINAL_APPROVAL;
+                } else {
+                    newStatus = STATUSES.APPROVED_WITH_COMMENTS;
+                }
+                break;
+        }
+        
+        // ... (ส่วนจัดการไฟล์และบันทึกข้อมูลที่เหลือเหมือนเดิมทุกประการ) ...
+        let finalDocFiles: RFAFile[] = docData.files || [];
+        let workflowFiles: RFAFile[] = [];
+
         if (newFiles && Array.isArray(newFiles) && newFiles.length > 0) {
             const cdnUrlBase = "https://ttsdoc-cdn.ttthaiii30.workers.dev";
-            const movedFiles = [];
+            const movedFiles: RFAFile[] = [];
 
             for (const tempFile of newFiles) {
                 const sourcePath = tempFile.filePath;
                 if (!sourcePath || !sourcePath.startsWith(`temp/${userId}/`)) continue;
-
                 const destinationPath = `sites/${docData.siteId}/rfa/${docData.documentNumber}/${Date.now()}_${tempFile.fileName}`;
                 await adminBucket.file(sourcePath).move(destinationPath);
                 
                 movedFiles.push({
-                    fileName: tempFile.fileName,
-                    fileUrl: `${cdnUrlBase}/${destinationPath}`,
-                    filePath: destinationPath,
-                    size: tempFile.size,
-                    fileSize: tempFile.size, // ✅ [FIX] เพิ่มบรรทัดนี้เข้าไป
-                    contentType: tempFile.contentType,
-                    uploadedAt: new Date().toISOString(),
-                    uploadedBy: userId,
+                    fileName: tempFile.fileName, fileUrl: `${cdnUrlBase}/${destinationPath}`,
+                    filePath: destinationPath, size: tempFile.size, fileSize: tempFile.size,
+                    contentType: tempFile.contentType, uploadedAt: new Date().toISOString(), uploadedBy: userId,
                 });
             }
-            finalFilesData = movedFiles;
+            
+            workflowFiles = movedFiles;
+            finalDocFiles.push(...movedFiles);
         }
     
         const workflowEntry = {
-          action,
-          status: newStatus,
-          userId,
-          userName: userData.email,
-          role: userRole,
-          timestamp: new Date().toISOString(),
-          comments: comments || '',
-          files: finalFilesData, // บันทึกไฟล์ชุดล่าสุดลงใน history
+          action, status: newStatus, userId, userName: userData.email, role: userRole,
+          timestamp: new Date().toISOString(), comments: comments || '',
+          files: workflowFiles,
         };
     
         await rfaDocRef.update({
           status: newStatus,
           currentStep: newStatus,
-          files: finalFilesData, // อัปเดต field files หลัก
+          files: finalDocFiles,
           workflow: FieldValue.arrayUnion(workflowEntry),
           updatedAt: FieldValue.serverTimestamp(),
         });
     
-        return NextResponse.json({
-          success: true,
-          message: `Action [${action}] completed successfully`,
-          newStatus,
-        });
+        return NextResponse.json({ success: true, message: `Action [${action}] completed successfully`, newStatus });
     
       } catch (error) {
         console.error('Error updating RFA document:', error);

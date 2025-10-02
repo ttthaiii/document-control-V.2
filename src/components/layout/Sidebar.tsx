@@ -37,11 +37,10 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { user, logout } = useAuth()
-  const { showLoader } = useLoading() // 👈 2. เรียกใช้ hook
+  const { showLoader } = useLoading()
 
   const [showRfaDropdown, setShowRfaDropdown] = useState(false)
   
-  // (ฟังก์ชัน isRFAAuthorized, userSites, useEffect, handleLogout, toggleRfaDropdown, isPathActive ทั้งหมดเหมือนเดิม)
   const isRFAAuthorized = () => {
     if (!user) return false;
     const authorizedRoles = [
@@ -53,7 +52,6 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
     return authorizedRoles.includes(user.role);
   }
 
-  // ใช้ useMemo แทน
   const userSites = useMemo(() => {
     if (!user?.sites || user.sites.length === 0) return []
     return user.sites.map((siteId: string, index: number) => ({
@@ -245,13 +243,14 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
             </Link>
           )}
 
+          {/* --- 👇 นี่คือส่วนที่แก้ไข --- */}
           <Link
-            href="/work-request"
+            href="/dashboard/work-request"
             onClick={showLoader}
             className={`
               flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
               transition-colors duration-200
-              ${isPathActive('/work-request') 
+              ${isPathActive('/dashboard/work-request') 
                 ? 'bg-orange-200 text-orange-900' 
                 : 'text-gray-700 hover:bg-orange-100 hover:text-orange-800'
               }
@@ -260,9 +259,10 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
             <Wrench size={18} />
             <span>Work Request</span>
           </Link>
+          {/* --- 👆 สิ้นสุดส่วนที่แก้ไข --- */}
+
         </nav>
 
-        {/* 👇 2. เพิ่ม Section สำหรับ Admin 👇 */}
         {user && user.role === 'Admin' && (
           <div className="px-4 py-2">
             <div className="border-t border-orange-200" />
@@ -292,7 +292,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
         <div className="p-4 border-t border-orange-200">
           <button
             onClick={handleLogout}
-            disabled={isLoggingOut} // เพิ่ม
+            disabled={isLoggingOut}
             className={`
               w-full flex items-center justify-center gap-2 
               px-4 py-2.5 rounded-lg text-sm font-medium

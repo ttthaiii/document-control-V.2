@@ -327,7 +327,6 @@ function RFAContent() {
         case STATUSES.REVISION_REQUIRED: return 'text-yellow-600 bg-yellow-50'
         
         // --- 👇 เพิ่ม 2 case นี้เข้าไป 👇 ---
-        case STATUSES.SENT_TO_EXTERNAL_CM: return 'text-cyan-600 bg-cyan-50'
         case STATUSES.PENDING_FINAL_APPROVAL: return 'text-purple-600 bg-purple-50'
         // --- สิ้นสุดจุดที่แก้ไข ---
 

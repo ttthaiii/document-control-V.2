@@ -81,7 +81,6 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
             newStats.responsibleParty.SITE += 1;
             break;
         case STATUSES.PENDING_CM_APPROVAL:
-        case STATUSES.SENT_TO_EXTERNAL_CM:
             newStats.responsibleParty.CM += 1;
             break;
         case STATUSES.REVISION_REQUIRED:
