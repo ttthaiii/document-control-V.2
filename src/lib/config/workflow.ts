@@ -9,27 +9,23 @@ export const OBSERVER_FINISHED_ROLES = ['SE'];
 
 export const STATUSES = {
   PENDING_REVIEW: 'PENDING_REVIEW',
-  PENDING_CM_APPROVAL: 'PENDING_CM_APPROVAL',
+  PENDING_CM_APPROVAL: 'PENDING_CM_APPROVAL', // <-- สถานะเดียวสำหรับรอ CM
   REVISION_REQUIRED: 'REVISION_REQUIRED',
   APPROVED: 'APPROVED',
   APPROVED_WITH_COMMENTS: 'APPROVED_WITH_COMMENTS',
   APPROVED_REVISION_REQUIRED: 'APPROVED_REVISION_REQUIRED',
   REJECTED: 'REJECTED',
-  // --- 👇 เพิ่ม 2 สถานะใหม่ 👇 ---
-  SENT_TO_EXTERNAL_CM: 'SENT_TO_EXTERNAL_CM',       // สำหรับ Flow ที่ SITE กดส่งให้ CM ภายนอก
-  PENDING_FINAL_APPROVAL: 'PENDING_FINAL_APPROVAL'  // สำหรับ Flow ที่ CM อนุมัติแล้วส่งกลับให้ SITE ตรวจสอบสุดท้าย
+  PENDING_FINAL_APPROVAL: 'PENDING_FINAL_APPROVAL'
 };
 
 export const STATUS_LABELS: { [key: string]: string } = {
   [STATUSES.PENDING_REVIEW]: 'รอตรวจสอบ',
-  [STATUSES.PENDING_CM_APPROVAL]: 'ส่ง CM',
+  [STATUSES.PENDING_CM_APPROVAL]: 'ส่ง CM', // <-- มีแค่ Label นี้ที่เดียว
   [STATUSES.REVISION_REQUIRED]: 'แก้ไข',
   [STATUSES.APPROVED]: 'อนุมัติ',
   [STATUSES.APPROVED_WITH_COMMENTS]: 'อนุมัติตามคอมเมนต์ (ไม่แก้ไข)',
   [STATUSES.APPROVED_REVISION_REQUIRED]: 'อนุมัติตามคอมเมนต์ (ต้องแก้ไข)',
   [STATUSES.REJECTED]: 'ไม่อนุมัติ',
-  // --- 👇 เพิ่ม Label ภาษาไทยสำหรับสถานะใหม่ 👇 ---
-  [STATUSES.SENT_TO_EXTERNAL_CM]: 'ส่งให้ CM (ภายนอก)',
   [STATUSES.PENDING_FINAL_APPROVAL]: 'รอ SITE อนุมัติขั้นสุดท้าย',
 };
 

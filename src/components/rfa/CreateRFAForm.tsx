@@ -425,17 +425,18 @@ export default function CreateRFAForm({
         }
       }
     } else {
-      // Google Sheets Flow
+      // Google Sheets Flow (ที่ตอนนี้คือ BIM-Tracking Flow)
       updateFormData({ selectedProject: selected.name });
-      if (!selected.sheetId) {
-        setErrors(prev => ({ ...prev, site: 'โครงการนี้ยังไม่ได้ตั้งค่า Google Sheet ID' }));
-        return;
-      }
+      // ไม่ต้องมี if check sheetId อีกต่อไป ลบทิ้งได้เลย
+
       try {
-        // ส่ง formData.rfaType ไปด้วย
-        const cats = await getCategories({ sheetId: selected.sheetId }, selected.name, formData.rfaType);
+        // sheetId ไม่ได้ถูกใช้งานใน API แล้ว แต่ยังส่งเป็นค่าว่างตามโครงสร้างเดิมของ Hook ได้
+        const cats = await getCategories({ sheetId: selected.sheetId || '' }, selected.name, formData.rfaType);
         setSheetCategories(cats);
-      } catch (e) { console.error(e); }
+      } catch (e) { 
+        console.error("Failed to fetch categories from BIM-Tracking:", e);
+        setErrors(prev => ({ ...prev, site: 'ไม่สามารถโหลดหมวดงานจากระบบ BIM-Tracking ได้' }));
+      }
     }
   };
 
@@ -443,9 +444,11 @@ export default function CreateRFAForm({
     updateFormData({ selectedCategory: category, selectedTask: null });
     setTasks([]);
     const site = sites.find(s => s.id === selectedSite);
-    if (!site || !site.sheetId || !formData.selectedProject) return;
+    // แก้ไขเงื่อนไข โดยลบ !site.sheetId ออก
+    if (!site || !formData.selectedProject) return; 
     try {
-      const taskList = await getTasks({ sheetId: site.sheetId }, formData.selectedProject, category);
+      // ส่ง sheetId เป็นค่าว่างได้เลย เพราะ API หลังบ้านไม่ได้ใช้แล้ว
+      const taskList = await getTasks({ sheetId: site.sheetId || '' }, formData.selectedProject, category);
       setTasks(taskList);
     } catch (e) { console.error(e); }
   };
@@ -529,7 +532,7 @@ export default function CreateRFAForm({
                 {/* ✅ FIX: ปรับปรุง UI ส่วนนี้เพื่อแสดง Loading Spinner และ Error */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
-                    หมวดงาน (จาก Google Sheets)
+                    หมวดงาน
                     {sheetsLoading && <Spinner className="w-4 h-4 ml-2" />}
                   </label>
                   <select 
