@@ -83,7 +83,7 @@ const RFA_TYPE_CONFIG = {
     icon: '🏗️',
     description: 'สำหรับการขออนุมัติ Shop Drawing',
     workflow: 'ผู้สร้าง → Site Admin → CM',
-    allowedRoles: ['BIM', 'ME', 'SN', 'Admin'],
+    allowedRoles: ['BIM', 'ME', 'SN', 'Site Admin', 'Admin'],
     color: 'blue'
   },
   'RFA-GEN': {

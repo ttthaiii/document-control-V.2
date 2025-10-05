@@ -152,7 +152,10 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
   };
   
   const handleCategoryClick = (data: any) => {
-    const categoryId = data.id; // ใช้ data.id จาก legend payload
+    // ตรวจสอบ `id` จาก `data.payload` (สำหรับ Legend) ก่อน, ถ้าไม่มีให้ใช้ `data.id` (สำหรับ Slice)
+    const categoryId = data.payload?.id || data.id;
+    if (!categoryId) return; // เพิ่มการตรวจสอบเพื่อความปลอดภัย
+
     onChartFilter('categoryId', activeFilters.categoryId === categoryId ? 'ALL' : categoryId);
   };
   

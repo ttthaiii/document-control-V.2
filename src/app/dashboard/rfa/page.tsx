@@ -1,22 +1,20 @@
 // src/app/dashboard/rfa/page.tsx (โค้ดที่แก้ไขแล้ว)
 'use client'
 
-import { Suspense, useMemo, useState, useEffect } from 'react'
+import React, { Suspense, useMemo, useState, useEffect } from 'react' // ✅ 1. เพิ่ม React เข้ามา
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth/useAuth'
 import { AuthGuard } from '@/lib/components/shared/AuthGuard'
-// ✅✅✅ เพิ่มบรรทัดนี้กลับเข้ามาครับ ✅✅✅
 import RFAListTable from '@/components/rfa/RFAListTable'
-import RFADetailModal from '@/components/rfa/RFADetailModal'
 import DashboardStats from '@/components/rfa/DashboardStats'
 import CreateRFAForm from '@/components/rfa/CreateRFAForm'
-import { RFADocument, Site } from '@/types/rfa'
+import { RFADocument, Site, Category } from '@/types/rfa' // ✅ 2. import Category เข้ามา
 import { STATUSES, STATUS_LABELS, CREATOR_ROLES, APPROVER_ROLES } from '@/lib/config/workflow'
 import { Plus, Search, RefreshCw } from 'lucide-react'
 import { db } from '@/lib/firebase/client'
 import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore'
 import SmartRFAModal from '@/components/rfa/SmartRFAModal'
-
+import FilterBar from '@/components/rfa/FilterBar' 
 
 // ... Interface ทั้งหมดเหมือนเดิม ...
 interface Filters {
@@ -28,11 +26,7 @@ interface Filters {
   responsibleParty: 'ALL' | 'SITE' | 'CM' | CreatorRole;
 }
 
-interface Category {
-  id: string;
-  categoryCode: string;
-  categoryName: string;
-}
+// ❌ 3. ลบ interface Category ที่ซ้ำซ้อนออกไป
 
 type CreatorRole = typeof CREATOR_ROLES[number];
 
@@ -49,6 +43,7 @@ function RFAContent() {
     const router = useRouter()
     const searchParams = useSearchParams()
 
+    // --- State ต่างๆ เหมือนเดิม ---
     const [allDocuments, setAllDocuments] = useState<RFADocument[]>([]);
     const [loading, setLoading] = useState(true)
     const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
@@ -56,7 +51,6 @@ function RFAContent() {
     const [categories, setCategories] = useState<Category[]>([]);
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [sites, setSites] = useState<Site[]>([]);
-
     const [filters, setFilters] = useState<Filters>({
         rfaType: (searchParams.get('type') as Filters['rfaType']) || 'ALL',
         status: 'ALL',
@@ -66,6 +60,11 @@ function RFAContent() {
         responsibleParty: 'ALL',
     })
 
+    const [isFilterBarStuck, setIsFilterBarStuck] = useState(false);
+    const sentinelRef = React.useRef<HTMLDivElement>(null);
+
+
+    // ... (ส่วน useMemo และ useEffect ทั้งหมดเหมือนเดิม ไม่ต้องแก้ไข) ...
     const availableStatuses = useMemo(() => {
         const allStatusKeys = Object.values(STATUSES);
         if (user && APPROVER_ROLES.includes(user.role)) {
@@ -178,55 +177,68 @@ function RFAContent() {
     }, [firebaseUser]);
 
     const filteredDocuments = useMemo(() => {
+        // 1. สร้าง Map เพื่อให้ค้นหาชื่อโครงการได้ง่ายและเร็ว
+        const sitesMap = new Map(sites.map(s => [s.id, s.name]));
+
+        // 2. เพิ่มชื่อโครงการที่ถูกต้องเข้าไปในข้อมูลเอกสารทั้งหมด
+        const documentsWithSiteNames = allDocuments.map(doc => ({
+            ...doc,
+            site: { ...doc.site, name: sitesMap.get(doc.site.id) || 'N/A' }
+        }));
+        
+        // 3. ใช้ข้อมูลที่เพิ่มชื่อโครงการแล้ว มาทำการกรองต่อไป
+        let docsToShow: RFADocument[] = documentsWithSiteNames;
+
         const isCM = user && APPROVER_ROLES.includes(user.role);
         const statusesHiddenFromCM = [STATUSES.PENDING_REVIEW, STATUSES.REVISION_REQUIRED];
 
-        let docsToShow: RFADocument[];
-
         if (filters.showAllRevisions) {
-        docsToShow = allDocuments;
+          // ถ้าแสดงทุก revision ก็ใช้ข้อมูลทั้งหมดได้เลย
+          docsToShow = documentsWithSiteNames;
         } else {
-        const familyMap = new Map<string, RFADocument[]>();
-        allDocuments.forEach(doc => {
-            const familyId = doc.parentRfaId || doc.id;
-            if (!familyMap.has(familyId)) {
-            familyMap.set(familyId, []);
-            }
-            familyMap.get(familyId)!.push(doc);
-        });
+          const familyMap = new Map<string, RFADocument[]>();
+          documentsWithSiteNames.forEach(doc => { // ใช้ข้อมูลใหม่ที่มีชื่อโครงการแล้ว
+              const familyId = doc.parentRfaId || doc.id;
+              if (!familyMap.has(familyId)) {
+              familyMap.set(familyId, []);
+              }
+              familyMap.get(familyId)!.push(doc);
+          });
 
-        const latestVisibleDocs: RFADocument[] = [];
-        familyMap.forEach(group => {
-            if (group.length === 0) return;
-            group.sort((a, b) => (b.revisionNumber || 0) - (a.revisionNumber || 0));
-            const latestRev = group[0];
+          const latestVisibleDocs: RFADocument[] = [];
+          familyMap.forEach(group => {
+              if (group.length === 0) return;
+              group.sort((a, b) => (b.revisionNumber || 0) - (a.revisionNumber || 0));
+              const latestRev = group[0];
 
-            if (isCM) {
-            const isLatestVisibleToCM = latestRev && !statusesHiddenFromCM.includes(latestRev.status);
-            if (isLatestVisibleToCM) {
-                latestVisibleDocs.push(latestRev);
-            } else {
-                const previousVisibleRev = group.find(doc => !statusesHiddenFromCM.includes(doc.status));
-                if (previousVisibleRev) {
-                latestVisibleDocs.push(previousVisibleRev);
-                }
-            }
-            } else {
-            latestVisibleDocs.push(latestRev);
-            }
-        });
-        docsToShow = latestVisibleDocs;
+              if (isCM) {
+              const isLatestVisibleToCM = latestRev && !statusesHiddenFromCM.includes(latestRev.status);
+              if (isLatestVisibleToCM) {
+                  latestVisibleDocs.push(latestRev);
+              } else {
+                  const previousVisibleRev = group.find(doc => !statusesHiddenFromCM.includes(doc.status));
+                  if (previousVisibleRev) {
+                  latestVisibleDocs.push(previousVisibleRev);
+                  }
+              }
+              } else {
+              latestVisibleDocs.push(latestRev);
+              }
+          });
+          docsToShow = latestVisibleDocs;
         }
 
         if (isCM) {
         docsToShow = docsToShow.filter(doc => !statusesHiddenFromCM.includes(doc.status));
         }
-        
+        if (filters.siteId !== 'ALL') {
+        docsToShow = docsToShow.filter(doc => doc.site.id === filters.siteId);
+        }        
         if (filters.rfaType !== 'ALL') {
         docsToShow = docsToShow.filter(doc => doc.rfaType === filters.rfaType);
         }
-        if (filters.status !== 'ALL') { // ✅ [REVERT] เปลี่ยนเงื่อนไขกลับเป็นแบบเดิม
-        docsToShow = docsToShow.filter(doc => doc.status === filters.status); // ✅ [REVERT] ใช้ === เพื่อเปรียบเทียบ
+        if (filters.status !== 'ALL') {
+        docsToShow = docsToShow.filter(doc => doc.status === filters.status);
         }
         if (filters.categoryId !== 'ALL') {
         docsToShow = docsToShow.filter(doc => doc.category?.id === filters.categoryId);
@@ -260,7 +272,7 @@ function RFAContent() {
         }
 
         return docsToShow;
-    }, [allDocuments, filters, user, searchTerm]);
+    }, [allDocuments, filters, user, searchTerm, sites]);
 
 
     const loadCategories = async () => {
@@ -315,6 +327,30 @@ function RFAContent() {
         setFilters(prev => ({ ...prev, [key]: value }));
     };
 
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                setIsFilterBarStuck(!entry.isIntersecting);
+            },
+            { 
+                rootMargin: '-64px 0px 0px 0px', 
+                threshold: 1.0 
+            }
+        );
+
+        const currentSentinel = sentinelRef.current;
+        if (currentSentinel) {
+            observer.observe(currentSentinel);
+        }
+
+        return () => {
+            if (currentSentinel) {
+                observer.unobserve(currentSentinel);
+            }
+        };
+    }, []);
+
+
     const getStatusColor = (status: string) => {
         switch (status) {
         case STATUSES.APPROVED:
@@ -325,11 +361,7 @@ function RFAContent() {
         case STATUSES.PENDING_CM_APPROVAL: return 'text-orange-600 bg-orange-50'
         case STATUSES.PENDING_REVIEW: return 'text-blue-600 bg-blue-50'
         case STATUSES.REVISION_REQUIRED: return 'text-yellow-600 bg-yellow-50'
-        
-        // --- 👇 เพิ่ม 2 case นี้เข้าไป 👇 ---
         case STATUSES.PENDING_FINAL_APPROVAL: return 'text-purple-600 bg-purple-50'
-        // --- สิ้นสุดจุดที่แก้ไข ---
-
         default: return 'text-gray-600 bg-gray-50'
         }
     }
@@ -344,10 +376,22 @@ function RFAContent() {
     }
 
     if (!user) return null
+    
+    const filterBarProps = {
+        filters,
+        handleFilterChange,
+        searchTerm,
+        setSearchTerm,
+        resetFilters,
+        sites,
+        categories,
+        availableStatuses,
+        availableResponsibleParties
+    };
 
     return (
         <AuthGuard>
-        <div className="max-w-7xl mx-auto">
+        <div className="max-w-screen-2xl mx-auto"> 
             {/* Header */}
             <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -357,7 +401,6 @@ function RFAContent() {
                     <span className="text-orange-600"> - {RFA_TYPE_DISPLAY_NAMES[filters.rfaType]}</span>
                     )}
                 </h1>
-                {/*<p className="text-gray-600 mt-1">จัดการเอกสาร Request for Approval</p>*/}
                 </div>
                 <div className="flex items-center space-x-3 mt-4 sm:mt-0">
                 <button onClick={() => {}} className="flex items-center px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200" disabled={loading}>
@@ -371,116 +414,22 @@ function RFAContent() {
                 </div>
             </div>
 
-            {/* Filter Bar */}
-            <div className="bg-white rounded-lg shadow mb-6 p-4">
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-                
-                {/* Project Filter */}
-                <div className="md:col-span-2">
-                    <label htmlFor="site-filter" className="text-sm font-medium text-gray-700">โครงการ</label>
-                    <select
-                        id="site-filter"
-                        value={filters.siteId}
-                        onChange={(e) => handleFilterChange('siteId', e.target.value)}
-                        className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg"
-                    >
-                        <option value="ALL">ทุกโครงการ</option>
-                        {sites.map(site => (
-                            <option key={site.id} value={site.id}>
-                                {site.name}
-                            </option>
-                        ))}
-                    </select>
+            {/* Sticky Filter Bar (conditionally rendered) */}
+            {isFilterBarStuck && (
+                <div className="sticky top-16 z-20 mb-6 animate-fade-in-down">
+                    <FilterBar {...filterBarProps} />
                 </div>
-
-                {/* Search Filter */}
-                <div className="md:col-span-2">
-                    <label htmlFor="search-filter" className="text-sm font-medium text-gray-700">ค้นหา</label>
-                    <div className="relative mt-1">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                    <input
-                        id="search-filter"
-                        type="text"
-                        placeholder="เลขที่, ชื่อเอกสาร..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg"
-                        />
-                    </div>
-                </div>
-
-                {/* Status Filter */}
-                <div className="md:col-span-2">
-                    <label htmlFor="status-filter" className="text-sm font-medium text-gray-700">สถานะ</label>
-                    <select
-                        id="status-filter"
-                        value={filters.status} // ✅ [REVERT] ใช้ค่าจาก state ตรงๆ
-                        onChange={(e) => handleFilterChange('status', e.target.value)} // ✅ [REVERT] ใช้ logic เดิม
-                        className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg"
-                    >
-                        <option value="ALL">ทุกสถานะ</option>
-                        {availableStatuses.map(statusKey => (
-                        <option key={statusKey} value={statusKey}>
-                            {STATUS_LABELS[statusKey] || statusKey}
-                        </option>
-                        ))}
-                    </select>
-                </div>
-                
-                {/* Responsible Party Filter */}
-                <div className="md:col-span-2">
-                    <label htmlFor="responsible-party-filter" className="text-sm font-medium text-gray-700">ผู้รับผิดชอบ</label>
-                    <select
-                        id="responsible-party-filter"
-                        value={filters.responsibleParty}
-                        onChange={(e) => handleFilterChange('responsibleParty', e.target.value as Filters['responsibleParty'])}
-                        className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg"
-                    >
-                        {availableResponsibleParties.map(party => (
-                            <option key={party.value} value={party.value}>{party.label}</option>
-                        ))}
-                    </select>
-                </div>
-
-                {/* Category Filter */}
-                <div className="md:col-span-2">
-                    <label htmlFor="category-filter" className="text-sm font-medium text-gray-700">หมวดงาน</label>
-                    <select 
-                        id="category-filter" 
-                        className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg"
-                        value={filters.categoryId}
-                        onChange={(e) => handleFilterChange('categoryId', e.target.value)}
-                    >
-                        <option value="ALL">ทุกหมวดงาน</option>
-                        {categories.map(cat => (
-                            <option key={cat.id} value={cat.id}>
-                                {cat.categoryCode}
-                            </option>
-                        ))}
-                    </select>
-                </div>
-
-                {/* Checkbox */}
-                <div className="md:col-span-1 flex items-center h-10">
-                    <input
-                        id="show-all-revisions"
-                        type="checkbox"
-                        checked={filters.showAllRevisions}
-                        onChange={(e) => handleFilterChange('showAllRevisions', e.target.checked)}
-                        className="h-4 w-4 rounded border-gray-300 text-blue-600"
-                    />
-                    <label htmlFor="show-all-revisions" className="ml-2 text-sm text-gray-700">ทุกฉบับ</label>
-                </div>
-                
-                {/* Reset Button */}
-                <div className="md:col-span-1">
-                    <button onClick={resetFilters} className="w-full px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300">
-                        รีเซ็ต
-                    </button>
-                </div>
-                </div>
+            )}
+            
+            {/* Primary Filter Bar */}
+            <div className='mb-6'>
+                <FilterBar {...filterBarProps} />
             </div>
+            
+            {/* Sentinel Element to trigger sticky */}
+            <div ref={sentinelRef} className="h-1"></div>
 
+            {/* Chart */}
             <DashboardStats 
                 allDocuments={filteredDocuments}
                 onChartFilter={handleChartFilter}
@@ -498,7 +447,7 @@ function RFAContent() {
             ) : (
                 <RFAListTable
                 documents={filteredDocuments}
-                isLoading={loading} // 👈 เพิ่ม prop นี้เข้าไป
+                isLoading={loading}
                 onDocumentClick={handleDocumentClick}
                 getStatusColor={getStatusColor}
                 statusLabels={STATUS_LABELS}

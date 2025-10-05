@@ -1,9 +1,9 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
-import { FileText, Calendar, User, Clock, Building, Tag, GitCommit } from 'lucide-react'
+import React, { useState, useEffect, useMemo } from 'react'
+import { FileText, Calendar, User, Clock, Building, Tag, ArrowUp, ArrowDown } from 'lucide-react'
 import { RFADocument } from '@/types/rfa'
-import { STATUSES, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES } from '@/lib/config/workflow'
+import { STATUSES } from '@/lib/config/workflow'
 import Spinner from '@/components/shared/Spinner'
 
 interface RFAListTableProps {
@@ -15,12 +15,16 @@ interface RFAListTableProps {
   getRFATypeColor: (type: string) => string
 }
 
-const PENDING_STATUSES = [
+// ✅ [FIX 3] กำหนดสถานะที่ "ยังไม่เสร็จสิ้น" ทั้งหมด เพื่อใช้คำนวณวันค้าง
+const ACTIVE_STATUSES_FOR_PENDING_DAYS = [
   STATUSES.PENDING_REVIEW,
   STATUSES.PENDING_CM_APPROVAL,
+  STATUSES.PENDING_FINAL_APPROVAL,
   STATUSES.REVISION_REQUIRED,
   STATUSES.APPROVED_REVISION_REQUIRED,
+  STATUSES.REJECTED, // เพิ่มสถานะ REJECTED เข้ามา
 ];
+
 
 const convertToDate = (date: any): Date | null => {
   if (!date) return null;
@@ -37,6 +41,11 @@ const convertToDate = (date: any): Date | null => {
   return null;
 };
 
+// Type สำหรับ state การเรียงลำดับ
+type SortDirection = 'ascending' | 'descending';
+type SortKey = keyof RFADocument | 'site.name' | 'category.categoryCode' | 'responsibleParty';
+
+
 export default function RFAListTable({
   documents,
   isLoading,
@@ -46,6 +55,10 @@ export default function RFAListTable({
   getRFATypeColor
 }: RFAListTableProps) {
   const [isMobile, setIsMobile] = useState(false)
+  
+  // ✅ [CHANGE 1] เพิ่ม State สำหรับจัดการการเรียงลำดับ
+  const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection } | null>({ key: 'updatedAt', direction: 'descending' });
+
 
   useEffect(() => {
     const checkIsMobile = () => setIsMobile(window.innerWidth <= 768)
@@ -53,6 +66,88 @@ export default function RFAListTable({
     window.addEventListener('resize', checkIsMobile)
     return () => window.removeEventListener('resize', checkIsMobile)
   }, [])
+
+  const getResponsibleParty = (doc: RFADocument): { name: string, role: string } => {
+    switch (doc.status) {
+      case STATUSES.PENDING_REVIEW:
+      case STATUSES.PENDING_FINAL_APPROVAL:
+        return { name: 'Site', role: 'Site' };
+
+      case STATUSES.PENDING_CM_APPROVAL:
+        return { name: 'CM', role: 'CM' };
+
+      case STATUSES.REVISION_REQUIRED:
+      case STATUSES.APPROVED_REVISION_REQUIRED:
+        return { name: doc.createdByInfo?.role || 'Creator', role: doc.createdByInfo?.role || 'Creator' };
+
+      case STATUSES.REJECTED:
+        return doc.isLatest 
+          ? { name: doc.createdByInfo?.role || 'Creator', role: doc.createdByInfo?.role || 'Creator' }
+          : { name: 'เสร็จสิ้น', role: 'Completed' };
+
+      case STATUSES.APPROVED:
+      case STATUSES.APPROVED_WITH_COMMENTS:
+        return { name: 'เสร็จสิ้น', role: 'Completed' };
+        
+      default:
+        return { name: 'N/A', role: 'N/A' };
+    }
+  }
+  
+  // ✅ [CHANGE 1] เพิ่ม useMemo สำหรับเรียงลำดับข้อมูลก่อนแสดงผล
+  const sortedDocuments = useMemo(() => {
+    let sortableDocuments = [...documents];
+    if (sortConfig !== null) {
+      sortableDocuments.sort((a, b) => {
+        const getNestedValue = (obj: any, path: string) => path.split('.').reduce((o, p) => (o ? o[p] : undefined), obj);
+        
+        let aValue: any;
+        let bValue: any;
+
+        if (sortConfig.key === 'responsibleParty') {
+            aValue = getResponsibleParty(a).name;
+            bValue = getResponsibleParty(b).name;
+        } else if (sortConfig.key === 'updatedAt') {
+            aValue = convertToDate(a.updatedAt)?.getTime() || 0;
+            bValue = convertToDate(b.updatedAt)?.getTime() || 0;
+        } else {
+            aValue = getNestedValue(a, sortConfig.key);
+            bValue = getNestedValue(b, sortConfig.key);
+        }
+
+        if (aValue < bValue) {
+          return sortConfig.direction === 'ascending' ? -1 : 1;
+        }
+        if (aValue > bValue) {
+          return sortConfig.direction === 'ascending' ? 1 : -1;
+        }
+        return 0;
+      });
+    }
+    return sortableDocuments;
+  }, [documents, sortConfig]);
+
+  // ✅ [CHANGE 1] ฟังก์ชันสำหรับเปลี่ยนการเรียงลำดับ
+  const requestSort = (key: SortKey) => {
+    let direction: SortDirection = 'ascending';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'ascending') {
+      direction = 'descending';
+    }
+    setSortConfig({ key, direction });
+  };
+  
+  // ✅ [CHANGE 1] Component สำหรับแสดงไอคอนการเรียงลำดับ
+  const SortIcon = ({ columnKey }: { columnKey: SortKey }) => {
+    if (!sortConfig || sortConfig.key !== columnKey) {
+      return <span className="w-4 h-4 ml-2"></span>;
+    }
+    return (
+      <span className="ml-2">
+        {sortConfig.direction === 'ascending' ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
+      </span>
+    );
+  };
+
 
   if (isLoading) {
     return (
@@ -62,8 +157,7 @@ export default function RFAListTable({
     );
   }
   
-  // เพิ่มเงื่อนไขสำหรับแสดงผลเมื่อไม่มีข้อมูล
-  if (!documents || documents.length === 0) {
+  if (!sortedDocuments || sortedDocuments.length === 0) {
     return (
       <div className="w-full h-96 flex flex-col justify-center items-center bg-white rounded-lg shadow text-center">
         <FileText className="w-16 h-16 text-gray-300 mb-4" />
@@ -86,51 +180,14 @@ export default function RFAListTable({
   const calculatePendingDays = (document: RFADocument) => {
     const lastUpdate = convertToDate(document.updatedAt);
     if (!lastUpdate) return 0;
-
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-
     const updateDate = new Date(lastUpdate);
     updateDate.setHours(0, 0, 0, 0);
-
     const diffTime = today.getTime() - updateDate.getTime();
     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-    
     return Math.max(0, diffDays);
   };
-
-  /**
-   * ✅ [แก้ไข] ปรับ Logic ให้แสดงผลเป็น Role ตามสถานะของเอกสาร
-   */
-  const getResponsibleParty = (doc: RFADocument): { name: string, role: string } => {
-    switch (doc.status) {
-      case STATUSES.PENDING_REVIEW:
-        return { name: 'Site', role: 'Site' };
-      
-      case STATUSES.PENDING_FINAL_APPROVAL:
-        return { name: 'Site', role: 'Site' };
-      // --- สิ้นสุดจุดที่แก้ไข ---
-
-      case STATUSES.PENDING_CM_APPROVAL:
-        return { name: 'CM', role: 'CM' };
-
-      case STATUSES.REVISION_REQUIRED:
-      case STATUSES.APPROVED_REVISION_REQUIRED:
-        return { name: doc.createdByInfo?.role || 'Creator', role: doc.createdByInfo?.role || 'Creator' };
-
-      case STATUSES.REJECTED:
-        return doc.isLatest 
-          ? { name: doc.createdByInfo?.role || 'Creator', role: doc.createdByInfo?.role || 'Creator' }
-          : { name: 'เสร็จสิ้น', role: 'Completed' };
-
-      case STATUSES.APPROVED:
-      case STATUSES.APPROVED_WITH_COMMENTS:
-        return { name: 'เสร็จสิ้น', role: 'Completed' };
-        
-      default:
-        return { name: 'N/A', role: 'N/A' };
-    }
-  }
 
   // Mobile View (Card)
   if (isMobile) {
@@ -185,7 +242,7 @@ export default function RFAListTable({
                   <Calendar className="w-3 h-3 mr-2" />
                   <span>อัปเดต: {formatDate(doc.updatedAt)}</span>
                 </div>
-                {PENDING_STATUSES.includes(doc.status) && pendingDays > 0 && (
+                {ACTIVE_STATUSES_FOR_PENDING_DAYS.includes(doc.status) && pendingDays > 0 && (
                   <div className="flex items-center text-orange-600">
                     <Clock className="w-3 h-3 mr-2" />
                     <span>ค้างดำเนินการ: {pendingDays} วัน</span>
@@ -206,17 +263,44 @@ export default function RFAListTable({
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">System No.</th>
-              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">หมวดหมู่</th>
+              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                 <button onClick={() => requestSort('runningNumber')} className="flex items-center justify-center w-full">
+                    System No.
+                    <SortIcon columnKey='runningNumber' />
+                 </button>
+              </th>
+              {/* ✅ [CHANGE 2] เพิ่มหัวตาราง "โครงการ" */}
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                 <button onClick={() => requestSort('site.name')} className="flex items-center w-full">
+                    โครงการ
+                    <SortIcon columnKey='site.name' />
+                 </button>
+              </th>
+              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                 <button onClick={() => requestSort('category.categoryCode')} className="flex items-center justify-center w-full">
+                    หมวดหมู่
+                    <SortIcon columnKey='category.categoryCode' />
+                 </button>
+              </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">เอกสาร</th>
               <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Rev.</th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">สถานะ</th>
-              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">ผู้รับผิดชอบ</th>
-              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">วันที่อัปเดตล่าสุด</th>
+              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                 <button onClick={() => requestSort('responsibleParty')} className="flex items-center justify-center w-full">
+                    ผู้รับผิดชอบ
+                    <SortIcon columnKey='responsibleParty' />
+                 </button>
+              </th>
+              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                 <button onClick={() => requestSort('updatedAt')} className="flex items-center justify-center w-full">
+                    วันที่อัปเดตล่าสุด
+                    <SortIcon columnKey='updatedAt' />
+                 </button>
+              </th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {documents.map((doc) => {
+            {sortedDocuments.map((doc) => {
               const responsible = getResponsibleParty(doc);
               const pendingDays = calculatePendingDays(doc);
               return (
@@ -227,6 +311,10 @@ export default function RFAListTable({
                 >
                   <td className="px-6 py-4">
                     <p className="text-sm font-semibold text-blue-600 text-center">{doc.runningNumber || 'N/A'}</p>
+                  </td>
+                  {/* ✅ [CHANGE 2] เพิ่ม Cell แสดงข้อมูล "โครงการ" */}
+                  <td className="px-6 py-4">
+                    <p className="text-sm text-gray-800">{doc.site?.name || 'N/A'}</p>
                   </td>
                   <td className="px-6 py-4">
                     <div className="text-sm">
@@ -249,7 +337,8 @@ export default function RFAListTable({
                       <span className={`inline-flex items-center justify-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(doc.status)}`}>
                         {statusLabels[doc.status] || doc.status}
                       </span>
-                      {PENDING_STATUSES.includes(doc.status) && pendingDays > 0 && (
+                      {/* ✅ [FIX 3] เปลี่ยนไปใช้ Array ใหม่ที่ครอบคลุมทุกสถานะ */}
+                      {ACTIVE_STATUSES_FOR_PENDING_DAYS.includes(doc.status) && pendingDays > 0 && (
                         <span className="text-xs text-orange-600 text-center">{`ค้าง ${pendingDays} วัน`}</span>
                       )}
                     </div>
