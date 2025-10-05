@@ -110,6 +110,11 @@ interface SiteWithSystemType extends RFASite {
 interface FullRFADocument extends RFADocument {
     site: SiteWithSystemType;
     creatorRole?: 'BIM' | 'ME' | 'SN';
+    taskData?: {
+        projectId?: string;
+        taskName?: string;
+        [key: string]: any;
+    };
 }
 
 export default function RFADetailModal({ document: initialDoc, onClose, onUpdate,showOverlay = true}: RFADetailModalProps) {
@@ -123,6 +128,11 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const [revisionComment, setRevisionComment] = useState('');
   const [revisionFiles, setRevisionFiles] = useState<UploadedFile[]>([]);
   const [previewFile, setPreviewFile] = useState<RFAFile | null>(null);
+
+  const [isVerifyingTask, setIsVerifyingTask] = useState(false);
+  const [isTaskVerified, setIsTaskVerified] = useState(false);
+  const [verificationError, setVerificationError] = useState<string | null>(null);
+  const [verifiedTaskId, setVerifiedTaskId] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchFullDocument = async () => {
@@ -172,6 +182,63 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     return [...document.workflow].reverse().find(step => step.comments && step.comments.trim() !== '');
   }, [document?.workflow]);
 
+  const isCreator = document?.createdBy === user?.id;
+  const isRevisionFlow = document?.status === STATUSES.REJECTED && isCreator && document?.isLatest;
+
+  useEffect(() => {
+    // ทำงานเฉพาะตอนที่เป็น Flow สร้าง Revision, ผู้สร้างคือ BIM และมีข้อมูล user แล้วเท่านั้น
+    if (isRevisionFlow && document?.creatorRole === 'BIM' && firebaseUser && document) {
+        const verifyTask = async () => {
+            if (!document.site?.name || !document.documentNumber || !document.taskData?.taskName) {
+                setVerificationError("ข้อมูลเอกสารไม่สมบูรณ์ ไม่สามารถตรวจสอบ Task ได้");
+                return;
+            }
+
+            setIsVerifyingTask(true);
+            setIsTaskVerified(false);
+            setVerificationError(null);
+            setVerifiedTaskId(null);
+            
+            try {
+                const token = await firebaseUser.getIdToken();
+                const newRevNumber = (document.revisionNumber || 0) + 1;
+
+                const response = await fetch('/api/bim-tracking/verify-task', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        documentNumber: document.documentNumber.split('-REV')[0],
+                        projectName: document.site.name,
+                        rev: newRevNumber,
+                        taskName: document.taskData.taskName,
+                    }),
+                });
+
+                const result = await response.json();
+                if (response.ok && result.success) {
+                    if (result.exists) {
+                        setIsTaskVerified(true);
+                        setVerifiedTaskId(result.taskId);
+                    } else {
+                        setVerificationError('กรุณาสร้าง Task สำหรับ Revision นี้ในระบบ BIM Tracking ก่อน');
+                    }
+                } else {
+                    throw new Error(result.error || 'ไม่สามารถตรวจสอบ Task ได้');
+                }
+            } catch (error: any) {
+                setVerificationError(error.message);
+            } finally {
+                setIsVerifyingTask(false);
+            }
+        };
+
+        verifyTask();
+    }
+  }, [isRevisionFlow, document, firebaseUser]);
+
   if (isLoading) {
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
@@ -183,13 +250,12 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   if (!document) return null;
   
   const permissions = document.permissions || {} as RFAPermissions;
-  const isCreator = document.createdBy === user?.id;
   const isResubmissionFlow = document.status === STATUSES.REVISION_REQUIRED && isCreator;
-  const isRevisionFlow = document.status === STATUSES.REJECTED && isCreator && document.isLatest;
   const newRevisionNumber = (document.revisionNumber || 0) + 1;
   const newDocumentNumber = `${document.documentNumber.split('-REV')[0]}-REV${String(newRevisionNumber).padStart(2, '0')}`;
   const displayDetailOrComment = latestCommentItem?.comments || document.description;
   const displayLabel = latestCommentItem ? `ความคิดเห็นล่าสุด` : 'รายละเอียดเพิ่มเติม';
+
   const uploadTempFile = async (file: File): Promise<Partial<UploadedFile>> => {
     try {
         if (!firebaseUser) throw new Error('กรุณาล็อกอินก่อนอัปโหลดไฟล์');
@@ -211,6 +277,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
         return { status: 'error', error: err instanceof Error ? err.message : 'เกิดข้อผิดพลาด' };
     }
   };
+  
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>, target: 'action' | 'revision' | 'resubmission') => {
     const files = Array.from(event.target.files || []);
     if (!files.length) return;
@@ -226,6 +293,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     });
     event.target.value = '';
   };
+  
   const removeFile = async (index: number, target: 'action' | 'revision' | 'resubmission') => {
     const files = target === 'revision' ? revisionFiles : newFiles;
     const setFiles = target === 'revision' ? setRevisionFiles : setNewFiles;
@@ -246,7 +314,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   };
   
   const handleAction = async (action: string) => {
-    // กำหนดว่า Action ไหนบ้างที่จำเป็นต้องแนบไฟล์
     const actionsRequiringFile = ['REQUEST_REVISION', 'SEND_TO_CM', 'SUBMIT_REVISION'];
     if (actionsRequiringFile.includes(action) && newFiles.filter(f => f.status === 'success').length === 0) {
         alert('กรุณาแนบไฟล์ประกอบการดำเนินการ');
@@ -292,7 +359,8 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       const payload = {
         originalDocId: document.id,
         uploadedFiles: successfulUploads.map(f => f.uploadedData),
-        comments: revisionComment
+        comments: revisionComment,
+        verifiedTaskId: verifiedTaskId,
       };
       const response = await fetch(`/api/rfa/create_revision`, {
         method: 'POST',
@@ -387,7 +455,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
             
             <div>
               <h4 className="text-md font-semibold mb-2 flex items-center">
-                <Paperclip size={16} className="mr-2"/> ไฟล์แนบ (ฉบับล่าสุด) ({latestFiles.length})
+                <Paperclip size={16} className="mr-2"/> ไฟล์แนบ (ฉบับล่าสุด)
               </h4>
               <ul className="space-y-2">
                 {latestFiles.length > 0 ? (
@@ -434,17 +502,16 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
             </div>
           </div>
           
-          {/* --- ✅ FIX: นำ Action Flows ทั้งหมดกลับมาครบถ้วน --- */}
-          <div className="p-4 border-t bg-gray-50 rounded-b-lg">
+      
+          {/* Action Buttons */}
+          <div className="p-4 border-t">
             {isSiteReviewing && (
-              <div className="space-y-4">
-                <h3 className="text-lg font-bold text-blue-800">ดำเนินการ (Site Admin)</h3>
+              <div className="p-4 bg-yellow-50 rounded-b-lg">
+                <h3 className="text-lg font-bold text-blue-800">ดำเนินการ</h3>
                 <div>
-                  <label className="text-sm font-medium text-gray-700 mb-1 block">แสดงความคิดเห็น (Optional)</label>
-                  <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..." className="w-full p-2 border rounded-md text-sm" rows={2}/>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-1 block">แนบไฟล์ (Required)</label>
+                  <label className="text-sm font-medium text-gray-700 mb-1 block">
+                    แนบไฟล์ <span className="text-red-700">*</span>
+                  </label>
                   <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
                       <input type="file" multiple onChange={(e) => handleFileUpload(e, 'action')} className="hidden" id="action-file-upload" />
                       <label htmlFor="action-file-upload" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
@@ -465,6 +532,10 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                       ))}
                   </div>
                 </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-1 block">แสดงความคิดเห็น</label>
+                  <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..." className="w-full p-2 border rounded-md text-sm" rows={2}/>
+                </div>                
                 <div className="flex flex-wrap justify-end gap-3">
                     <button 
                         onClick={() => handleAction('REQUEST_REVISION')} 
@@ -485,14 +556,12 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
             )}
             
             {isResubmissionFlow && (
-                 <div className="space-y-4">
-                 <h3 className="text-lg font-bold text-blue-800">ส่งเอกสารที่แก้ไข (Submit Revision)</h3>
+                 <div className="p-4 bg-yellow-50 rounded-b-lg">
+                 <h3 className="text-lg font-bold text-blue-800">ส่งเอกสารที่แก้ไข </h3>
                  <div>
-                   <label className="text-sm font-medium text-gray-700 mb-1 block">แสดงความคิดเห็น (Optional)</label>
-                   <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..." className="w-full p-2 border rounded-md text-sm" rows={2}/>
-                 </div>
-                 <div>
-                   <label className="text-sm font-medium text-gray-700 mb-1 block">แนบไฟล์ที่แก้ไขแล้ว (จำเป็น)</label>
+                  <label className="text-sm font-medium text-gray-700 mb-1 block">
+                    แนบไฟล์ที่แก้ไขแล้ว <span className="text-red-700">*</span>
+                  </label>
                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
                        <input type="file" multiple onChange={(e) => handleFileUpload(e, 'resubmission')} className="hidden" id="resubmit-file-upload" />
                        <label htmlFor="resubmit-file-upload" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
@@ -513,6 +582,10 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                        ))}
                    </div>
                  </div>
+                 <div>
+                   <label className="text-sm font-medium text-gray-700 mb-1 block">แสดงความคิดเห็น</label>
+                   <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..." className="w-full p-2 border rounded-md text-sm" rows={2}/>
+                 </div>                 
                  <div className="flex justify-end">
                    <button
                        onClick={handleResubmitRevision}
@@ -539,72 +612,93 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
             )}
 
             {isRevisionFlow && (
-               <div className="p-4 border-t bg-yellow-50 rounded-b-lg">
-                 <h3 className="text-lg font-bold text-yellow-800 mb-4">สร้างเอกสารฉบับแก้ไข (Create New Revision)</h3>
-                 <div className="space-y-4">
-                   <div className="grid grid-cols-2 gap-4 text-sm">
-                       <p><strong>เอกสารเดิม:</strong> {document.documentNumber}</p>
-                       <p><strong>เอกสารใหม่:</strong> {newDocumentNumber}</p>
-                   </div>
-                   <div>
-                       <label className="text-sm font-medium text-gray-700 mb-1 block">แนบไฟล์ที่แก้ไขแล้ว (จำเป็น)</label>
-                       <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
-                           <input type="file" multiple onChange={(e) => handleFileUpload(e, 'revision')} className="hidden" id="revision-file-upload" />
-                           <label htmlFor="revision-file-upload" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
-                               <Upload size={16} className="mr-2"/>
-                               คลิกเพื่อเลือกไฟล์
-                           </label>
-                       </div>
-                       <div className="mt-2 space-y-2">
-                           {revisionFiles.map((fileObj, index) => (
-                               <div key={fileObj.id} className="flex items-center text-sm p-2 bg-gray-100 rounded">
-                                   <FileText className="w-4 h-4 mr-2 text-gray-500" />
-                                   <span className="flex-1 truncate">{fileObj.file.name}</span>
-                                   {fileObj.status === 'uploading' && <Spinner className="w-4 h-4 mr-2" /> }
-                                   {fileObj.status === 'success' && <Check className="w-4 h-4 text-green-500" />}
-                                   {fileObj.status === 'error' && (
-                                     <span title={fileObj.error}>
-                                       <AlertTriangle className="w-4 h-4 text-red-500" />
-                                     </span>
-                                   )}
-                                   <button onClick={() => removeFile(index, 'revision')} className="ml-2 text-gray-500 hover:text-red-600"><X size={16} /></button>
-                               </div>
-                           ))}
-                       </div>
-                   </div>
-                   <div>
-                       <label className="text-sm font-medium text-gray-700 mb-1 block">หมายเหตุการแก้ไข (Optional)</label>
-                       <textarea
-                           value={revisionComment}
-                           onChange={(e) => setRevisionComment(e.target.value)}
-                           placeholder="เช่น แก้ไขตาม Comment จาก CM..."
-                           className="w-full p-2 border rounded-md text-sm"
-                           rows={2}
-                       />
-                   </div>
-                   <div className="flex justify-end">
-                       <button
-                           onClick={handleCreateRevision}
-                           disabled={isSubmitting || revisionFiles.filter(f => f.status === 'success').length === 0}
-                           className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-300"
-                       >
-                           {isSubmitting ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />}
-                           ส่งเอกสารฉบับแก้ไข
-                       </button>
-                   </div>
-                 </div>
+               <div className="p-4 bg-yellow-50 rounded-b-lg">
+                 <h3 className="text-lg font-bold text-gray-800 mb-4">สร้างเอกสารฉบับแก้ไข (Create New Revision)</h3>
+                 
+                 {/* --- ✅ FIX: เพิ่มเงื่อนไขการแสดงผลตาม `creatorRole` --- */}
+                 {document.creatorRole === 'BIM' && (isVerifyingTask || verificationError) && (
+                    <div className="mb-4 p-3 rounded-md text-sm font-medium flex items-center border bg-white">
+                        {isVerifyingTask && (
+                            <>
+                                <Spinner className="w-4 h-4 mr-3 text-gray-500" />
+                                <span className="text-gray-600">กำลังตรวจสอบ Task ในระบบ BIM Tracking...</span>
+                            </>
+                        )}
+                        {verificationError && (
+                            <span className="text-red-600 font-semibold">{verificationError}</span>
+                        )}
+                    </div>
+                 )}
+
+                 {/* --- ✅ FIX: เพิ่มเงื่อนไขการแสดงฟอร์ม --- */}
+                 {/* ถ้าผู้สร้างไม่ใช่ BIM หรือ เป็น BIM และตรวจสอบ Task ผ่านแล้ว */}
+                 {(document.creatorRole !== 'BIM' || isTaskVerified) && (
+                    <div className="space-y-4 border-t border-yellow-200 pt-4">
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                            <p><strong>เอกสารเดิม:</strong> {document.documentNumber}</p>
+                            <p><strong>เอกสารใหม่:</strong> {newDocumentNumber}</p>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-gray-700 mb-1 block">
+                            แนบไฟล์ที่แก้ไขแล้ว <span className="text-red-700">*</span>
+                          </label>
+                            <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
+                                <input type="file" multiple onChange={(e) => handleFileUpload(e, 'revision')} className="hidden" id="revision-file-upload" />
+                                <label htmlFor="revision-file-upload" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
+                                    <Upload size={16} className="mr-2"/>
+                                    คลิกเพื่อเลือกไฟล์
+                                </label>
+                            </div>
+                            <div className="mt-2 space-y-2">
+                                {revisionFiles.map((fileObj, index) => (
+                                    <div key={fileObj.id} className="flex items-center text-sm p-2 bg-gray-100 rounded">
+                                        <FileText className="w-4 h-4 mr-2 text-gray-500" />
+                                        <span className="flex-1 truncate">{fileObj.file.name}</span>
+                                        {fileObj.status === 'uploading' && <Spinner className="w-4 h-4 mr-2" /> }
+                                        {fileObj.status === 'success' && <Check className="w-4 h-4 text-green-500" />}
+                                        {fileObj.status === 'error' && (
+                                        <span title={fileObj.error}>
+                                            <AlertTriangle className="w-4 h-4 text-red-500" />
+                                        </span>
+                                        )}
+                                        <button onClick={() => removeFile(index, 'revision')} className="ml-2 text-gray-500 hover:text-red-600"><X size={16} /></button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        <div>
+                            <label className="text-sm font-medium text-gray-700 mb-1 block">หมายเหตุการแก้ไข</label>
+                            <textarea
+                                value={revisionComment}
+                                onChange={(e) => setRevisionComment(e.target.value)}
+                                placeholder="เช่น แก้ไขตาม Comment จาก CM..."
+                                className="w-full p-2 border rounded-md text-sm"
+                                rows={2}
+                            />
+                        </div>
+                        <div className="flex justify-end">
+                            <button
+                                onClick={handleCreateRevision}
+                                // --- ✅ FIX: ปรับเงื่อนไข disabled ให้ครอบคลุมทุก Role ---
+                                disabled={isSubmitting || revisionFiles.filter(f => f.status === 'success').length === 0 || (document.creatorRole === 'BIM' && !isTaskVerified)}
+                                className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                            >
+                                {isSubmitting ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />}
+                                ส่งเอกสารฉบับแก้ไข
+                            </button>
+                        </div>
+                    </div>
+                 )}
                </div>
             )}
-
+            
             {(isSiteFinalApproving || isSiteActingAsExternalCM) && (
-                 <div className="space-y-4">
-                 <h3 className="text-lg font-bold text-blue-800">ดำเนินการ (Site Admin)</h3>
+                 <div className="p-4 bg-yellow-50 rounded-b-lg">
+                 <h3 className="text-lg font-bold text-blue-800">ดำเนินการ</h3>
                  <div>
-                   <label className="text-sm font-medium text-gray-700 mb-1 block">แสดงความคิดเห็น (Optional)</label>
-                   <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..." className="w-full p-2 border rounded-md text-sm" rows={2}/>
-                 </div>
-                 <div>
-                   <label className="text-sm font-medium text-gray-700 mb-1 block">แนบไฟล์ (Required)</label>
+                  <label className="text-sm font-medium text-gray-700 mb-1 block">
+                    แนบไฟล์ <span className="text-red-700">*</span>
+                  </label>
                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
                        <input type="file" multiple onChange={(e) => handleFileUpload(e, 'action')} className="hidden" id="action-file-upload-final" />
                        <label htmlFor="action-file-upload-final" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
@@ -625,6 +719,10 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                        ))}
                    </div>
                  </div>
+                 <div>
+                   <label className="text-sm font-medium text-gray-700 mb-1 block">แสดงความคิดเห็น</label>
+                   <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..." className="w-full p-2 border rounded-md text-sm" rows={2}/>
+                 </div>                 
                  <div className="flex flex-wrap justify-end gap-3">
                     <button onClick={() => handleAction('APPROVE')} disabled={isActionDisabled} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed">
                       <ThumbsUp size={16} className="mr-2" /> อนุมัติ
@@ -643,14 +741,12 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
             )}
             
             {isInternalCmApproving && (
-                <div className="space-y-4">
+                <div className="p-4 bg-yellow-50 rounded-b-lg">
                 <h3 className="text-lg font-bold text-green-800">ดำเนินการ (CM)</h3>
                 <div>
-                  <label className="text-sm font-medium text-gray-700 mb-1 block">แสดงความคิดเห็น (Optional)</label>
-                  <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..." className="w-full p-2 border rounded-md text-sm" rows={2}/>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-1 block">แนบไฟล์ (Required)</label>
+                  <label className="text-sm font-medium text-gray-700 mb-1 block">
+                    แนบไฟล์ <span className="text-red-700">*</span>
+                  </label>
                   <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
                       <input type="file" multiple onChange={(e) => handleFileUpload(e, 'action')} className="hidden" id="action-file-upload-cm" />
                       <label htmlFor="action-file-upload-cm" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
@@ -671,6 +767,10 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                       ))}
                   </div>
                 </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-1 block">แสดงความคิดเห็น</label>
+                  <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..." className="w-full p-2 border rounded-md text-sm" rows={2}/>
+                </div>                
                 <div className="flex flex-wrap justify-end gap-3">
                     <button onClick={() => handleAction('APPROVE')} disabled={isActionDisabled} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed">
                       <ThumbsUp size={16} className="mr-2" /> อนุมัติ
@@ -686,19 +786,19 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
             )}
           </div>
         </div>
-      </div>
-      {showHistory && (
-        <WorkflowHistoryModal 
-            workflow={document.workflow || []} 
-            onClose={() => setShowHistory(false)} 
-            userRole={user?.role}
-        />
-      )}
-       <PDFPreviewModal
-            isOpen={!!previewFile}
-            file={previewFile}
-            onClose={() => setPreviewFile(null)}
-        />
+        </div>
+        {showHistory && (
+          <WorkflowHistoryModal 
+              workflow={document.workflow || []} 
+              onClose={() => setShowHistory(false)} 
+              userRole={user?.role}
+          />
+        )}
+        <PDFPreviewModal
+              isOpen={!!previewFile}
+              file={previewFile}
+              onClose={() => setPreviewFile(null)}
+          />
     </>
   )
 }

@@ -1,37 +1,45 @@
-import admin from "firebase-admin";
+// src/lib/firebase/admin.ts (Final Corrected Version)
+import * as admin from "firebase-admin";
 
-// --- Config for Project 1: ttsdoc-v2 (Document System) ---
-const ttsdocConfig = {
-  credential: admin.credential.cert({
-    projectId: process.env.TTSDOC_PROJECT_ID, // <--- แก้ไข
-    clientEmail: process.env.TTSDOC_CLIENT_EMAIL, // <--- แก้ไข
-    privateKey: process.env.TTSDOC_PRIVATE_KEY?.replace(/\\n/g, "\n"), // <--- แก้ไข
-  }),
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+// --- Helper Functions to ensure apps are initialized only once ---
+const initializeAppOnce = (name: string, config: admin.AppOptions): admin.app.App => {
+  return admin.apps.find(app => app?.name === name) || admin.initializeApp(config, name);
 };
 
-// --- Config for Project 2: BIM-Tracking (Task System) ---
-const bimTrackingConfig = {
-  credential: admin.credential.cert({
-    projectId: process.env.BIM_TRACKING_PROJECT_ID,
-    clientEmail: process.env.BIM_TRACKING_CLIENT_EMAIL,
-    privateKey: process.env.BIM_TRACKING_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-  }),
+// --- App Getters (Lazy Initialization) ---
+
+const getTtsdocApp = () => {
+  const config = {
+    credential: admin.credential.cert({
+      projectId: process.env.TTSDOC_PROJECT_ID,
+      clientEmail: process.env.TTSDOC_CLIENT_EMAIL,
+      privateKey: process.env.TTSDOC_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+    }),
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  };
+  return initializeAppOnce('ttsdoc-v2', config);
 };
 
-// --- Initialize Apps ---
-// ตั้งชื่อแอปพลิเคชันเพื่อแยกการเชื่อมต่อ
-const ttsdocApp = admin.apps.find(app => app?.name === 'ttsdoc-v2') 
-  || admin.initializeApp(ttsdocConfig, 'ttsdoc-v2');
+const getBimTrackingApp = () => {
+  const config = {
+    credential: admin.credential.cert({
+      projectId: process.env.BIM_TRACKING_PROJECT_ID,
+      clientEmail: process.env.BIM_TRACKING_CLIENT_EMAIL,
+      privateKey: process.env.BIM_TRACKING_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+    }),
+  };
+  return initializeAppOnce('bim-tracking', config);
+};
 
-const bimTrackingApp = admin.apps.find(app => app?.name === 'bim-tracking') 
-  || admin.initializeApp(bimTrackingConfig, 'bim-tracking');
 
+// --- Main Exports ---
+export const adminDb = getTtsdocApp().firestore();
+export const adminAuth = getTtsdocApp().auth();
+export const adminBucket = getTtsdocApp().storage().bucket();
+export const bimTrackingDb = getBimTrackingApp().firestore();
 
-// --- Exports for Project 1: ttsdoc-v2 ---
-export const adminDb = ttsdocApp.firestore();
-export const adminAuth = ttsdocApp.auth();
-export const adminBucket = ttsdocApp.storage().bucket();
-
-// --- Exports for Project 2: BIM-Tracking ---
-export const bimTrackingDb = bimTrackingApp.firestore();
+// Getter functions for lazy initialization in other server-side files if needed
+export const getAdminDb = () => adminDb;
+export const getAdminAuth = () => adminAuth;
+export const getAdminBucket = () => adminBucket;
+export const getBimTrackingDb = () => bimTrackingDb;
