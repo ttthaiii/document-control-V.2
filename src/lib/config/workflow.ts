@@ -1,11 +1,28 @@
 // src/lib/config/workflow.ts (แก้ไขแล้ว)
 
-// (ส่วน ROLES เหมือนเดิม)
-export const CREATOR_ROLES = ['BIM', 'ME', 'SN'];
-export const REVIEWER_ROLES = ['Site Admin', 'Adminsite2', 'OE', 'PE'];
-export const APPROVER_ROLES = ['CM'];
-export const OBSERVER_ALL_ROLES = ['PM'];
-export const OBSERVER_FINISHED_ROLES = ['SE'];
+export const ROLES = {
+  ADMIN: 'Admin',
+  BIM: 'BIM',
+  SITE_ADMIN: 'Site Admin',
+  CM: 'CM',
+  ME: 'ME',
+  SN: 'SN',
+  OE: 'OE',
+  PE: 'PE',
+  PM: 'PM',
+  SE: 'SE',
+  ADMIN_SITE_2: 'Adminsite2',
+} as const;
+
+type ObjectValues<T> = T[keyof T];
+export type Role = ObjectValues<typeof ROLES>;
+
+// ✅ 2. อัปเดต Role Groups เดิมให้เรียกใช้ค่าจาก ROLES Object และใช้ Type ใหม่
+export const CREATOR_ROLES: Role[] = [ROLES.BIM, ROLES.ME, ROLES.SN];
+export const REVIEWER_ROLES: Role[] = [ROLES.SITE_ADMIN, ROLES.ADMIN_SITE_2, ROLES.OE, ROLES.PE];
+export const APPROVER_ROLES: Role[] = [ROLES.CM];
+export const OBSERVER_ALL_ROLES: Role[] = [ROLES.PM];
+export const OBSERVER_FINISHED_ROLES: Role[] = [ROLES.SE];
 
 export const STATUSES = {
   PENDING_REVIEW: 'PENDING_REVIEW',

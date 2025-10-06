@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { InvitationService } from '@/lib/auth/invitation-service';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: NextRequest) {
   try {
     const { email, role, sites } = await request.json();

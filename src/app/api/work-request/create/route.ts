@@ -3,6 +3,8 @@ import { adminDb, adminBucket, adminAuth } from "@/lib/firebase/admin";
 import { FieldValue } from 'firebase-admin/firestore';
 import { WorkRequestStatus } from '@/types/work-request';
 
+export const dynamic = 'force-dynamic';
+
 // Helper function to verify user token from request header
 async function verifyIdTokenFromHeader(req: Request): Promise<string | null> {
     const authHeader = req.headers.get("authorization") || "";

@@ -1,7 +1,9 @@
+import { Role } from '@/lib/config/workflow';
+
 export interface User {
   id: string;
   email: string;
-  role: 'BIM' | 'Site Admin' | 'CM' | 'Admin' | 'ME' | 'SN';
+  role: Role;
   sites: string[];
   status: 'ACTIVE' | 'DISABLED';
   createdFromInvitation?: boolean;
@@ -11,7 +13,7 @@ export interface User {
 
 export interface Invitation {
   email: string;
-  role: 'BIM' | 'Site Admin' | 'CM';
+  role: Role;
   sites: string[];
   status: 'PENDING' | 'ACCEPTED' | 'EXPIRED';
   createdAt: Date;

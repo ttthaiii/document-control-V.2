@@ -1,4 +1,6 @@
 // src/types/rfa.ts
+import { Role } from '@/lib/config/workflow';
+
 export interface Site {
   id: string;
   name: string;
@@ -28,7 +30,7 @@ export interface RFAWorkflowStep {
   userId: string
   userName: string
   userRole: string
-  role: string
+  role: Role;
   timestamp: string
   comments?: string
   action?: string // <-- ✅ 3. เพิ่ม 'action' (เป็น optional)
@@ -53,7 +55,7 @@ export interface RFAPermissions {
 
 export interface RFACurrentUser {
   id: string
-  role: string
+  role: Role;
   isCreator: boolean
   isAssigned: boolean
 }
@@ -143,6 +145,6 @@ export interface RFAStats {
 export interface CreateRFAUser {
   id: string
   email: string
-  role: 'BIM' | 'Site Admin' | 'CM' | 'Admin'
+  role: Role;
   sites: string[]
 }

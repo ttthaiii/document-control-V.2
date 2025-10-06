@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation'; // 👈 1. Import useSearchParams
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '@/lib/firebase/client';
 import { useForm } from 'react-hook-form';
@@ -12,6 +12,7 @@ interface LoginFormData {
 
 export function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams(); // 👈 2. เรียกใช้ useSearchParams
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -24,7 +25,13 @@ export function LoginForm() {
     try {
       const userCredential = await signInWithEmailAndPassword(auth, data.email, data.password);
       console.log('Login successful:', userCredential.user);
-      router.push('/dashboard');
+      
+      // --- 🔽 [แก้ไขจุดสำคัญ] 🔽 ---
+      const redirectUrl = searchParams.get('redirect');
+      // ถ้ามี redirectUrl ให้ไปที่นั่น, ถ้าไม่มีให้ไปที่ /dashboard ตามเดิม
+      router.push(redirectUrl || '/dashboard');
+      // --- 👆 [สิ้นสุดการแก้ไข] 👆 ---
+
     } catch (error: any) {
       console.error('Login error:', error);
       

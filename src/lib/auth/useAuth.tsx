@@ -6,6 +6,7 @@ import React, { useState, useEffect, useContext, createContext, ReactNode } from
 import { User, onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase/client';
+import { Role } from '@/lib/config/workflow';
 
 // Cache interface
 interface UserCache {
@@ -22,7 +23,7 @@ const CACHE_DURATION = 5 * 60 * 1000; // 5 นาที
 interface AppUser {
   id: string;
   email: string;
-  role: 'BIM' | 'Site Admin' | 'CM' | 'Admin' | 'ME' | 'SN';
+  role: Role;
   sites?: string[];
   status: 'ACTIVE' | 'DISABLED';
   createdFromInvitation?: boolean;

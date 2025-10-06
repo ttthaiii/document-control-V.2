@@ -5,6 +5,8 @@ import { adminBucket, adminAuth } from "@/lib/firebase/admin"; // 🔽 1. Import
 // 🗑️ 2. ลบ getAuth ที่ไม่ได้ใช้แล้วออกไป
 // import { getAuth } from "firebase-admin/auth";
 
+export const dynamic = 'force-dynamic';
+
 async function verifyIdTokenFromHeader(req: Request): Promise<string | null> {
   const authHeader = req.headers.get("authorization") || "";
   const match = authHeader.match(/^Bearer (.+)$/i);

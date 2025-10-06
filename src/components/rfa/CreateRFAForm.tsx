@@ -6,6 +6,7 @@ import { FileText, Upload, X, Check, AlertTriangle } from 'lucide-react'
 import { useGoogleSheets } from '@/lib/hooks/useGoogleSheets'
 import { useAuth } from '@/lib/auth/useAuth'
 import Spinner from '@/components/shared/Spinner'
+import { ROLES, Role } from '@/lib/config/workflow';
 
 interface Category {
   id: string;
@@ -59,7 +60,7 @@ interface Site {
 interface User {
   id: string
   email: string
-  role: 'BIM' | 'Site Admin' | 'CM' | 'Admin' | 'ME' | 'SN'
+  role: Role
   sites: string[]
 }
 
@@ -76,14 +77,25 @@ const INITIAL_FORM_DATA: RFAFormData = {
   selectedTask: null
 }
 
-const RFA_TYPE_CONFIG = {
+type RFAConfig = {
+  title: string;
+  subtitle: string;
+  icon: string;
+  description: string;
+  workflow: string;
+  allowedRoles: Role[]; // 👈 บอกว่า allowedRoles เป็น Array ของ Role
+  color: string;
+};
+
+// 👇 2. กำหนด Type ให้กับ RFA_TYPE_CONFIG
+const RFA_TYPE_CONFIG: Record<'RFA-SHOP' | 'RFA-GEN' | 'RFA-MAT', RFAConfig> = {
   'RFA-SHOP': {
     title: 'RFA-SHOP',
     subtitle: 'Shop Drawing Approval',
     icon: '🏗️',
     description: 'สำหรับการขออนุมัติ Shop Drawing',
     workflow: 'ผู้สร้าง → Site Admin → CM',
-    allowedRoles: ['BIM', 'ME', 'SN', 'Site Admin', 'Admin'],
+    allowedRoles: [ROLES.BIM, ROLES.ME, ROLES.SN, ROLES.SITE_ADMIN, ROLES.ADMIN],
     color: 'blue'
   },
   'RFA-GEN': {
@@ -92,7 +104,7 @@ const RFA_TYPE_CONFIG = {
     icon: '📋',
     description: 'สำหรับการส่งเอกสารทั่วไป',
     workflow: 'ผู้สร้าง → CM',
-    allowedRoles: ['BIM', 'Site Admin', 'Admin', 'ME', 'SN'],
+    allowedRoles: [ROLES.BIM, ROLES.SITE_ADMIN, ROLES.ADMIN, ROLES.ME, ROLES.SN],
     color: 'green'
   },
   'RFA-MAT': {
@@ -101,10 +113,10 @@ const RFA_TYPE_CONFIG = {
     icon: '🧱',
     description: 'สำหรับการขออนุมัติวัสดุ',
     workflow: 'Site Admin → CM',
-    allowedRoles: ['Site Admin', 'Admin'],
+    allowedRoles: [ROLES.SITE_ADMIN, ROLES.ADMIN],
     color: 'orange'
   }
-}
+};
 
 export default function CreateRFAForm({ 
   onClose, 
@@ -135,7 +147,7 @@ export default function CreateRFAForm({
   const [taskSearchQuery, setTaskSearchQuery] = useState('');
   const [siteCategories, setSiteCategories] = useState<Category[]>([]);
 
-  const isManualFlow = userProp && (userProp.role === 'ME' || userProp.role === 'SN');
+  const isManualFlow = userProp && (userProp.role === ROLES.ME || userProp.role === ROLES.SN);
 
   useEffect(() => {
     if (presetRfaType) {
@@ -483,7 +495,7 @@ export default function CreateRFAForm({
         {currentStep === 1 && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {Object.entries(RFA_TYPE_CONFIG).map(([type, config]) => {
-                    const isAllowed = config.allowedRoles.includes(userProp?.role || '');
+                    const isAllowed = userProp ? config.allowedRoles.includes(userProp.role) : false;
                     return (
                     <div key={type} onClick={() => isAllowed && updateFormData({ rfaType: type as any })}
                         className={`p-6 border-2 rounded-lg text-center cursor-pointer ${formData.rfaType === type ? 'border-blue-500 bg-blue-50' : isAllowed ? 'border-gray-200 hover:border-gray-300' : 'border-gray-100 bg-gray-50 opacity-60 cursor-not-allowed'}`}>

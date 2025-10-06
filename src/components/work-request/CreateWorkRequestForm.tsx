@@ -6,12 +6,13 @@ import { WorkRequestPriority } from '@/types/work-request';
 import { Site, RFAFile } from '@/types/rfa';
 import Spinner from '@/components/shared/Spinner';
 import { FileText, Upload, X, Check, AlertTriangle, Send } from 'lucide-react';
+import { Role } from '@/lib/config/workflow';
 
 // Interface สำหรับ User ที่รับมาจาก props
 interface AppUser {
   id: string;
   email: string;
-  role: 'BIM' | 'Site Admin' | 'CM' | 'Admin' | 'ME' | 'SN';
+  role: Role;
   sites?: string[];
   status: 'ACTIVE' | 'DISABLED';
 }

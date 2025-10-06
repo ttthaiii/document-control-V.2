@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth, getBimTrackingDb } from "@/lib/firebase/admin";
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: NextRequest) {
   try {
     // 1. ตรวจสอบสิทธิ์ผู้ใช้
@@ -34,8 +36,8 @@ export async function POST(request: NextRequest) {
     const tasksQuery = bimTrackingDb.collection("tasks")
       .where("documentNumber", "==", documentNumber)
       .where("projectId", "==", projectId)
-      .where("rev", "==", String(rev).padStart(2, '0')) // <-- แก้ไขตรงนี้: ทำให้เป็น String "01", "02" เสมอ
-      .where("taskName", "==", taskName)
+      .where("rev", "==", String(rev).padStart(2, '0')) // <-- ใช้เงื่อนไขนี้
+      // .where("taskName", "==", taskName) // <--- บรรทัดนี้ถูกลบออก
       .limit(1);
 
     const tasksSnapshot = await tasksQuery.get();

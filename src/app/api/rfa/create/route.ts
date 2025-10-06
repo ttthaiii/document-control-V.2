@@ -5,7 +5,9 @@ import { adminDb, adminBucket, adminAuth } from "@/lib/firebase/admin";
 // 🗑️ 2. ลบ getAuth ที่ไม่ได้ใช้แล้วออกไป 🗑️
 // import { getAuth } from "firebase-admin/auth";
 import { FieldValue } from 'firebase-admin/firestore';
-import { REVIEWER_ROLES, STATUSES } from '@/lib/config/workflow';
+import { ROLES, REVIEWER_ROLES, STATUSES, Role } from '@/lib/config/workflow';
+
+export const dynamic = 'force-dynamic';
 
 // ... (ฟังก์ชัน toSlugId, ensureCategory ไม่ต้องแก้ไข) ...
 function toSlugId(input: string): string {
@@ -135,15 +137,18 @@ export async function POST(req: Request) {
     
     let initialStatus = STATUSES.PENDING_REVIEW;
     let initialAction = "CREATE";
+    
+    // ใช้ (userRole as Role) เพื่อยืนยัน Type ให้ TypeScript
+    const isReviewer = REVIEWER_ROLES.includes(userRole as Role);
+    const isEngineer = userRole === ROLES.ME || userRole === ROLES.SN;
 
-    if (rfaType === 'RFA-SHOP' && (userRole === 'ME' || userRole === 'SN')) {
+    // Case 1: Engineer สร้าง RFA-SHOP, จะถูกส่งไป CM เลย
+    if (rfaType === 'RFA-SHOP' && isEngineer) {
       initialStatus = STATUSES.PENDING_CM_APPROVAL;
       initialAction = "CREATE_AND_SUBMIT_TO_CM";
     }
-
-    const isReviewer = REVIEWER_ROLES.includes(userRole);
-    const isMatOrGen = ['RFA-MAT', 'RFA-GEN'].includes(rfaType);
-    if (isReviewer && isMatOrGen) {
+    // Case 2: Reviewer (Site Admin, OE, etc.) สร้างเอกสาร, จะถูกส่งไป CM เลย
+    else if (isReviewer && ['RFA-MAT', 'RFA-GEN', 'RFA-SHOP'].includes(rfaType)) {
       initialStatus = STATUSES.PENDING_CM_APPROVAL;
       initialAction = "CREATE_AND_SUBMIT";
     }

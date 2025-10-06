@@ -1,9 +1,10 @@
 import { adminAuth, adminDb } from '../firebase/admin';
 import { randomBytes } from 'crypto';
+import { Role } from '@/lib/config/workflow';
 
 export interface CreateInvitationData {
   email: string;
-  role: 'BIM' | 'Site Admin' | 'CM' | 'ME' | 'SN'; 
+  role: Role;
   sites: string[];
 }
 

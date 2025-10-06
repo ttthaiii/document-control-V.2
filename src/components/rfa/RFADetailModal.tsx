@@ -5,7 +5,7 @@ import { RFADocument, RFAPermissions, RFAWorkflowStep, RFAFile, RFASite } from '
 import { X, Paperclip, Clock, User, Check, Send, AlertTriangle, FileText, Download, History, MessageSquare, Edit3, Upload, ThumbsUp, ThumbsDown, Eye } from 'lucide-react'
 import Spinner from '@/components/shared/Spinner';
 import { useAuth } from '@/lib/auth/useAuth'
-import { STATUS_LABELS, STATUSES, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUS_COLORS } from '@/lib/config/workflow'
+import { Role, STATUS_LABELS, STATUSES, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUS_COLORS } from '@/lib/config/workflow'
 import PDFPreviewModal from './PDFPreviewModal'
 
 // --- (Helper Functions and other components are unchanged) ---
@@ -22,9 +22,11 @@ const formatFileSize = (bytes: number): string => {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 };
+
 const WorkflowHistoryModal = ({ workflow, onClose, userRole }: { workflow: RFAWorkflowStep[], onClose: () => void, userRole?: string }) => {
     const filteredWorkflow = useMemo(() => {
-        if (userRole && APPROVER_ROLES.includes(userRole)) {
+        // แก้ไขบรรทัดนี้: เพิ่ม as Role
+        if (userRole && APPROVER_ROLES.includes(userRole as Role)) {
             const statusesToHide = [STATUSES.PENDING_REVIEW, STATUSES.REVISION_REQUIRED];
             return workflow.filter(item => !statusesToHide.includes(item.status));
         }
@@ -386,10 +388,10 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const { role: userRole } = user || {};
   const { status, creatorRole } = document;
   const cmSystemType = document.site?.cmSystemType || 'INTERNAL';
-  const isSiteReviewing = userRole === 'Site Admin' && status === STATUSES.PENDING_REVIEW;
-  const isSiteFinalApproving = userRole === 'Site Admin' && status === STATUSES.PENDING_FINAL_APPROVAL;
-  const isSiteActingAsExternalCM = userRole === 'Site Admin' && status === STATUSES.PENDING_CM_APPROVAL && cmSystemType === 'EXTERNAL';
-  const isInternalCmApproving = userRole === 'CM' && status === STATUSES.PENDING_CM_APPROVAL && cmSystemType === 'INTERNAL';
+  const isSiteReviewing = REVIEWER_ROLES.includes(userRole as Role) && status === STATUSES.PENDING_REVIEW;
+  const isSiteFinalApproving = REVIEWER_ROLES.includes(userRole as Role) && status === STATUSES.PENDING_FINAL_APPROVAL;
+  const isSiteActingAsExternalCM = REVIEWER_ROLES.includes(userRole as Role) && status === STATUSES.PENDING_CM_APPROVAL && cmSystemType === 'EXTERNAL';
+  const isInternalCmApproving = APPROVER_ROLES.includes(userRole as Role) && status === STATUSES.PENDING_CM_APPROVAL && cmSystemType === 'INTERNAL';
   const overlayClasses = showOverlay ? 'bg-black bg-opacity-50' : ''  
  
   const isActionDisabled = isSubmitting || newFiles.filter(f => f.status === 'success').length === 0;

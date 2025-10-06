@@ -2,9 +2,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminDb, adminBucket, adminAuth } from '@/lib/firebase/admin';
 import { FieldValue } from 'firebase-admin/firestore';
-import { CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUSES } from '@/lib/config/workflow';
+import { ROLES, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUSES } from '@/lib/config/workflow'; // 👈 Import
 import { RFAFile } from '@/types/rfa';
 
+export const dynamic = 'force-dynamic';
 
 // --- GET Function (ฉบับแก้ไข) ---
 export async function GET(
@@ -124,8 +125,8 @@ export async function PUT(
         let newStatus = docData.status;
         let canPerformAction = false;
         
-        // --- 1. ตรวจสอบสิทธิ์ (Authorization) ---
-        if (userRole === 'Site Admin') {
+        // ✅ เปลี่ยนจากการเช็ค string ตรงๆ มาเป็นการใช้ Role Group
+        if (REVIEWER_ROLES.includes(userRole)) {
             if (docData.status === STATUSES.PENDING_REVIEW && (action === 'SEND_TO_CM' || action === 'REQUEST_REVISION')) {
                 canPerformAction = true;
             }
@@ -136,7 +137,7 @@ export async function PUT(
                 canPerformAction = true;
             }
         }
-        else if (userRole === 'CM' && docData.status === STATUSES.PENDING_CM_APPROVAL && cmSystemType === 'INTERNAL') {
+        else if (APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL && cmSystemType === 'INTERNAL') {
             if (['APPROVE', 'APPROVE_WITH_COMMENTS', 'REJECT'].includes(action)) {
                 canPerformAction = true;
             }

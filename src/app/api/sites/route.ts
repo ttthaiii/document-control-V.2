@@ -1,6 +1,9 @@
 // src/app/api/sites/route.ts (แก้ไขแล้ว)
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth, adminDb } from '@/lib/firebase/admin';
+import { ROLES } from '@/lib/config/workflow';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
@@ -22,7 +25,7 @@ export async function GET(request: NextRequest) {
     let siteSnapshots: FirebaseFirestore.DocumentSnapshot[];
 
     // --- 👇 จุดที่แก้ไขคือตรงนี้ครับ 👇 ---
-    if (userProfile.role === 'Admin') {
+    if (userProfile.role === ROLES.ADMIN) { 
       // 1. ถ้าเป็น Admin: ให้ดึงข้อมูลจาก collection 'sites' มาทั้งหมด
       const allSitesSnapshot = await adminDb.collection('sites').get();
       siteSnapshots = allSitesSnapshot.docs;

@@ -483,7 +483,8 @@ function RFAContent() {
 
 export default function RFAListPage() {
   return (
-    <Suspense fallback={<div>Loading...</div>}>
+    // 👇 2. ครอบ RFAContent ด้วย <Suspense>
+    <Suspense fallback={<div>Loading Page...</div>}>
       <RFAContent />
     </Suspense>
   )

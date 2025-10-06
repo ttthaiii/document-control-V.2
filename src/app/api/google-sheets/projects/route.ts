@@ -6,6 +6,8 @@ import { adminAuth, bimTrackingDb } from '@/lib/firebase/admin';
 // 🗑️ 2. ลบ import ของ googleSheetsService ที่ไม่ได้ใช้แล้ว
 // import { googleSheetsService } from '@/lib/google-sheets/service';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: NextRequest) {
   try {
     // --- ส่วนการยืนยันตัวตนยังคงเหมือนเดิม ---

@@ -6,6 +6,8 @@ import { adminDb, adminAuth } from '@/lib/firebase/admin'
 // 🗑️ 2. ลบ import ของ getAuth ที่ไม่ได้ใช้แล้ว
 // import { getAuth } from 'firebase-admin/auth'
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization')

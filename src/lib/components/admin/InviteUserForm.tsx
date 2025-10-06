@@ -2,10 +2,11 @@
 import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { useAuth } from '@/lib/auth/useAuth'; // <-- 1. เพิ่ม import useAuth
+import { ROLES, Role } from '@/lib/config/workflow';
 
 interface InviteUserFormData {
   email: string;
-  role: 'BIM' | 'Site Admin' | 'CM' | 'ME' | 'SN'; 
+  role: Role;
   sites: string[];
 }
 
@@ -125,11 +126,13 @@ export function InviteUserForm() {
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           >
             <option value="">-- เลือกตำแหน่งงาน --</option>
-            <option value="BIM">BIM</option>
-            <option value="Site Admin">Site Admin</option>
-            <option value="CM">CM</option>
-            <option value="ME">ME (Mechanical/Electrical Engineer)</option>
-            <option value="SN">SN (Sanitary Engineer)</option>            
+            <option value={ROLES.BIM}>BIM</option>
+            <option value={ROLES.SITE_ADMIN}>Site Admin</option>
+            <option value={ROLES.OE}>OE (Owner Engineer)</option>
+            <option value={ROLES.PE}>PE (Project Engineer)</option>
+            <option value={ROLES.CM}>CM</option>
+            <option value={ROLES.ME}>ME (Mechanical/Electrical Engineer)</option>
+            <option value={ROLES.SN}>SN (Sanitary Engineer)</option>          
           </select>
           {errors.role && (
             <p className="text-red-500 text-sm mt-1">{errors.role.message}</p>

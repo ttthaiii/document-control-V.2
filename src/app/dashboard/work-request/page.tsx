@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect,Suspense } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth/useAuth';
 import { AuthGuard } from '@/lib/components/shared/AuthGuard';
 import WorkRequestListTable from '@/components/work-request/WorkRequestListTable';
 import { WorkRequest } from '@/types/work-request';
 import { Plus, RefreshCw } from 'lucide-react';
+import { ROLES, REVIEWER_ROLES } from '@/lib/config/workflow';
 
 function WorkRequestDashboardContent() {
     const { user, firebaseUser } = useAuth();
@@ -52,7 +53,7 @@ function WorkRequestDashboardContent() {
         console.log('Clicked document:', doc.id);
     };
 
-    const canCreate = user && (user.role === 'Site Admin' || user.role === 'Admin');
+    const canCreate = user && (REVIEWER_ROLES.includes(user.role) || user.role === ROLES.ADMIN);
 
     return (
             <div className="max-w-7xl mx-auto">
@@ -89,9 +90,12 @@ function WorkRequestDashboardContent() {
 }
 
 export default function WorkRequestDashboardPage() {
-    return (
-        <AuthGuard requiredRoles={['Admin', 'Site Admin', 'BIM', 'ME', 'SN']}>
+  return (
+    <AuthGuard requiredRoles={[ROLES.ADMIN, ROLES.SITE_ADMIN, ROLES.BIM, ROLES.ME, ROLES.SN]}>
+        {/* 👇 2. ครอบด้วย Suspense */}
+        <Suspense fallback={<div className="text-center p-8">Loading Page...</div>}>
             <WorkRequestDashboardContent />
-        </AuthGuard>
-    );
+        </Suspense>
+    </AuthGuard>
+  );
 }
