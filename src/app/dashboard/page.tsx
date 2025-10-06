@@ -1,19 +1,21 @@
-// src/app/dashboard/page.tsx (โค้ดใหม่)
-
+// src/app/dashboard/page.tsx (แก้ไขแล้ว)
 'use client';
 
+import { Suspense } from 'react'; // 👈 1. Import Suspense
 import { AuthGuard } from '@/lib/components/shared/AuthGuard';
-import ApprovedDocumentLibrary from '@/components/rfa/ApprovedDocumentLibrary'; // 👈 1. Import component ใหม่
+import ApprovedDocumentLibrary from '@/components/rfa/ApprovedDocumentLibrary';
 
 function DashboardContent() {
-  // 2. ลบโค้ดเก่าออกทั้งหมด แล้วแทนที่ด้วย Component ใหม่
   return <ApprovedDocumentLibrary />;
 }
 
 export default function DashboardPage() {
   return (
     <AuthGuard>
-      <DashboardContent />
+      {/* 👇 2. ครอบ DashboardContent ด้วย Suspense */}
+      <Suspense fallback={<div className="p-8 text-center">Loading Dashboard...</div>}>
+        <DashboardContent />
+      </Suspense>
     </AuthGuard>
   );
 }

@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { AcceptInvitationForm } from '@/lib/components/auth/AcceptInvitationForm';
 
 interface PageProps {
@@ -26,7 +27,9 @@ export default function AcceptInvitationPage({ searchParams }: PageProps) {
 
   return (
     <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-      <AcceptInvitationForm token={token} />
+      <Suspense fallback={<div>Loading...</div>}>
+        <AcceptInvitationForm token={token} />
+      </Suspense>
     </div>
   );
 }

@@ -1,3 +1,4 @@
+// src/app/rfa/[id]/page.tsx (แก้ไขสมบูรณ์)
 'use client'
 
 import { useEffect, useState } from 'react'
@@ -5,54 +6,71 @@ import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from '@/lib/firebase/client'
 import { Loader2 } from 'lucide-react'
+import { useAuth } from '@/lib/auth/useAuth' // 👈 1. Import useAuth
 
 export default function RFADirectLinkHandlerPage() {
   const router = useRouter()
   const params = useParams()
   const searchParams = useSearchParams()
   const [error, setError] = useState<string | null>(null)
+  
+  const { user, loading: authLoading } = useAuth() // 👈 2. เรียกใช้ useAuth เพื่อเช็คสถานะ
 
   useEffect(() => {
-    const docId = params.id as string
-    if (!docId) {
-      setError("ไม่พบ ID ของเอกสารใน URL")
-      return
+    // ถ้ากำลังรอสถานะ login ให้แสดงหน้า loading ไปก่อน
+    if (authLoading) {
+      return; 
     }
 
+    const docId = params.id as string;
+
+    // --- 👇 [แก้ไข] Logic การทำงานใหม่ทั้งหมด ---
+    
+    // 3. เมื่อเช็คสถานะเสร็จแล้ว และพบว่า "ยังไม่ได้ login"
+    if (!user) {
+      // สร้าง URL ปลายทาง (เอกสารที่พยายามจะเปิด)
+      const destination = `/rfa/${docId}`;
+      // ส่งไปหน้า login พร้อมบอกว่า login เสร็จแล้วให้กลับมาที่นี่
+      router.replace(`/login?redirect=${encodeURIComponent(destination)}`);
+      return; // หยุดการทำงานทันที
+    }
+
+    // 4. ถ้า "login อยู่แล้ว" ให้ทำงานตามปกติ
     const fetchTypeAndRedirect = async () => {
+      if (!docId) {
+        setError("ไม่พบ ID ของเอกสารใน URL");
+        return;
+      }
       try {
-        // 1. ดึงข้อมูลเอกสารจาก Firestore เพื่อหา rfaType
-        const docRef = doc(db, 'rfaDocuments', docId)
-        const docSnap = await getDoc(docRef)
+        const docRef = doc(db, 'rfaDocuments', docId);
+        const docSnap = await getDoc(docRef);
 
         if (docSnap.exists()) {
-          const docData = docSnap.data()
-          const rfaType = docData.rfaType // เช่น "RFA-MAT"
+          const docData = docSnap.data();
+          const rfaType = docData.rfaType;
 
           if (rfaType) {
-            // 2. สร้าง URL ใหม่ที่สมบูรณ์ โดยมีทั้ง type และ docId
-            const currentQuery = new URLSearchParams(searchParams.toString())
-            currentQuery.set('type', rfaType)
-            currentQuery.set('docId', docId)
-
-            // 3. Redirect ไปยังหน้า Dashboard ที่ถูกต้อง
-            router.replace(`/dashboard/rfa?${currentQuery.toString()}`)
+            const currentQuery = new URLSearchParams(searchParams.toString());
+            currentQuery.set('type', rfaType);
+            currentQuery.set('docId', docId);
+            router.replace(`/dashboard/rfa?${currentQuery.toString()}`);
           } else {
-            setError("ไม่สามารถระบุประเภทของเอกสารได้")
+            setError("ไม่สามารถระบุประเภทของเอกสารได้");
           }
         } else {
-          setError("ไม่พบเอกสารที่คุณต้องการ")
+          setError("ไม่พบเอกสารที่คุณต้องการ");
         }
       } catch (err) {
-        console.error("Redirect Error:", err)
-        setError("เกิดข้อผิดพลาดในการเปิดเอกสาร")
+        console.error("Redirect Error:", err);
+        setError("เกิดข้อผิดพลาดในการเปิดเอกสาร");
       }
-    }
+    };
 
-    fetchTypeAndRedirect()
-  }, [params.id, router, searchParams])
+    fetchTypeAndRedirect();
+    
+  }, [params.id, router, searchParams, user, authLoading]); // 👈 5. เพิ่ม dependency
 
-  // ระหว่างที่กำลังดึงข้อมูลและ Redirect ให้แสดงหน้า Loading
+  // UI ส่วน loading/error ไม่ต้องแก้ไข
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="text-center">
@@ -75,5 +93,5 @@ export default function RFADirectLinkHandlerPage() {
         )}
       </div>
     </div>
-  )
+  );
 }

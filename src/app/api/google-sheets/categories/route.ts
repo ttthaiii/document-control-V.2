@@ -2,6 +2,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth, bimTrackingDb } from '@/lib/firebase/admin';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: NextRequest) {
   try {
     // ... (ส่วนการยืนยันตัวตนเหมือนเดิม) ...

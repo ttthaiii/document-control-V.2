@@ -5,6 +5,8 @@ import Layout from '@/components/layout/Layout';
 import CreateWorkRequestForm from '@/components/work-request/CreateWorkRequestForm';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth/useAuth';
+import { ROLES } from '@/lib/config/workflow';
+import { Suspense } from 'react';
 
 function WorkRequestCreateContent() {
   const router = useRouter();
@@ -53,8 +55,11 @@ function WorkRequestCreateContent() {
 
 export default function WorkRequestCreatePage() {
   return (
-    <AuthGuard requiredRoles={['Site Admin', 'Admin']}>
-      <WorkRequestCreateContent />
+    <AuthGuard requiredRoles={[ROLES.SITE_ADMIN, ROLES.ADMIN]}>
+      {/* 👇 2. ครอบด้วย Suspense */}
+      <Suspense fallback={<div className="text-center p-8">Loading Form...</div>}>
+        <WorkRequestCreateContent />
+      </Suspense>
     </AuthGuard>
   );
 }

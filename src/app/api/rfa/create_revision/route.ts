@@ -1,18 +1,16 @@
-// src/app/api/rfa/create_revision/route.ts (แก้ไขแล้ว)
+// src/app/api/rfa/create_revision/route.ts (แก้ไขสมบูรณ์)
 import { NextResponse } from "next/server";
-// 🔽 1. Import adminAuth เข้ามาด้วย 🔽
 import { adminDb, adminBucket, adminAuth } from "@/lib/firebase/admin";
-// 🗑️ 2. ลบ getAuth ที่ไม่ได้ใช้แล้วออกไป 🗑️
-// import { getAuth } from "firebase-admin/auth";
-import { FieldValue, Transaction } from 'firebase-admin/firestore';
+import { FieldValue } from 'firebase-admin/firestore';
 import { STATUSES } from '@/lib/config/workflow';
+
+export const dynamic = 'force-dynamic';
 
 async function verifyIdTokenFromHeader(req: Request): Promise<string | null> {
     const authHeader = req.headers.get("authorization") || "";
     const match = authHeader.match(/^Bearer (.+)$/i);
     if (!match) return null;
     try {
-        // 🔽 3. เปลี่ยนไปใช้ adminAuth ที่เรา import เข้ามา 🔽
         const decoded = await adminAuth.verifyIdToken(match[1]);
         return decoded.uid;
     } catch {
@@ -27,16 +25,21 @@ export async function POST(req: Request) {
     }
 
     try {
-        const { originalDocId, uploadedFiles } = await req.json();
+        // --- 🔽 [แก้ไขจุดที่ 1] 🔽 ---
+        // รับ verifiedTaskId เพิ่มจาก request body
+        const { originalDocId, uploadedFiles, verifiedTaskId } = await req.json();
 
-        if (!originalDocId || !uploadedFiles || uploadedFiles.length === 0) {
-            return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
-        }
-        
+        // ตรวจสอบ `verifiedTaskId` เพิ่มเติม (สำหรับ Role ที่ไม่ใช่ Manual Flow)
         const userDoc = await adminDb.collection('users').doc(uid).get();
         const userData = userDoc.data();
         if (!userData) return NextResponse.json({ error: 'User not found' }, { status: 403 });
 
+        const isManualFlow = userData.role === 'ME' || userData.role === 'SN';
+
+        if (!originalDocId || !uploadedFiles || uploadedFiles.length === 0 || (!isManualFlow && !verifiedTaskId)) {
+            return NextResponse.json({ error: "Missing required fields (originalDocId, uploadedFiles, and verifiedTaskId for non-manual flow)" }, { status: 400 });
+        }
+        
         const originalRfaRef = adminDb.collection("rfaDocuments").doc(originalDocId);
         
         await adminDb.runTransaction(async (transaction) => {
@@ -47,6 +50,16 @@ export async function POST(req: Request) {
 
             const originalData = originalDoc.data()!;
             
+            // --- 🔽 [แก้ไขจุดที่ 2] 🔽 ---
+            // สร้าง object taskData ใหม่ โดยใช้ verifiedTaskId ที่ได้รับมา
+            // ถ้าเป็น Manual Flow จะไม่มี verifiedTaskId ก็ให้ใช้ของเดิมไป
+            const newTaskData = verifiedTaskId ? {
+                ...originalData.taskData,
+                taskUid: verifiedTaskId,
+            } : originalData.taskData;
+            // --- 👆 [สิ้นสุดการแก้ไข] 👆 ---
+
+
             const newRevisionNumber = (originalData.revisionNumber || 0) + 1;
             const newDocumentNumber = originalData.documentNumber;
 
@@ -73,6 +86,7 @@ export async function POST(req: Request) {
 
             transaction.set(newRfaRef, {
                 ...originalData,
+                taskData: newTaskData, // <-- ใช้ taskData ที่อัปเดตแล้ว
                 revisionNumber: newRevisionNumber,
                 documentNumber: newDocumentNumber,
                 status: newStatus,

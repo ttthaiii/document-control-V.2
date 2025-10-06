@@ -4,6 +4,8 @@ import { headers } from 'next/headers'
 import { adminAuth, adminDb } from '@/lib/firebase/admin'
 import { STATUSES } from '@/lib/config/workflow';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) { // Changed to accept request object
   try {
     const headersList = headers()

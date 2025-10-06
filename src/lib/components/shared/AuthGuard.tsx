@@ -4,6 +4,7 @@
 import { useAuth } from '@/lib/auth/useAuth'
 import { useRouter } from 'next/navigation'
 import { useEffect, ReactNode } from 'react'
+import { ROLES } from '@/lib/config/workflow';
 
 const SkeletonLoader = () => (
   <div className="min-h-screen bg-gray-50">
@@ -188,7 +189,7 @@ export function AuthGuard({
 // Specialized AuthGuards for common use cases
 export function AdminOnly({ children }: { children: ReactNode }) {
   return (
-    <AuthGuard requiredRoles={['Admin']}>
+    <AuthGuard requiredRoles={[ROLES.ADMIN]}>
       {children}
     </AuthGuard>
   )
@@ -196,7 +197,7 @@ export function AdminOnly({ children }: { children: ReactNode }) {
 
 export function BIMOnly({ children }: { children: ReactNode }) {
   return (
-    <AuthGuard requiredRoles={['BIM']}>
+    <AuthGuard requiredRoles={[ROLES.BIM]}>
       {children}
     </AuthGuard>
   )
@@ -204,7 +205,7 @@ export function BIMOnly({ children }: { children: ReactNode }) {
 
 export function SiteAdminOrAdmin({ children }: { children: ReactNode }) {
   return (
-    <AuthGuard requiredRoles={['Site Admin', 'Admin']}>
+    <AuthGuard requiredRoles={[ROLES.SITE_ADMIN, ROLES.ADMIN]}>
       {children}
     </AuthGuard>
   )
@@ -212,7 +213,7 @@ export function SiteAdminOrAdmin({ children }: { children: ReactNode }) {
 
 export function CMOrAdmin({ children }: { children: ReactNode }) {
   return (
-    <AuthGuard requiredRoles={['CM', 'Admin']}>
+    <AuthGuard requiredRoles={[ROLES.CM, ROLES.ADMIN]}>
       {children}
     </AuthGuard>
   )

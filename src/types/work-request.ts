@@ -1,6 +1,7 @@
 // src/types/work-request.ts
 
 import { RFAFile, RFASite, RFAUserInfo } from './rfa';
+import { Role } from '@/lib/config/workflow';
 
 /**
  * ระดับความสำคัญของงาน
@@ -30,7 +31,7 @@ export interface WorkRequestWorkflowStep {
   status: WorkRequestStatus;
   userId: string;
   userName: string;
-  role: string;
+  role: Role;
   timestamp: string; // ISO Date String
   comments?: string;
   files?: RFAFile[]; // ไฟล์ที่แนบในขั้นตอนนี้ (ถ้ามี)

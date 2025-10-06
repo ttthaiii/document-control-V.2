@@ -4,6 +4,8 @@ import { useRouter } from 'next/navigation';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '@/lib/firebase/client';
 
+export const dynamic = 'force-dynamic';
+
 export default function HomePage() {
   const router = useRouter();
 

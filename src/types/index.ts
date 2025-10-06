@@ -1,10 +1,11 @@
 // Core types for ttsdoc-v2
+import { Role } from '@/lib/config/workflow';
 
 export interface User {
   id: string;
   email: string;
   name?: string;
-  role: 'BIM' | 'Site Admin' | 'CM' | 'Admin' | 'ME' | 'SN';
+  role: Role;
   sites: string[];
   status: 'ACTIVE' | 'PENDING_FIRST_LOGIN' | 'DISABLED';
   mustChangePassword?: boolean;
@@ -15,7 +16,7 @@ export interface User {
 export interface Invitation {
   id: string;
   email: string;
-  role: 'BIM' | 'Site Admin' | 'CM';
+  role: Role;
   sites: string[];
   status: 'PENDING' | 'ACCEPTED' | 'EXPIRED';
   createdAt: Date;
@@ -33,6 +34,6 @@ export interface Site {
 
 export interface SiteMember {
   userId: string;
-  role: 'BIM' | 'Site Admin' | 'CM';
+  role: Role;
   joinedAt: Date;
 }
