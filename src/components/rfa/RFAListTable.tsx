@@ -43,7 +43,7 @@ const convertToDate = (date: any): Date | null => {
 
 // Type สำหรับ state การเรียงลำดับ
 type SortDirection = 'ascending' | 'descending';
-type SortKey = keyof RFADocument | 'site.name' | 'category.categoryCode' | 'responsibleParty';
+type SortKey = keyof RFADocument | 'site.name' | 'category.categoryCode' | 'responsibleParty' | 'pendingDays';
 
 
 export default function RFAListTable({
@@ -94,6 +94,18 @@ export default function RFAListTable({
     }
   }
   
+  const calculatePendingDays = (document: RFADocument) => {
+    const lastUpdate = convertToDate(document.updatedAt);
+    if (!lastUpdate) return 0;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const updateDate = new Date(lastUpdate);
+    updateDate.setHours(0, 0, 0, 0);
+    const diffTime = today.getTime() - updateDate.getTime();
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    return Math.max(0, diffDays);
+  };
+
   // ✅ [CHANGE 1] เพิ่ม useMemo สำหรับเรียงลำดับข้อมูลก่อนแสดงผล
   const sortedDocuments = useMemo(() => {
     let sortableDocuments = [...documents];
@@ -104,7 +116,13 @@ export default function RFAListTable({
         let aValue: any;
         let bValue: any;
 
-        if (sortConfig.key === 'responsibleParty') {
+        // --- 👇 2. เพิ่ม Logic การเรียงลำดับสำหรับ pendingDays ---
+        if (sortConfig.key === 'pendingDays') {
+            const aIsActive = ACTIVE_STATUSES_FOR_PENDING_DAYS.includes(a.status);
+            const bIsActive = ACTIVE_STATUSES_FOR_PENDING_DAYS.includes(b.status);
+            aValue = aIsActive ? calculatePendingDays(a) : -1; // ตอนนี้จะเรียกใช้งานได้แล้ว
+            bValue = bIsActive ? calculatePendingDays(b) : -1; // ตอนนี้จะเรียกใช้งานได้แล้ว
+        } else if (sortConfig.key === 'responsibleParty') {
             aValue = getResponsibleParty(a).name;
             bValue = getResponsibleParty(b).name;
         } else if (sortConfig.key === 'updatedAt') {
@@ -177,17 +195,6 @@ export default function RFAListTable({
     })
   }
 
-  const calculatePendingDays = (document: RFADocument) => {
-    const lastUpdate = convertToDate(document.updatedAt);
-    if (!lastUpdate) return 0;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const updateDate = new Date(lastUpdate);
-    updateDate.setHours(0, 0, 0, 0);
-    const diffTime = today.getTime() - updateDate.getTime();
-    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-    return Math.max(0, diffDays);
-  };
 
   // Mobile View (Card)
   if (isMobile) {
@@ -284,7 +291,12 @@ export default function RFAListTable({
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">เอกสาร</th>
               <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Rev.</th>
-              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">สถานะ</th>
+              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                 <button onClick={() => requestSort('pendingDays')} className="flex items-center justify-center w-full">
+                    สถานะ
+                    <SortIcon columnKey='pendingDays' />
+                 </button>
+              </th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                  <button onClick={() => requestSort('responsibleParty')} className="flex items-center justify-center w-full">
                     ผู้รับผิดชอบ

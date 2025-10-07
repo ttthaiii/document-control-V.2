@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
+import { useNotification } from '@/lib/context/NotificationContext';
 
 interface AcceptInvitationFormProps {
   token: string;
@@ -21,6 +22,7 @@ export function AcceptInvitationForm({ token }: AcceptInvitationFormProps) {
   const { register, handleSubmit, watch, formState: { errors } } = useForm<AcceptFormData>();
   
   const password = watch('password');
+  const { showNotification } = useNotification();
 
   useEffect(() => {
     // Fetch invitation details
@@ -62,7 +64,11 @@ export function AcceptInvitationForm({ token }: AcceptInvitationFormProps) {
 
       if (result.success) {
         // Success! Redirect to login
-        alert('✅ บัญชีผู้ใช้สร้างเสร็จแล้ว! กรุณาเข้าสู่ระบบ');
+        showNotification(
+          'success', 
+          'สร้างบัญชีสำเร็จ!', 
+          'กรุณาเข้าสู่ระบบด้วยอีเมลและรหัสผ่านที่คุณตั้งไว้'
+        );
         router.push('/login');
       } else {
         setError(result.error || 'Failed to create account');

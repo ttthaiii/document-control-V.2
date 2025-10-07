@@ -80,6 +80,21 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Missing required fields. Required: rfaType, siteId, categoryId, title, uploadedFiles." }, { status: 400 });
     }
 
+    if (documentNumber) {
+        const existingDocQuery = adminDb.collection('rfaDocuments')
+            .where('siteId', '==', siteId)
+            .where('documentNumber', '==', documentNumber.trim());
+        
+        const existingDocSnapshot = await existingDocQuery.get();
+
+        if (!existingDocSnapshot.empty) {
+            return NextResponse.json(
+                { success: false, error: `เลขที่เอกสาร "${documentNumber.trim()}" นี้ถูกใช้ไปแล้วในโครงการนี้` },
+                { status: 409 } // 409 Conflict เป็น HTTP Status ที่เหมาะสม
+            );
+        }
+    }
+    
     const runningNumber = await adminDb.runTransaction(async (transaction) => {
       const siteRef = adminDb.collection('sites').doc(siteId);
       const siteDoc = await transaction.get(siteRef);

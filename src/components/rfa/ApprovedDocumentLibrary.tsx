@@ -52,6 +52,12 @@ export default function ApprovedDocumentLibrary() {
   const [error, setError] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<RFAFile | null>(null);
 
+  const resetFilters = () => {
+    setSearchTerm('');
+    setSelectedSite('ALL');
+    setSelectedCategory('ALL');
+  };
+
   useEffect(() => {
     setHasMounted(true);
   }, []);
@@ -150,27 +156,36 @@ export default function ApprovedDocumentLibrary() {
           <h2 className="text-xl font-bold text-gray-800 mb-4">
             📚 คลังเอกสารอนุมัติ (Approved Document Library)
           </h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="relative">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+            <div className="relative md:col-span-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
               <input type="text" placeholder="ค้นหา..." className="w-full pl-10 pr-4 py-2 border rounded-lg"
                 value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
             </div>
-            <div className="relative">
+            <div className="relative md:col-span-1">
                <Building className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-               <select className="w-full pl-10 pr-4 py-2 border rounded-lg appearance-none"
+               <select className="w-full pl-10 pr-4 py-2 border rounded-lg appearance-none truncate"
                  value={selectedSite} onChange={(e) => setSelectedSite(e.target.value)}>
                   <option value="ALL">ทุกโครงการ</option>
                   {sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
                </select>
             </div>
-            <div className="relative">
+            <div className="relative md:col-span-1">
                <Tag className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
                <select className="w-full pl-10 pr-4 py-2 border rounded-lg appearance-none"
                   value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)}>
                   <option value="ALL">ทุกหมวดงาน</option>
                    {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.categoryCode}</option>)}
                </select>
+            </div>
+            {/* เพิ่มปุ่ม Reset */}
+            <div className="md:col-span-1">
+                <button 
+                    onClick={resetFilters}
+                    className="w-full px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors"
+                >
+                    รีเซ็ต
+                </button>
             </div>
           </div>
           {error && <p className="text-red-500 text-sm mt-2">{error}</p>}

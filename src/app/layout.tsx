@@ -1,7 +1,9 @@
+// src/app/layout.tsx
 import { Inter } from 'next/font/google'
 import './globals.css'
 import { AuthProvider } from '@/lib/auth/useAuth'
 import { LoadingProvider } from '@/lib/context/LoadingContext'
+import { NotificationProvider } from '@/lib/context/NotificationContext' //  <-- 1. Import เข้ามา
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -19,8 +21,10 @@ export default function RootLayout({
     <html lang="th">
       <body>
         <AuthProvider>
-          <LoadingProvider> {/* 👈 2. นำไปครอบ children */}
-            {children}
+          <LoadingProvider>
+            <NotificationProvider> {/* <-- 2. นำไปครอบ children */}
+              {children}
+            </NotificationProvider>
           </LoadingProvider>
         </AuthProvider>
       </body>

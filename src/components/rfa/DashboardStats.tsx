@@ -1,37 +1,29 @@
+// src/components/rfa/DashboardStats.tsx (แก้ไขใหม่ทั้งหมด)
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { useAuth } from '@/lib/auth/useAuth';
-import { STATUSES, STATUS_LABELS, STATUS_COLORS } from '@/lib/config/workflow'; // Import STATUS_COLORS
-import { Loader2 } from 'lucide-react';
+import { STATUSES, STATUS_LABELS, STATUS_COLORS } from '@/lib/config/workflow';
 import { RFADocument } from '@/types/rfa';
 
-// ... (Interface StatsData, Category ไม่มีการเปลี่ยนแปลง) ...
-interface StatsData {
-  responsibleParty: { [key: string]: number };
-  categories: { [key: string]: number };
-}
 interface Category {
   id: string;
   categoryCode: string;
   categoryName: string;
 }
 
-
-// ✅✅✅ [FIX 1] อัปเดต Interface ของ Props ทั้งหมด ✅✅✅
 interface DashboardStatsProps {
   allDocuments: RFADocument[]; 
-  onChartFilter: (filterKey: string, value: string) => void; // ✅ [REVERT] value เป็น string เท่านั้น
+  onChartFilter: (filterKey: string, value: string) => void;
   activeFilters: { 
     rfaType: string; 
-    status: string; // ✅ [REVERT] status เป็น string
+    status: string;
     categoryId: string; 
   }; 
   categories: Category[];
 }
 
-// ... (Component CustomTooltip, const CATEGORY_COLORS, function getColorForString ไม่มีการเปลี่ยนแปลง) ...
+// --- Helper Components (ไม่มีการเปลี่ยนแปลง) ---
 const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
       const data = payload[0];
@@ -58,7 +50,6 @@ const getColorForString = (str: string): string => {
 
 
 const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFilter, activeFilters, categories }) => {
-  // ... (ส่วน state, useMemo ของ stats, categoryData, displayData ไม่มีการเปลี่ยนแปลง) ...
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -67,56 +58,52 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
     window.addEventListener('resize', checkIsMobile);
     return () => window.removeEventListener('resize', checkIsMobile);
   }, []);
-  
-  const stats = useMemo<StatsData | null>(() => {
-    const docsForStats = allDocuments; 
-    const newStats: StatsData = {
-      responsibleParty: { BIM: 0, SITE: 0, CM: 0, APPROVED: 0, REJECTED: 0 },
-      categories: {},
-    };
-    for (const doc of docsForStats) {
-      switch (doc.status) {
-        case STATUSES.PENDING_REVIEW:
-        case STATUSES.PENDING_FINAL_APPROVAL:
-            newStats.responsibleParty.SITE += 1;
-            break;
-        case STATUSES.PENDING_CM_APPROVAL:
-            newStats.responsibleParty.CM += 1;
-            break;
-        case STATUSES.REVISION_REQUIRED:
-        case STATUSES.APPROVED_REVISION_REQUIRED:
-            newStats.responsibleParty.BIM += 1;
-            break;
-        case STATUSES.REJECTED:
-             newStats.responsibleParty.REJECTED += 1;
-            break;
-        case STATUSES.APPROVED:
-        case STATUSES.APPROVED_WITH_COMMENTS:
-            newStats.responsibleParty.APPROVED += 1;
-            break;
-      }
+
+  // --- 👇 [แก้ไข] Logic การนับข้อมูลสถานะใหม่ทั้งหมด ---
+  const statsByStatus = useMemo(() => {
+    const statusCounts: { [key: string]: number } = {};
+    const categoryCounts: { [key: string]: number } = {};
+    
+    for (const doc of allDocuments) {
+      // นับทุกสถานะแยกกัน
+      statusCounts[doc.status] = (statusCounts[doc.status] || 0) + 1;
+      
       const categoryId = doc.category?.id || 'N/A';
       if (categoryId !== 'N/A') {
-          newStats.categories[categoryId] = (newStats.categories[categoryId] || 0) + 1;
+          categoryCounts[categoryId] = (categoryCounts[categoryId] || 0) + 1;
       }
     }
-    return newStats;
+    return { statusCounts, categoryCounts };
   }, [allDocuments]);
 
+  // --- 👇 [แก้ไข] Logic การสร้างข้อมูลสำหรับ Chart สถานะใหม่ทั้งหมด ---
   const responsiblePartyData = useMemo(() => {
-    if (!stats) return [];
-    return [
-      { name: 'รอ SITE ตรวจสอบ', value: stats.responsibleParty.SITE, statusKey: STATUSES.PENDING_REVIEW, color: STATUS_COLORS[STATUSES.PENDING_REVIEW] },
-      { name: 'รอ CM อนุมัติ', value: stats.responsibleParty.CM, statusKey: STATUSES.PENDING_CM_APPROVAL, color: STATUS_COLORS[STATUSES.PENDING_CM_APPROVAL] },
-      { name: 'รอ BIM แก้ไข', value: stats.responsibleParty.BIM, statusKey: STATUSES.REVISION_REQUIRED, color: STATUS_COLORS[STATUSES.REVISION_REQUIRED] },
-      { name: 'อนุมัติแล้ว', value: stats.responsibleParty.APPROVED, statusKey: STATUSES.APPROVED, color: STATUS_COLORS[STATUSES.APPROVED] },
-      { name: 'ไม่อนุมัติ', value: stats.responsibleParty.REJECTED, statusKey: STATUSES.REJECTED, color: STATUS_COLORS[STATUSES.REJECTED] }
-    ].filter(item => item.value > 0);
-  }, [stats]);
+    if (!statsByStatus) return [];
+    
+    // แปลงข้อมูลที่นับได้ ให้เป็นรูปแบบที่ Chart ใช้งานได้
+    return Object.entries(statsByStatus.statusCounts)
+      .map(([statusKey, value]) => {
+        // ดึงชื่อและสีมาจาก workflow.ts
+        const label = STATUS_LABELS[statusKey];
+        const color = STATUS_COLORS[statusKey];
+        
+        if (!label || !color) return null; // ไม่แสดงสถานะที่ไม่มีการตั้งค่า
 
+        return {
+          name: label,
+          value: value,
+          statusKey: statusKey, // Key ที่จะใช้ filter คือ key ของสถานะจริงๆ
+          color: color,
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null && item.value > 0);
+  }, [statsByStatus]);
+
+
+  // --- Logic ส่วน Category ไม่มีการเปลี่ยนแปลง ---
   const categoryData = useMemo(() => {
-    if (!stats) return [];
-    return Object.entries(stats.categories)
+    if (!statsByStatus) return [];
+    return Object.entries(statsByStatus.categoryCounts)
       .map(([categoryId, value]) => {
         const categoryDetails = categories.find(c => c.id === categoryId);
         return {
@@ -127,8 +114,9 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
         };
       })
       .filter(item => item.value > 0);
-  }, [stats, categories]);
+  }, [statsByStatus, categories]);
 
+  // --- Logic ส่วนที่เหลือไม่มีการเปลี่ยนแปลง ---
   const { displayData: displayResponsibleData, total: displayTotalResponsible } = useMemo(() => {
     const total = responsiblePartyData.reduce((sum, item) => sum + item.value, 0);
     return { displayData: responsiblePartyData, total };
@@ -139,23 +127,17 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
     return { displayData: categoryData, total };
   }, [categoryData]);
 
+  if (allDocuments.length === 0) { return <div className="text-center p-8 text-gray-500">ไม่มีข้อมูลสำหรับแสดงผล</div>; }
 
-  if (!stats) { return <div className="text-center p-8 text-gray-500">ไม่มีข้อมูลสำหรับแสดงผล</div>; }
-
-  // ✅✅✅ [FIX 2] แก้ไข Logic ของ Click Handler ทั้งหมด ✅✅✅
   const handleResponsibleClick = (data: any) => {
       const statusKey = data.payload?.statusKey || data.statusKey;
       if (!statusKey) return;
-      
-      // ถ้าคลิกที่สถานะที่เลือกไว้อยู่แล้ว ให้ยกเลิก Filter, ถ้าไม่ ให้เลือกสถานะนั้น
       onChartFilter('status', activeFilters.status === statusKey ? 'ALL' : statusKey);
   };
   
   const handleCategoryClick = (data: any) => {
-    // ตรวจสอบ `id` จาก `data.payload` (สำหรับ Legend) ก่อน, ถ้าไม่มีให้ใช้ `data.id` (สำหรับ Slice)
     const categoryId = data.payload?.id || data.id;
-    if (!categoryId) return; // เพิ่มการตรวจสอบเพื่อความปลอดภัย
-
+    if (!categoryId) return;
     onChartFilter('categoryId', activeFilters.categoryId === categoryId ? 'ALL' : categoryId);
   };
   
@@ -180,7 +162,6 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
                     onClick={handleResponsibleClick}
                     className="cursor-pointer"
                   >
-                    {/* ✅✅✅ [FIX 3] แก้ไข Logic การแสดง Opacity ✅✅✅ */}
                     {displayResponsibleData.map((entry) => (
                       <Cell 
                         key={`cell-${entry.name}`} 
@@ -190,7 +171,6 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
                     ))}
                   </Pie>
                   <Tooltip content={<CustomTooltip />} />
-                  {/* ✅✅✅ [FIX 4] ทำให้ Legend คลิกได้และเป็นวงกลม ✅✅✅ */}
                   <Legend 
                     iconType="circle"
                     onClick={handleResponsibleClick}

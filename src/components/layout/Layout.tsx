@@ -58,12 +58,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         <Sidebar isOpen={isSidebarOpen} onToggle={toggleSidebar} />
 
         {/* ❌ 1. ลบ pt-16 ออกจาก <main> */}
-        <main 
-          className={`
-            relative flex-1 transition-all duration-300 ease-in-out
-            ${isSidebarOpen ? 'lg:ml-64' : 'lg:ml-0'}
-          `}
-        >
+          <main 
+            className={`
+              relative flex-1 transition-all duration-300 ease-in-out
+              ${isSidebarOpen ? 'lg:ml-64' : 'lg:ml-0'}
+              overflow-x-hidden //  <-- เพิ่มบรรทัดนี้เข้าไป
+            `}
+          >
           {/* Spinner จะแสดงผลเต็มพื้นที่ <main> ที่ไม่มี padding แล้ว */}
           {isLoading && <GlobalSpinner />}
           

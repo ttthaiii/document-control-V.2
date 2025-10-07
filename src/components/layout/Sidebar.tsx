@@ -26,15 +26,43 @@ interface SidebarProps {
   onToggle: () => void
 }
 
-// 👇 แยก Component ที่ใช้ useSearchParams ออกมา
+// Interface สำหรับ Site ที่จะดึงข้อมูลมา
+interface Site {
+  id: string;
+  name: string;
+}
+
 function SidebarContent({ isOpen, onToggle }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
-  const searchParams = useSearchParams() // ✅ ใช้ที่นี่ได้เพราะถูก wrap ด้วย Suspense
-  const { user, logout } = useAuth()
+  const searchParams = useSearchParams()
+  const { user, logout, firebaseUser } = useAuth() // <-- 1. ดึง firebaseUser มาด้วย
   const { showLoader } = useLoading()
 
   const [showRfaDropdown, setShowRfaDropdown] = useState(false)
+  const [sites, setSites] = useState<Site[]>([]); // <-- 2. เพิ่ม State สำหรับเก็บข้อมูล Sites
+
+  // --- 👇 3. เพิ่ม useEffect เพื่อดึงข้อมูล Sites จาก API ---
+  useEffect(() => {
+    const fetchSites = async () => {
+      if (!firebaseUser) return;
+      try {
+        const token = await firebaseUser.getIdToken();
+        const response = await fetch('/api/sites', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+        if (data.success) {
+          setSites(data.sites || []);
+        }
+      } catch (error) {
+        console.error("Sidebar: Failed to fetch sites", error);
+      }
+    };
+    fetchSites();
+  }, [firebaseUser]);
+  // --- 👆 สิ้นสุดส่วนที่เพิ่ม ---
+
   
   const isRFAAuthorized = () => {
     if (!user) return false;
@@ -47,13 +75,16 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
     return authorizedRoles.includes(user.role);
   }
 
+  // --- 👇 4. แก้ไข useMemo ให้ดึงชื่อจริงๆ มาแสดง ---
   const userSites = useMemo(() => {
-    if (!user?.sites || user.sites.length === 0) return []
-    return user.sites.map((siteId: string, index: number) => ({
-      id: siteId,
-      name: `Site ${index + 1}`
-    }))
-  }, [user?.sites])
+    if (!user?.sites || sites.length === 0) {
+      return [];
+    }
+    // กรองเอาเฉพาะ Site ที่ user มีสิทธิ์ และ map ให้มี id และ name ที่ถูกต้อง
+    return sites.filter(site => user.sites!.includes(site.id));
+  }, [user?.sites, sites]);
+  // --- 👆 สิ้นสุดส่วนที่แก้ไข ---
+
 
   useEffect(() => {
     if (pathname.includes('/rfa') || pathname.includes('/dashboard/rfa')) {
@@ -121,14 +152,23 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
             <p className="text-orange-100 text-sm">
               Role: {user.role}
             </p>
+            {/* ส่วนนี้จะแสดงผลถูกต้องโดยอัตโนมัติ */}
             {userSites.length > 0 && (
-              <p className="text-orange-100 text-xs truncate">
-                Site: {userSites.map(site => site.name).join(', ')}
-              </p>
+              <div>
+                <p className="text-orange-100 text-xs">Site:</p>
+                <div className="pl-2">
+                  {userSites.map(site => (
+                    <p key={site.id} className="text-orange-100 text-xs truncate" title={site.name}>
+                      - {site.name}
+                    </p>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         </div>
 
+        {/* ... ส่วนที่เหลือของ JSX ไม่มีการเปลี่ยนแปลง ... */}
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
           
           <Link
@@ -302,7 +342,6 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
   )
 }
 
-// 👇 Wrapper Component ที่ wrap ด้วย Suspense
 const Sidebar: React.FC<SidebarProps> = (props) => {
   return (
     <Suspense fallback={<div className="w-64 bg-gray-100 h-screen" />}>
