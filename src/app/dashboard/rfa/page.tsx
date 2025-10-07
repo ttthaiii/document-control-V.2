@@ -104,7 +104,11 @@ function RFAContent() {
         setSelectedDocumentId(null);
         const currentQuery = new URLSearchParams(window.location.search);
         currentQuery.delete('docId');
-        router.push(`/dashboard/rfa?${currentQuery.toString()}`);
+        
+        // --- 👇 นี่คือส่วนที่แก้ไข ---
+        // เพิ่ม { scroll: false } เข้าไปด้านหลังเพื่อไม่ให้หน้าจอเลื่อน
+        router.push(`/dashboard/rfa?${currentQuery.toString()}`, { scroll: false });
+        // --- 👆 สิ้นสุดส่วนที่แก้ไข ---
     };
 
     useEffect(() => {

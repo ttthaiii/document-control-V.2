@@ -110,7 +110,7 @@ export async function PUT(
         const userData = userDoc.data()!;
         const userRole = userData.role;
         const body = await request.json();
-        const { action, comments, newFiles } = body; 
+        const { action, comments, newFiles, documentNumber } = body;
 
         if (!action) return NextResponse.json({ error: 'Action is required' }, { status: 400 });
         
@@ -187,7 +187,10 @@ export async function PUT(
             for (const tempFile of newFiles) {
                 const sourcePath = tempFile.filePath;
                 if (!sourcePath || !sourcePath.startsWith(`temp/${userId}/`)) continue;
-                const destinationPath = `sites/${docData.siteId}/rfa/${docData.documentNumber}/${Date.now()}_${tempFile.fileName}`;
+                
+                const docNumForPath = documentNumber || docData.documentNumber || docData.runningNumber;
+                const destinationPath = `sites/${docData.siteId}/rfa/${docNumForPath}/${Date.now()}_${tempFile.fileName}`;
+                
                 await adminBucket.file(sourcePath).move(destinationPath);
                 
                 movedFiles.push({
@@ -196,7 +199,6 @@ export async function PUT(
                     contentType: tempFile.contentType, uploadedAt: new Date().toISOString(), uploadedBy: userId,
                 });
             }
-            
             workflowFiles = movedFiles;
             finalDocFiles.push(...movedFiles);
         }
@@ -207,14 +209,25 @@ export async function PUT(
           files: workflowFiles,
         };
     
-        await rfaDocRef.update({
+        // --- 👇 [แก้ไข] สร้าง Object updates และเรียกใช้ update เพียงครั้งเดียว ---
+        const updates: { [key: string]: any } = {
           status: newStatus,
           currentStep: newStatus,
-          files: finalDocFiles,
           workflow: FieldValue.arrayUnion(workflowEntry),
           updatedAt: FieldValue.serverTimestamp(),
-        });
-    
+        };
+
+        if (documentNumber) {
+          updates.documentNumber = documentNumber;
+        }
+        if (workflowFiles.length > 0) {
+            updates.files = finalDocFiles;
+        }
+        
+        // สั่งอัปเดตฐานข้อมูลเพียงครั้งเดียวด้วยข้อมูลทั้งหมดที่จำเป็น
+        await rfaDocRef.update(updates);
+        // --- 👆 สิ้นสุดการแก้ไข ---
+
         return NextResponse.json({ success: true, message: `Action [${action}] completed successfully`, newStatus });
     
       } catch (error) {

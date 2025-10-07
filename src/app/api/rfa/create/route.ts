@@ -76,8 +76,8 @@ export async function POST(req: Request) {
     const { payload } = body;
     const { rfaType, siteId, categoryId, title, description, taskData, documentNumber, revisionNumber, uploadedFiles } = payload || {};
 
-    if (!rfaType || !siteId || !title || !documentNumber || !uploadedFiles || uploadedFiles.length === 0 || !categoryId) {
-        return NextResponse.json({ error: "Missing required fields. Required: rfaType, siteId, categoryId, title, documentNumber, uploadedFiles." }, { status: 400 });
+    if (!rfaType || !siteId || !title || !uploadedFiles || uploadedFiles.length === 0 || !categoryId) {
+        return NextResponse.json({ error: "Missing required fields. Required: rfaType, siteId, categoryId, title, uploadedFiles." }, { status: 400 });
     }
 
     const runningNumber = await adminDb.runTransaction(async (transaction) => {
@@ -107,7 +107,9 @@ export async function POST(req: Request) {
       createdBy: uid,
       rfaType,
     });
-    
+
+    const docNumForPath = documentNumber || runningNumber;
+
     const finalFilesData = [];
     const cdnUrlBase = "https://ttsdoc-cdn.ttthaiii30.workers.dev";
 
@@ -122,7 +124,7 @@ export async function POST(req: Request) {
 
         const originalName = tempFile.fileName;
         const timestamp = Date.now();
-        const destinationPath = `sites/${siteId}/rfa/${documentNumber}/${timestamp}_${originalName}`;
+        const destinationPath = `sites/${siteId}/rfa/${docNumForPath}/${timestamp}_${originalName}`;
 
         await adminBucket.file(sourcePath).move(destinationPath);
 
@@ -158,7 +160,7 @@ export async function POST(req: Request) {
     
     await rfaRef.set({
       siteId, rfaType, categoryId: finalCategoryId, title, description: description || "",
-      taskData: taskData || null, documentNumber, status: initialStatus,
+      taskData: taskData || null, documentNumber: documentNumber || "", status: initialStatus,
       currentStep: initialStatus, createdBy: uid,
       createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
       workflow: [{
