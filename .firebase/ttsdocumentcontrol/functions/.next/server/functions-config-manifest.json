@@ -1,1 +1,1 @@
-{"version":1,"functions":{}}
+{"version":1,"functions":{"/api/admin/invite":{},"/api/google-sheets/projects":{},"/api/bim-tracking/verify-task":{},"/api/google-sheets/tasks":{},"/api/invitation/accept":{},"/api/google-sheets/categories":{},"/api/rfa/categories":{},"/api/dashboard/stats":{},"/api/rfa/[id]":{},"/api/rfa/create":{},"/api/rfa/upload-temp-file":{},"/api/rfa/delete-temp-file":{},"/api/rfa/list":{},"/api/sites/[siteId]/categories":{},"/api/rfa/create_revision":{},"/api/sites":{},"/":{},"/api/work-request/list":{},"/api/work-request/create":{}}}

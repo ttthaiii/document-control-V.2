@@ -1,7 +1,7 @@
 // src/components/layout/Sidebar.tsx (แก้ไขแล้ว)
 'use client'
 
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, Suspense } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth/useAuth'
@@ -21,21 +21,16 @@ import {
 } from 'lucide-react'
 import { CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES } from '@/lib/config/workflow'
 
-
 interface SidebarProps {
   isOpen: boolean
   onToggle: () => void
 }
 
-interface SiteData {
-  id: string
-  name: string
-}
-
-const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
+// 👇 แยก Component ที่ใช้ useSearchParams ออกมา
+function SidebarContent({ isOpen, onToggle }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
-  const searchParams = useSearchParams()
+  const searchParams = useSearchParams() // ✅ ใช้ที่นี่ได้เพราะถูก wrap ด้วย Suspense
   const { user, logout } = useAuth()
   const { showLoader } = useLoading()
 
@@ -243,7 +238,6 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
             </Link>
           )}
 
-          {/* --- 👇 นี่คือส่วนที่แก้ไข --- */}
           <Link
             href="/dashboard/work-request"
             onClick={showLoader}
@@ -259,7 +253,6 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
             <Wrench size={18} />
             <span>Work Request</span>
           </Link>
-          {/* --- 👆 สิ้นสุดส่วนที่แก้ไข --- */}
 
         </nav>
 
@@ -306,6 +299,15 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
         </div>
       </div>
     </>
+  )
+}
+
+// 👇 Wrapper Component ที่ wrap ด้วย Suspense
+const Sidebar: React.FC<SidebarProps> = (props) => {
+  return (
+    <Suspense fallback={<div className="w-64 bg-gray-100 h-screen" />}>
+      <SidebarContent {...props} />
+    </Suspense>
   )
 }
 

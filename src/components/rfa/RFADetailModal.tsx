@@ -135,6 +135,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const [isTaskVerified, setIsTaskVerified] = useState(false);
   const [verificationError, setVerificationError] = useState<string | null>(null);
   const [verifiedTaskId, setVerifiedTaskId] = useState<string | null>(null);
+  const [newDocumentNumberInput, setNewDocumentNumberInput] = useState('');
 
   useEffect(() => {
     const fetchFullDocument = async () => {
@@ -324,15 +325,28 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     setIsSubmitting(true);
     try {
       const token = await firebaseUser?.getIdToken();
-      const payload = {
+      
+      // --- 👇 [แก้ไข] สร้าง payload และเพิ่ม documentNumber เข้าไป ---
+      const payload: {
+          action: string;
+          comments: string;
+          newFiles: any[];
+          documentNumber?: string; // ทำให้เป็น optional
+      } = {
           action,
           comments: comment,
           newFiles: newFiles.filter(f => f.status === 'success').map(f => f.uploadedData)
       };
+
+      if (needsDocNumber && newDocumentNumberInput.trim()) {
+          payload.documentNumber = newDocumentNumberInput.trim();
+      }
+      // --- 👆 สิ้นสุดการแก้ไข ---
+
       const response = await fetch(`/api/rfa/${document.id}`, {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(payload), // 👈 ใช้ payload ที่สร้างขึ้นใหม่
       });
       const result = await response.json();
       if (result.success) {
@@ -395,6 +409,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const overlayClasses = showOverlay ? 'bg-black bg-opacity-50' : ''  
  
   const isActionDisabled = isSubmitting || newFiles.filter(f => f.status === 'success').length === 0;
+  const needsDocNumber = isSiteReviewing && !document.documentNumber;
 
   return (
     <>
@@ -511,6 +526,24 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
             {isSiteReviewing && (
               <div className="space-y-4">
                 <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (Site)</h3>
+
+                {needsDocNumber && (
+                  <div className="p-4 bg-yellow-50 border-l-4 border-yellow-400">
+                    <label className="text-sm font-bold text-yellow-800 mb-2 block">
+                      <AlertTriangle size={16} className="inline mr-2" />
+                      กรุณาระบุเลขที่เอกสาร (Required)
+                    </label>
+                    <input 
+                      type="text" 
+                      value={newDocumentNumberInput} 
+                      onChange={(e) => setNewDocumentNumberInput(e.target.value)}
+                      placeholder="กรอกเลขที่เอกสารที่นี่..."
+                      className="w-full p-2 border rounded-md text-sm border-yellow-300 focus:ring-yellow-500 focus:border-yellow-500"
+                    />
+                     <p className="text-xs text-yellow-700 mt-1">เอกสารนี้ยังไม่มีเลขที่เอกสาร คุณต้องกำหนดก่อนส่งต่อไปยัง CM</p>
+                  </div>
+                )}
+
                 <div>
                   <label className="text-sm font-medium text-gray-700 mb-1 block">
                     แนบไฟล์ <span className="text-red-700">*</span>
@@ -542,14 +575,14 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 <div className="flex flex-wrap justify-end gap-3">
                     <button 
                         onClick={() => handleAction('REQUEST_REVISION')} 
-                        disabled={isActionDisabled} 
+                        disabled={isActionDisabled || (needsDocNumber && !newDocumentNumberInput.trim())} 
                         className="flex items-center px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 disabled:bg-slate-200 disabled:cursor-not-allowed"
                     >
                         <Edit3 size={16} className="mr-2" /> ขอแก้ไข
                     </button>
                     <button 
                         onClick={() => handleAction('SEND_TO_CM')} 
-                        disabled={isActionDisabled}
+                        disabled={isActionDisabled || (needsDocNumber && !newDocumentNumberInput.trim())}
                         className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed"
                     >
                         <Send size={16} className="mr-2" /> ส่งให้ CM

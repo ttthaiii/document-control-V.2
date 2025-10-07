@@ -109,6 +109,7 @@ async function sendLineNotification(event: any) {
 
     const statusKey = newData.status || "UNKNOWN";
     const message = `📄 เอกสารโครงการ: ${siteName}
+📝 หัวข้อ: ${newData.title || "ไม่มีหัวข้อ"}
 🔢 เลขที่เอกสาร: ${newData.documentNumber || "N/A"}
 🔄 rev: ${String(newData.revisionNumber || 0).padStart(2, "0")}
 📌 สถานะ: ${STATUS_LABELS[statusKey] || statusKey}

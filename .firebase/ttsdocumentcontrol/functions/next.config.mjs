@@ -1,7 +1,8 @@
 // next.config.mjs
 var nextConfig = {
-  // เราจะลบ output: 'export' ออกไป
-  // แต่จะยังคงการตั้งค่านี้ไว้ เพื่อปิด ESLint ตอน Build
+  experimental: {
+    missingSuspenseWithCSRBailout: false
+  },
   eslint: {
     ignoreDuringBuilds: true
   }
