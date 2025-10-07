@@ -3,11 +3,12 @@
 
 import React, { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { FileText, Upload, X, Check, AlertTriangle, Info, Paperclip } from 'lucide-react'
+import { FileText, Upload, X, Check, AlertTriangle, Info, Paperclip,Loader2 } from 'lucide-react'
 import { useGoogleSheets } from '@/lib/hooks/useGoogleSheets'
 import { useAuth } from '@/lib/auth/useAuth'
 import Spinner from '@/components/shared/Spinner'
 import { ROLES, Role } from '@/lib/config/workflow';
+import { useNotification } from '@/lib/context/NotificationContext';
 
 // --- Interfaces ---
 interface Category { id: string; categoryCode: string; categoryName: string; }
@@ -46,7 +47,13 @@ export default function CreateRFAForm({
   const [sheetCategories, setSheetCategories] = useState<string[]>([]);
   const [tasks, setTasks] = useState<TaskData[]>([]);
   const [selectedSite, setSelectedSite] = useState<string>('');
+
+  const [isCheckingDocNum, setIsCheckingDocNum] = useState(false);
+  const [isDocNumAvailable, setIsDocNumAvailable] = useState<boolean | null>(null);
+  const [debouncedDocNum, setDebouncedDocNum] = useState('');
+
   const { firebaseUser } = useAuth();
+  const { showNotification } = useNotification();
   const { loading: sheetsLoading, error: sheetsError, getCategories, getTasks } = useGoogleSheets();
   const [taskSearchQuery, setTaskSearchQuery] = useState('');
   const [siteCategories, setSiteCategories] = useState<Category[]>([]);
@@ -79,7 +86,57 @@ export default function CreateRFAForm({
     };
     loadSites();
   }, [firebaseUser]);
-  
+
+  useEffect(() => {
+    // ถ้าไม่มี siteId หรือ documentNumber ก็ไม่ต้องทำอะไร
+    if (!selectedSite || !formData.documentNumber) {
+      setIsDocNumAvailable(null); // รีเซ็ตสถานะ
+      return;
+    }
+
+    setIsCheckingDocNum(true);
+    // ตั้งเวลาหน่วง (debounce) 500ms
+    const handler = setTimeout(() => {
+      setDebouncedDocNum(formData.documentNumber);
+    }, 500);
+
+    // clear timeout ถ้า user พิมพ์ต่อ
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [formData.documentNumber, selectedSite]);
+
+  useEffect(() => {
+    if (!debouncedDocNum || !selectedSite) {
+        return;
+    }
+
+    const checkDuplicate = async () => {
+      setIsCheckingDocNum(true);
+      setIsDocNumAvailable(null);
+      try {
+        const response = await fetch('/api/rfa/check-duplicate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            siteId: selectedSite,
+            documentNumber: debouncedDocNum,
+          }),
+        });
+        const result = await response.json();
+        setIsDocNumAvailable(!result.isDuplicate);
+
+      } catch (error) {
+        console.error("Failed to check duplicate:", error);
+        setIsDocNumAvailable(null); // ไม่สามารถเช็คได้
+      } finally {
+        setIsCheckingDocNum(false);
+      }
+    };
+
+    checkDuplicate();
+  }, [debouncedDocNum, selectedSite]);
+    
   const updateFormData = (updates: Partial<RFAFormData>) => {
     setFormData(prev => ({ ...prev, ...updates }));
     const newErrors = { ...errors };
@@ -102,8 +159,10 @@ export default function CreateRFAForm({
     if (!formData.title.trim()) newErrors.title = 'กรุณาใส่หัวข้อเอกสาร';
     if (!formData.revisionNumber.trim()) newErrors.revisionNumber = 'กรุณาใส่ Rev. No.';
     if (!selectedSite) newErrors.site = 'กรุณาเลือกโครงการ';
-    if (userProp?.role !== ROLES.BIM && !formData.documentNumber.trim()) {
+    if (!formData.documentNumber.trim()) {
       newErrors.documentNumber = 'กรุณาใส่เลขที่เอกสาร';
+    } else if (isDocNumAvailable === false) {
+      newErrors.documentNumber = 'เลขที่เอกสารนี้ถูกใช้ไปแล้ว';
     }
     if (isManualFlow) {
       if (!formData.categoryId.trim()) newErrors.categoryId = 'กรุณากรอกหมวดงาน';
@@ -126,18 +185,21 @@ export default function CreateRFAForm({
   }
 
   const submitForm = async () => {
+    if (!validateForm()) {
+        showNotification('warning', 'ข้อมูลไม่ครบถ้วน', 'กรุณากรอกข้อมูลในช่องที่มีเครื่องหมาย * ให้ครบ');
+        return;
+    }
+
     setIsSubmitting(true);
-    setIsConfirmationModalOpen(false);
     try {
       if (!firebaseUser) throw new Error('กรุณาล็อกอินก่อน');
       const token = await firebaseUser.getIdToken();
+      
       const successfulFiles = formData.uploadedFiles.filter(f => f.status === 'success' && f.uploadedData);
       const finalCategoryId = isManualFlow ? formData.categoryId : formData.selectedTask?.taskCategory;
       const finalTaskData = isManualFlow ? null : formData.selectedTask;
 
-      if (!finalCategoryId) {
-        throw new Error('ไม่สามารถระบุ Category ID ได้ กรุณาตรวจสอบข้อมูล');
-      }
+      if (!finalCategoryId) throw new Error('ไม่สามารถระบุ Category ID ได้');
 
       const submitData = {
         rfaType: formData.rfaType,
@@ -159,17 +221,24 @@ export default function CreateRFAForm({
         },
         body: JSON.stringify({ payload: submitData })
       });
+
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error || `HTTP error! status: ${response.status}`);
+
+      if (!response.ok) throw new Error(result.error || 'เกิดข้อผิดพลาดในการสร้างเอกสาร');
+      
       if (result.success) {
-        alert(`สร้าง RFA สำเร็จ! หมายเลขเอกสาร: ${result.runningNumber}`);
+        showNotification(
+          'success', 
+          'สร้าง RFA สำเร็จ!', 
+          `หมายเลขเอกสาร: ${result.runningNumber}`
+        );
         if (onClose) onClose();
       } else {
-        throw new Error(result.error || 'เกิดข้อผิดพลาดในการสร้างเอกสาร');
+        throw new Error(result.error);
       }
     } catch (error) {
-      console.error("Submit Error:", error);
-      setErrors({ general: error instanceof Error ? error.message : 'เกิดข้อผิดพลาดที่ไม่รู้จัก' });
+      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
+      showNotification('error', 'เกิดข้อผิดพลาด', errorMessage);
     } finally {
       setIsSubmitting(false);
     }
@@ -276,7 +345,7 @@ export default function CreateRFAForm({
               <span className="font-medium text-gray-600"> - {RFA_TYPE_CONFIG[formData.rfaType].subtitle}</span>
             )}
           </h2>
-          <p className="text-sm text-gray-600 mt-1">{userProp && `โดย ${userProp.email} (${userProp.role})`}</p>
+          {/*<p className="text-sm text-gray-600 mt-1">{userProp && `โดย ${userProp.email} (${userProp.role})`}</p>*/}
         </div>
         {onClose && <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X /></button>}
       </div>
@@ -315,7 +384,7 @@ export default function CreateRFAForm({
                 {/* --- 👇 [UI/UX] ปรับ Layout ส่วนนี้เป็น Grid --- */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">โครงการ</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">โครงการ <span className="text-red-500">*</span></label>
                         <select value={selectedSite} onChange={(e) => handleSiteChange(e.target.value)} className="w-full p-3 border rounded-lg bg-gray-50">
                             <option value="">-- เลือกโครงการ --</option>
                             {sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
@@ -325,14 +394,14 @@ export default function CreateRFAForm({
                     
                     {isManualFlow ? (
                         <div>
-                            <label htmlFor="category-manual-input" className="block text-sm font-medium text-gray-700 mb-2">หมวดงาน</label>
+                            <label htmlFor="category-manual-input" className="block text-sm font-medium text-gray-700 mb-2">หมวดงาน <span className="text-red-500">*</span></label>
                             <input id="category-manual-input" type="text" list="category-list" value={formData.categoryId} onChange={(e) => updateFormData({ categoryId: e.target.value })} placeholder="พิมพ์หรือเลือกหมวดงาน" className="w-full p-3 border rounded-lg" disabled={!selectedSite} />
                             <datalist id="category-list">{siteCategories.map(cat => (<option key={cat.id} value={cat.categoryCode} />))}</datalist>
                             {errors.categoryId && <p className="text-red-600 text-sm mt-1">{errors.categoryId}</p>}
                         </div>
                     ) : (
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">หมวดงาน {sheetsLoading && <Spinner className="w-4 h-4 ml-2" />}</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">หมวดงาน {sheetsLoading && <Spinner className="w-4 h-4 ml-2" />} <span className="text-red-500">*</span></label>
                             <select value={formData.selectedCategory} onChange={(e) => handleCategoryChange(e.target.value)} className="w-full p-3 border rounded-lg disabled:bg-gray-100 bg-gray-50" disabled={!selectedSite || sheetsLoading}>
                                 <option value="">{sheetsLoading ? 'กำลังโหลด...' : '-- เลือกหมวดงาน --'}</option>
                                 {sheetCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
@@ -344,7 +413,7 @@ export default function CreateRFAForm({
 
                 {!isManualFlow && (
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">ค้นหางาน</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">ค้นหางาน <span className="text-red-500">*</span></label>
                         <input type="text" placeholder="ค้นหาชื่องานจาก BIM Tracking..." value={taskSearchQuery} onChange={(e) => setTaskSearchQuery(e.target.value)} className="w-full p-3 border rounded-lg" disabled={!formData.selectedCategory || sheetsLoading} />
                         <div className="mt-2 max-h-48 overflow-y-auto border rounded-lg bg-white">
                             {filteredTasks.map(task => (<div key={task.taskUid || task.taskName} onClick={() => handleTaskSelect(task)} className={`p-3 text-sm cursor-pointer hover:bg-gray-100 ${formData.selectedTask?.taskName === task.taskName ? 'bg-blue-50 font-semibold' : ''}`}>{task.taskName}</div>))}
@@ -355,8 +424,28 @@ export default function CreateRFAForm({
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div className="sm:col-span-2">
                         <label className="block text-sm font-medium text-gray-700 mb-2">เลขที่เอกสาร</label>
-                        <input type="text" value={formData.documentNumber} onChange={(e) => updateFormData({ documentNumber: e.target.value })} className="w-full p-3 border rounded-lg" />
+                        {/* 1. เพิ่ม div ครอบ input และ icon ด้วย class "relative" */}
+                        <div className="relative">
+                            <input 
+                              type="text" 
+                              value={formData.documentNumber} 
+                              onChange={(e) => {
+                                updateFormData({ documentNumber: e.target.value });
+                                setIsDocNumAvailable(null);
+                              }}
+                              className={`w-full p-3 border rounded-lg pr-10 ${isDocNumAvailable === false ? 'border-red-500' : ''}`} 
+                            />
+                            {/* 2. ลบคลาส "top-6" ออก เพื่อให้ flex จัดตำแหน่งกึ่งกลางได้ถูกต้อง */}
+                            <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                              {isCheckingDocNum && <Loader2 className="h-5 w-5 text-gray-400 animate-spin" />}
+                              {!isCheckingDocNum && isDocNumAvailable === true && <Check className="h-5 w-5 text-green-500" />}
+                              {!isCheckingDocNum && isDocNumAvailable === false && <X className="h-5 w-5 text-red-500" />}
+                            </div>
+                        </div>
                         {errors.documentNumber && <p className="text-red-600 text-sm mt-1">{errors.documentNumber}</p>}
+                        {!isCheckingDocNum && isDocNumAvailable === false && !errors.documentNumber && (
+                          <p className="text-red-600 text-sm mt-1">เลขที่เอกสารนี้ถูกใช้ไปแล้ว</p>
+                        )}
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Rev. No.</label>
@@ -365,7 +454,7 @@ export default function CreateRFAForm({
                     </div>
                 </div>
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">หัวข้อเอกสาร</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">หัวข้อเอกสาร <span className="text-red-500">*</span></label>
                     <input type="text" value={formData.title} onChange={(e) => updateFormData({ title: e.target.value })} className="w-full p-3 border rounded-lg" />
                     {errors.title && <p className="text-red-600 text-sm mt-1">{errors.title}</p>}
                 </div>
@@ -379,7 +468,7 @@ export default function CreateRFAForm({
         <section className={`bg-white p-6 rounded-lg border border-gray-200 ${!formData.rfaType && !presetRfaType ? 'opacity-40 pointer-events-none' : ''}`}>
             <h3 className="flex items-center text-lg font-semibold text-gray-900 border-b pb-4 mb-6">
                 <Paperclip size={20} className="mr-3 text-blue-600"/>
-                แนบไฟล์
+                แนบไฟล์ <span className="text-red-500 ml-1">*</span>
             </h3>
             <div className="space-y-6 max-w-3xl">
                 <label htmlFor="file-upload" className="flex flex-col items-center justify-center w-full h-48 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-slate-50 hover:bg-slate-100 transition-colors">
@@ -436,7 +525,7 @@ export default function CreateRFAForm({
 
       {isConfirmationModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
                 <div className="flex justify-between items-center p-4 border-b">
                     <h3 className="text-xl font-bold text-gray-800">ยืนยันข้อมูล</h3>
                     <button onClick={() => setIsConfirmationModalOpen(false)} className="text-gray-400 hover:text-gray-600"> <X size={24} /> </button>

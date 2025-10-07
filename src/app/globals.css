@@ -34,3 +34,7 @@ body {
   outline: none !important;
   border: none !important;
 }
+
+option {
+  font-size: 0.875rem; /* ปรับขนาดตัวอักษรของตัวเลือกใน Dropdown (14px) */
+}

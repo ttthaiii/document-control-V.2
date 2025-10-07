@@ -7,6 +7,7 @@ import Spinner from '@/components/shared/Spinner';
 import { useAuth } from '@/lib/auth/useAuth'
 import { Role, STATUS_LABELS, STATUSES, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUS_COLORS } from '@/lib/config/workflow'
 import PDFPreviewModal from './PDFPreviewModal'
+import { useNotification } from '@/lib/context/NotificationContext';
 
 // --- (Helper Functions and other components are unchanged) ---
 const formatDate = (dateString: string | undefined): string => {
@@ -136,6 +137,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const [verificationError, setVerificationError] = useState<string | null>(null);
   const [verifiedTaskId, setVerifiedTaskId] = useState<string | null>(null);
   const [newDocumentNumberInput, setNewDocumentNumberInput] = useState('');
+  const { showNotification } = useNotification();
 
   useEffect(() => {
     const fetchFullDocument = async () => {
@@ -350,13 +352,14 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       });
       const result = await response.json();
       if (result.success) {
-        alert(result.message || 'ดำเนินการสำเร็จ!');
+        showNotification('success', 'ดำเนินการสำเร็จ!', result.message);
         onClose();
       } else {
         throw new Error(result.error || 'เกิดข้อผิดพลาด');
       }
     } catch (error) {
-      alert(`เกิดข้อผิดพลาด: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      showNotification('error', 'เกิดข้อผิดพลาด', message);
     } finally {
       setIsSubmitting(false);
     }
@@ -384,13 +387,14 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       });
       const result = await response.json();
       if (result.success) {
-        alert(`สร้างเอกสารฉบับแก้ไข ${newDocumentNumber} สำเร็จ!`);
+        showNotification('success', 'สร้าง Revision สำเร็จ!', `เอกสารฉบับใหม่ ${newDocumentNumber} ถูกสร้างแล้ว`);
         onClose();
       } else {
         throw new Error(result.error || 'เกิดข้อผิดพลาดในการสร้าง Revision');
       }
     } catch (error) {
-      alert(`เกิดข้อผิดพลาด: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      showNotification('error', 'เกิดข้อผิดพลาด', message);
     } finally {
       setIsSubmitting(false);
     }

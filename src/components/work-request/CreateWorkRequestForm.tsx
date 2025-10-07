@@ -7,6 +7,7 @@ import { Site, RFAFile } from '@/types/rfa';
 import Spinner from '@/components/shared/Spinner';
 import { FileText, Upload, X, Check, AlertTriangle, Send } from 'lucide-react';
 import { Role } from '@/lib/config/workflow';
+import { useNotification } from '@/lib/context/NotificationContext';
 
 // Interface สำหรับ User ที่รับมาจาก props
 interface AppUser {
@@ -44,6 +45,7 @@ export default function CreateWorkRequestForm({ onClose, userProp }: CreateWorkR
   const [loading, setLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const { showNotification } = useNotification();
 
   useEffect(() => {
     const loadSites = async () => {
@@ -180,12 +182,16 @@ export default function CreateWorkRequestForm({ onClose, userProp }: CreateWorkR
         throw new Error(result.error || result.details || 'เกิดข้อผิดพลาดในการสร้าง Work Request');
       }
 
-      alert(`สร้าง Work Request สำเร็จ!\nเลขที่เอกสาร: ${result.documentNumber}`);
+      showNotification(
+        'success',
+        'สร้าง Work Request สำเร็จ!',
+        `เลขที่เอกสาร: ${result.documentNumber}`
+      );
       onClose();
 
     } catch (error) {
-      console.error("Submit Error:", error);
-      setErrors({ form: error instanceof Error ? error.message : 'เกิดข้อผิดพลาดที่ไม่รู้จัก' });
+      const message = error instanceof Error ? error.message : 'เกิดข้อผิดพลาดที่ไม่รู้จัก';
+      showNotification('error', 'เกิดข้อผิดพลาด', message);
     } finally {
       setIsSubmitting(false);
     }
