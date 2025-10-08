@@ -4,6 +4,16 @@ import { RFAFile, RFASite, RFAUserInfo } from './rfa';
 import { Role } from '@/lib/config/workflow';
 
 /**
+ * Interface for data from BIM Tracking system
+ */
+export interface TaskData {
+  taskUid?: string;
+  taskCategory: string;
+  taskName: string;
+  projectName: string;
+}
+
+/**
  * ระดับความสำคัญของงาน
  */
 export enum WorkRequestPriority {
@@ -34,7 +44,7 @@ export interface WorkRequestWorkflowStep {
   role: Role;
   timestamp: string; // ISO Date String
   comments?: string;
-  files?: RFAFile[]; // ไฟล์ที่แนบในขั้นตอนนี้ (ถ้ามี)
+  files?: RFAFile[];
 }
 
 /**
@@ -42,28 +52,32 @@ export interface WorkRequestWorkflowStep {
  */
 export interface WorkRequest {
   id: string;
-  documentNumber: string; // WR-<ชื่อย่อโครงการ>-<Running number>
-  runningNumber: string;  // <Running number> ล้วนๆ
-  site: RFASite;          // ข้อมูลโครงการ
-  taskName: string;          // ชื่องาน
-  description: string;    // รายละเอียดความต้องการ
-  priority: WorkRequestPriority; // ความเร่งด่วน
-  status: WorkRequestStatus;     // สถานะปัจจุบัน
+  documentNumber: string;
+  runningNumber: string;
+  site: RFASite;
+  taskName: string;
+  description: string;
+  priority: WorkRequestPriority;
+  status: WorkRequestStatus;
   
-  createdAt: any;       // Firestore Timestamp
-  updatedAt: any;       // Firestore Timestamp
-  createdBy: string;      // User ID ของ Site ที่สร้าง
-  assignedTo?: string;     // User ID ของ BIM ที่รับผิดชอบ (อาจจะยังไม่มีในตอนแรก)
+  createdAt: any;
+  updatedAt: any;
+  createdBy: string;
+  assignedTo?: string;
+
+  // --- 👇 นี่คือส่วนที่เพิ่มเข้ามา ---
+  taskData?: TaskData | null; // สำหรับเก็บข้อมูลจาก BIM Tracking
+  // --- 👆 สิ้นสุดส่วนที่เพิ่มเข้ามา ---
 
   // การจัดการ Revision
-  revisionNumber: number;       // เริ่มที่ 0, 1, 2, ...
-  isLatest: boolean;            // true ถ้าเป็นฉบับล่าสุด
-  parentWorkRequestId?: string; // ID ของเอกสารตั้งต้น (สำหรับ Rev.1 เป็นต้นไป)
+  revisionNumber: number;
+  isLatest: boolean;
+  parentWorkRequestId?: string;
   
   // ไฟล์และ Workflow
   files: RFAFile[];
   workflow: WorkRequestWorkflowStep[];
   
   // ข้อมูลเพิ่มเติม
-  usersInfo: Record<string, RFAUserInfo>; // เก็บข้อมูล user ทุกคนที่เกี่ยวข้อง
+  usersInfo: Record<string, RFAUserInfo>;
 }

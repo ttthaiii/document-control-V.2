@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
         }
         const userData = userDoc.data()!;
         const payload = await req.json();
-        const { siteId, taskName, description, priority, files: uploadedFiles } = payload;
+        const { siteId, taskName, description, priority, files: uploadedFiles, taskData } = await req.json();
 
         if (!siteId || !taskName || !priority) { // เอา description ออกจากการตรวจสอบ
             return NextResponse.json({ success: false, error: "Missing required fields (siteId, taskName, priority)." }, { status: 400 });
@@ -100,6 +100,7 @@ export async function POST(req: NextRequest) {
             revisionNumber: 0,
             isLatest: true,
             files: finalFilesData,
+            taskData: taskData || null, // <-- บันทึก taskData ที่ได้รับมา
             workflow: [{
                 action: "CREATE",
                 status: initialStatus,
@@ -110,12 +111,7 @@ export async function POST(req: NextRequest) {
                 files: finalFilesData,
                 comments: description || '',
             }],
-            usersInfo: {
-                [uid]: {
-                    email: userData.email,
-                    role: userData.role,
-                }
-            }
+            usersInfo: { [uid]: { email: userData.email, role: userData.role } }
         });
 
         return NextResponse.json({ 

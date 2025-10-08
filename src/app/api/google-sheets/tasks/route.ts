@@ -34,31 +34,28 @@ export async function POST(request: NextRequest) {
 
     const tasksQuery = bimTrackingDb.collection('tasks')
       .where('projectId', '==', projectId)
-      .where('taskCategory', '==', category)
-      .where('link', '==', '');
+      .where('taskCategory', '==', category);
       
     const tasksSnapshot = await tasksQuery.get();
-
-    // --- 🔽 เพิ่ม Log จุดที่ 2: ดูว่า query แล้วเจอเอกสารกี่อัน 🔽 ---
-    console.log(`[TASKS_DEBUG] Query executed. Found ${tasksSnapshot.size} task(s).`);
 
     if (tasksSnapshot.empty) {
         return NextResponse.json({ success: true, data: { tasks: [] } });
     }
 
-    const tasks = tasksSnapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-            taskUid: doc.id,
-            taskCategory: data.taskCategory || '',
-            taskName: data.taskName || '',
-            projectName: data.projectName || '',
-            // เพิ่ม field อื่นๆ ที่อาจมี
-            startDate: data.startDate || '',
-            finishDate: data.finishDate || '',
-            percentComplete: data.percentComplete || 0
-        };
-    });
+    const tasks = tasksSnapshot.docs
+      .filter(doc => !doc.data().link)
+      .map(doc => {
+          const data = doc.data();
+          return {
+              taskUid: doc.id,
+              taskCategory: data.taskCategory || '',
+              taskName: data.taskName || '',
+              projectName: data.projectName || '',
+              startDate: data.startDate || '',
+              finishDate: data.finishDate || '',
+              percentComplete: data.percentComplete || 0
+          };
+      });
 
     return NextResponse.json({
       success: true,
