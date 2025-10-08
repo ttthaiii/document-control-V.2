@@ -12,12 +12,9 @@ function WorkRequestCreateContent() {
   const router = useRouter();
   const { user: appUser } = useAuth();
 
-  // --- 👇 จุดที่แก้ไข ---
   const handleClose = () => {
-    // เปลี่ยนจาก '/dashboard' เป็น '/dashboard/work-request'
     router.push('/dashboard/work-request');
   };
-  // --- 👆 สิ้นสุดจุดที่แก้ไข ---
   
   const user = appUser ? {
     id: appUser.id,
@@ -44,7 +41,7 @@ function WorkRequestCreateContent() {
         
         <div className="bg-white rounded-lg shadow-sm border p-6">
           <CreateWorkRequestForm
-              onClose={handleClose} // ใช้ handleClose ที่แก้ไขแล้ว
+              onClose={handleClose}
               userProp={user}
             /> 
         </div>
@@ -55,8 +52,10 @@ function WorkRequestCreateContent() {
 
 export default function WorkRequestCreatePage() {
   return (
-    <AuthGuard requiredRoles={[ROLES.SITE_ADMIN, ROLES.ADMIN]}>
-      {/* 👇 2. ครอบด้วย Suspense */}
+    // --- 👇 นี่คือจุดที่แก้ไข ---
+    // เพิ่ม ROLES.BIM เข้าไปใน AuthGuard
+    <AuthGuard requiredRoles={[ROLES.SITE_ADMIN, ROLES.ADMIN, ROLES.BIM]}>
+    // --- 👆 สิ้นสุดการแก้ไข ---
       <Suspense fallback={<div className="text-center p-8">Loading Form...</div>}>
         <WorkRequestCreateContent />
       </Suspense>
