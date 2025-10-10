@@ -1,12 +1,13 @@
+// src/components/work-request/CreateWorkRequestForm.tsx (แก้ไขตาม Workflow ใหม่)
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth/useAuth';
-import { WorkRequestPriority, TaskData } from '@/types/work-request';
+import { WorkRequestPriority, TaskData } from '@/types/work-request'; // WorkRequestPriority อาจจะไม่ถูกใช้แล้ว แต่เก็บไว้ก่อนได้
 import { Site, RFAFile } from '@/types/rfa';
 import Spinner from '@/components/shared/Spinner';
-import { FileText, Upload, X, Check, AlertTriangle, Send, Search, CheckCircle } from 'lucide-react';
-import { Role, ROLES } from '@/lib/config/workflow';
+import { FileText, Upload, X, Check, AlertTriangle, Send } from 'lucide-react';
+import { Role, ROLES, REVIEWER_ROLES } from '@/lib/config/workflow';
 import { useNotification } from '@/lib/context/NotificationContext';
 
 // Interfaces
@@ -35,22 +36,21 @@ export default function CreateWorkRequestForm({ onClose, userProp }: { onClose: 
   
   const [taskName, setTaskName] = useState('');
   const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState<WorkRequestPriority>(WorkRequestPriority.NORMAL);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   
-  const [loadingSites, setLoadingSites] = useState(false);
+  // --- 👇 [แก้ไข] ---
+  const [dueDate, setDueDate] = useState('');
+  // --- 👆 [สิ้นสุดการแก้ไข] ---
+
+  const [loadingSites, setLoadingSites] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // --- States for BIM Flow ---
-  const isBimFlow = userProp?.role === ROLES.BIM;
-  const [tasks, setTasks] = useState<TaskData[]>([]);
-  const [tasksLoading, setTasksLoading] = useState(false);
-  const [taskError, setTaskError] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedTask, setSelectedTask] = useState<TaskData | null>(null);
+  // --- 👇 [แก้ไข] เอา isBimFlow ออก และเพิ่มเงื่อนไขตรวจสอบว่าเป็น Site User หรือไม่ ---
+  const isSiteUser = userProp && REVIEWER_ROLES.includes(userProp.role);
+  // --- 👆 [สิ้นสุดการแก้ไข] ---
 
-  // --- Fetch Sites (used by both flows) ---
+
   useEffect(() => {
     const loadSites = async () => {
       if (!firebaseUser) return;
@@ -73,49 +73,6 @@ export default function CreateWorkRequestForm({ onClose, userProp }: { onClose: 
     loadSites();
   }, [firebaseUser, showNotification]);
 
-  // --- Fetch Tasks for BIM Flow ---
-  const handleSiteChangeForBim = async (siteId: string) => {
-    setSelectedSiteId(siteId);
-    setSelectedTask(null);
-    setTasks([]);
-    if (!siteId || !firebaseUser) return;
-
-    const site = sites.find(s => s.id === siteId);
-    if (!site) return;
-
-    setTasksLoading(true);
-    setTaskError(null);
-    try {
-        const token = await firebaseUser.getIdToken();
-        const response = await fetch('/api/bim-tracking/work-request-tasks', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ projectName: site.name }),
-        });
-        const result = await response.json();
-        if (result.success) {
-          setTasks(result.tasks);
-        } else {
-          throw new Error(result.error || 'Failed to fetch tasks');
-        }
-    } catch (err) {
-        setTaskError(err instanceof Error ? err.message : 'Unknown error');
-    } finally {
-        setTasksLoading(false);
-    }
-  };
-
-  const handleTaskSelect = (task: TaskData) => {
-    setSelectedTask(task);
-    setTaskName(task.taskName);
-  };
-  
-  const filteredTasks = useMemo(() => {
-    if (!searchTerm) return tasks;
-    return tasks.filter(task => task.taskName.toLowerCase().includes(searchTerm.toLowerCase()));
-  }, [tasks, searchTerm]);
-
-  // --- File Upload Functions ---
   const uploadTempFile = async (file: File): Promise<Partial<UploadedFile>> => {
     try {
         if (!firebaseUser) throw new Error('กรุณาล็อกอินก่อนอัปโหลดไฟล์');
@@ -161,22 +118,19 @@ export default function CreateWorkRequestForm({ onClose, userProp }: { onClose: 
 
   const removeFile = (index: number) => {
     const fileToRemove = uploadedFiles[index];
-    // This assumes deleteTempFile exists and is implemented correctly
     if (fileToRemove.uploadedData?.filePath) {
-      // deleteTempFile(fileToRemove.uploadedData.filePath);
+      // Assuming a deleteTempFile function exists
     }
     setUploadedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-
-  // --- Form Validation & Submission (unified) ---
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
     if (!selectedSiteId) newErrors.site = 'กรุณาเลือกโครงการ';
-    if (isBimFlow) {
-        if (!selectedTask) newErrors.task = 'กรุณาเลือก Task จาก BIM Tracking';
-    }
     if (!taskName.trim()) newErrors.taskName = 'กรุณาใส่หัวข้องาน';
+    // --- 👇 [แก้ไข] ตรวจสอบ dueDate แทน priority ---
+    if (!dueDate) newErrors.dueDate = 'กรุณาเลือกวันที่กำหนดส่ง';
+    // --- 👆 [สิ้นสุดการแก้ไข] ---
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -190,14 +144,16 @@ export default function CreateWorkRequestForm({ onClose, userProp }: { onClose: 
         if (!firebaseUser) throw new Error('กรุณาล็อกอินก่อน');
         const token = await firebaseUser.getIdToken();
 
+        // --- 👇 [แก้ไข] ปรับ Payload ที่จะส่งไป API ---
         const payload = {
             siteId: selectedSiteId,
             taskName,
             description,
-            priority,
+            dueDate: dueDate, // ส่ง dueDate
             files: uploadedFiles.filter(f => f.status === 'success').map(f => f.uploadedData),
-            taskData: isBimFlow ? selectedTask : null,
+            // ไม่ต้องส่ง priority, planStartDate, taskData จาก Frontend แล้ว
         };
+        // --- 👆 [สิ้นสุดการแก้ไข] ---
 
         const response = await fetch('/api/work-request/create', {
             method: 'POST',
@@ -215,45 +171,23 @@ export default function CreateWorkRequestForm({ onClose, userProp }: { onClose: 
         setIsSubmitting(false);
     }
   };
-  
-  // --- Render Logic ---
-  const renderBimTaskSelector = () => (
-    <div className="space-y-6">
-        <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">1. เลือกโครงการ</label>
-            <select value={selectedSiteId} onChange={(e) => handleSiteChangeForBim(e.target.value)} className="w-full p-3 border rounded-lg bg-gray-50" disabled={loadingSites}>
-                <option value="">{loadingSites ? 'กำลังโหลด...' : '-- เลือกโครงการ --'}</option>
-                {sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
-            </select>
-        </div>
-        
-        {selectedSiteId && (
-            <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">2. ค้นหาและเลือก Task <span className="text-red-500">*</span></label>
-                <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-                    <input type="text" placeholder="ค้นหาชื่องาน..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 border rounded-lg" disabled={tasksLoading} />
-                </div>
-                {tasksLoading && <div className="text-center py-4"><Spinner /></div>}
-                {taskError && <p className="text-red-500 text-center py-4">{taskError}</p>}
-                {!tasksLoading && !taskError && (
-                    <div className="mt-2 space-y-2 max-h-48 overflow-y-auto border rounded-lg bg-gray-50 p-2">
-                        {filteredTasks.length > 0 ? filteredTasks.map((task: TaskData) => (
-                            <div key={task.taskUid} onClick={() => handleTaskSelect(task)} className={`flex items-center justify-between p-3 text-sm rounded-md cursor-pointer ${selectedTask?.taskUid === task.taskUid ? 'bg-blue-100' : 'hover:bg-gray-100'}`}>
-                                <span>{task.taskName}</span>
-                                {selectedTask?.taskUid === task.taskUid && <CheckCircle className="w-5 h-5 text-blue-600" />}
-                            </div>
-                        )) : <p className="text-center text-gray-500 py-4">ไม่พบ Task ที่ว่าง (Category: "Work Request")</p>}
-                    </div>
-                )}
-                {errors.task && <p className="text-red-600 text-sm mt-1">{errors.task}</p>}
-            </div>
-        )}
-    </div>
-  );
 
-  const renderManualForm = () => (
-    <div className="space-y-6">
+  // --- 👇 [แก้ไข] ถ้าไม่ใช่ Site User ให้แสดงข้อความแจ้งเตือน ---
+  if (!isSiteUser) {
+    return (
+        <div className="text-center p-8 bg-yellow-50 rounded-lg">
+            <AlertTriangle className="mx-auto w-12 h-12 text-yellow-500 mb-4" />
+            <h3 className="text-lg font-bold text-yellow-800">ไม่มีสิทธิ์สร้าง Work Request</h3>
+            <p className="text-yellow-700 mt-2">ฟังก์ชันนี้สงวนไว้สำหรับผู้ใช้งานฝั่งโครงการ (Site) เท่านั้น</p>
+        </div>
+    )
+  }
+  // --- 👆 [สิ้นสุดการแก้ไข] ---
+
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-6">
+        {/* --- 👇 [แก้ไข] ปรับ Layout และเปลี่ยน Priority เป็น Due Date --- */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">โครงการ <span className="text-red-500">*</span></label>
@@ -264,77 +198,57 @@ export default function CreateWorkRequestForm({ onClose, userProp }: { onClose: 
                 {errors.site && <p className="text-red-600 text-sm mt-1">{errors.site}</p>}
             </div>
             <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ระดับความสำคัญ</label>
-                <select value={priority} onChange={(e) => setPriority(e.target.value as WorkRequestPriority)} className="w-full p-3 border rounded-lg">
-                    <option value={WorkRequestPriority.NORMAL}>ปกติ</option>
-                    <option value={WorkRequestPriority.HIGH}>ด่วน</option>
-                    <option value={WorkRequestPriority.URGENT}>ด่วนที่สุด</option>
-                </select>
+                <label className="block text-sm font-medium text-gray-700 mb-1">วันที่กำหนดส่ง (Due Date) <span className="text-red-500">*</span></label>
+                <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full p-3 border rounded-lg" />
+                {errors.dueDate && <p className="text-red-600 text-sm mt-1">{errors.dueDate}</p>}
             </div>
         </div>
+        {/* --- 👆 [สิ้นสุดการแก้ไข] --- */}
+
+        {/* --- 👇 [แก้ไข] ลบเงื่อนไข isBimFlow ออกทั้งหมด --- */}
         <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">หัวข้องาน <span className="text-red-500">*</span></label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              หัวข้องาน <span className="text-red-500">*</span>
+            </label>
             <input type="text" value={taskName} onChange={(e) => setTaskName(e.target.value)} placeholder="เช่น ขอแก้ไขโมเดลโครงสร้างอาคาร A" className="w-full p-3 border rounded-lg" />
             {errors.taskName && <p className="text-red-600 text-sm mt-1">{errors.taskName}</p>}
         </div>
-    </div>
-  );
+        {/* --- 👆 [สิ้นสุดการแก้ไข] --- */}
 
-  const renderContent = () => {
-    if (isBimFlow) {
-      return renderBimTaskSelector();
-    }
-    return renderManualForm();
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-        {renderContent()}
-
-        {/* This part is shown for both flows, but only after site selection for BIM flow */}
-        {((isBimFlow && selectedTask) || !isBimFlow) && (
-            <div className="space-y-6 pt-6 border-t">
-                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">หัวข้องาน <span className="text-red-500">*</span></label>
-                    <input type="text" value={taskName} onChange={(e) => setTaskName(e.target.value)} placeholder="เช่น ขอแก้ไขโมเดลโครงสร้างอาคาร A" className="w-full p-3 border rounded-lg" disabled={isBimFlow} />
-                    {errors.taskName && <p className="text-red-600 text-sm mt-1">{errors.taskName}</p>}
-                </div>
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">รายละเอียด <span className="text-gray-400 font-normal">(Optional)</span></label>
-                    <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} placeholder="อธิบายรายละเอียดเพิ่มเติม (ถ้ามี)..." className="w-full p-3 border rounded-lg" />
-                </div>
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">แนบไฟล์ (ถ้ามี)</label>
-                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-500 transition-colors">
-                        <input type="file" multiple onChange={handleFileUpload} id="file-upload" className="hidden"/>
-                        <label htmlFor="file-upload" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
-                            <Upload size={18} className="mr-2"/>
-                            คลิกเพื่อเลือกไฟล์
-                        </label>
-                    </div>
-                    {uploadedFiles.length > 0 && (
-                        <div className="mt-4 space-y-2">
-                            {uploadedFiles.map((fileObj, i) => (
-                            <div key={fileObj.id} className="flex items-center text-sm p-2 bg-gray-100 rounded">
-                                <FileText className="w-4 h-4 mr-3 text-gray-500" />
-                                <span className="flex-1 truncate">{fileObj.file.name}</span>
-                                <div className="flex items-center ml-3">
-                                    {fileObj.status === 'uploading' && <Spinner className="w-4 h-4" />}
-                                    {fileObj.status === 'success' && <Check className="w-4 h-4 text-green-500" />}
-                                    {fileObj.status === 'error' && ( <span title={fileObj.error}><AlertTriangle className="w-4 h-4 text-red-500" /></span> )}
-                                    <button type="button" onClick={() => removeFile(i)} className="ml-3 text-gray-500 hover:text-red-600"><X size={16} /></button>
-                                </div>
-                            </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
+        <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">รายละเอียด <span className="text-gray-400 font-normal">(Optional)</span></label>
+            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} placeholder="อธิบายรายละเอียดเพิ่มเติม (ถ้ามี)..." className="w-full p-3 border rounded-lg" />
+        </div>
+        <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">แนบไฟล์ (ถ้ามี)</label>
+            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-500 transition-colors">
+                <input type="file" multiple onChange={handleFileUpload} id="file-upload" className="hidden"/>
+                <label htmlFor="file-upload" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
+                    <Upload size={18} className="mr-2"/>
+                    คลิกเพื่อเลือกไฟล์
+                </label>
             </div>
-        )}
+            {uploadedFiles.length > 0 && (
+                <div className="mt-4 space-y-2">
+                    {uploadedFiles.map((fileObj, i) => (
+                    <div key={fileObj.id} className="flex items-center text-sm p-2 bg-gray-100 rounded">
+                        <FileText className="w-4 h-4 mr-3 text-gray-500" />
+                        <span className="flex-1 truncate">{fileObj.file.name}</span>
+                        <div className="flex items-center ml-3">
+                            {fileObj.status === 'uploading' && <Spinner className="w-4 h-4" />}
+                            {fileObj.status === 'success' && <Check className="w-4 h-4 text-green-500" />}
+                            {fileObj.status === 'error' && ( <span title={fileObj.error}><AlertTriangle className="w-4 h-4 text-red-500" /></span> )}
+                            <button type="button" onClick={() => removeFile(i)} className="ml-3 text-gray-500 hover:text-red-600"><X size={16} /></button>
+                        </div>
+                    </div>
+                    ))}
+                </div>
+            )}
+        </div>
 
         <div className="flex justify-end gap-4 pt-4 border-t">
             <button type="button" onClick={onClose} className="px-6 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">ยกเลิก</button>
-            <button type="submit" disabled={isSubmitting || (isBimFlow && !selectedTask)} className="flex items-center px-6 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-blue-300">
+            <button type="submit" disabled={isSubmitting} className="flex items-center px-6 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-blue-300">
                 {isSubmitting ? <Spinner className="w-5 h-5 mr-2" /> : <Send className="w-5 h-5 mr-2" />}
                 {isSubmitting ? 'กำลังส่ง...' : 'ส่งคำขอ'}
             </button>

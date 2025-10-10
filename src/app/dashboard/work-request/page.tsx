@@ -63,7 +63,7 @@ function WorkRequestDashboardContent() {
         fetchDocuments(); // Re-fetch data after creating
     };
 
-    const canCreate = user && (REVIEWER_ROLES.includes(user.role) || user.role === ROLES.ADMIN || user.role === ROLES.BIM);
+    const canCreate = user && (REVIEWER_ROLES.includes(user.role) || user.role === ROLES.ADMIN);
 
     return (
         <div className="max-w-7xl mx-auto">
