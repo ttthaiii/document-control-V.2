@@ -100,7 +100,6 @@ export async function POST(req: NextRequest) {
             siteId,
             taskName,
             description: description || '',
-            priority: 'NORMAL', // ใส่ค่า default ไว้ก่อน หรือจะลบออกก็ได้
             status: initialStatus,
             createdBy: uid,
             assignedTo,

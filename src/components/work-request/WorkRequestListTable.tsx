@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { WorkRequest, WorkRequestStatus, WorkRequestPriority } from '@/types/work-request';
+import { WorkRequest, WorkRequestStatus } from '@/types/work-request';
 import Spinner from '@/components/shared/Spinner';
 import { FileText, Calendar, User, Clock, Building, Zap, AlertTriangle } from 'lucide-react';
 
@@ -40,29 +40,6 @@ const getStatusStyles = (status: WorkRequestStatus) => {
     }
 };
 
-// --- 👇 นี่คือส่วนที่แก้ไข ---
-const getPriorityIcon = (priority: WorkRequestPriority) => {
-    switch(priority) {
-        case WorkRequestPriority.URGENT:
-            return (
-                <span title="ด่วนที่สุด">
-                    <AlertTriangle className="w-4 h-4 text-red-500" />
-                </span>
-            );
-        case WorkRequestPriority.HIGH:
-            return (
-                <span title="ด่วน">
-                    <Zap className="w-4 h-4 text-orange-500" />
-                </span>
-            );
-        default:
-            return (
-                <span title="ปกติ" className="w-4 h-4" /> // Placeholder for alignment
-            );
-    }
-}
-// --- 👆 สิ้นสุดส่วนที่แก้ไข ---
-
 
 export default function WorkRequestListTable({
   documents,
@@ -96,7 +73,6 @@ export default function WorkRequestListTable({
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-2 py-3 text-center w-12"></th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">เลขที่เอกสาร</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">หัวข้อเรื่อง</th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">โครงการ</th>
@@ -113,9 +89,6 @@ export default function WorkRequestListTable({
                   className="hover:bg-gray-50 cursor-pointer"
                   onClick={() => onDocumentClick(doc)}
                 >
-                  <td className="px-2 py-4 text-center">
-                    {getPriorityIcon(doc.priority)}
-                  </td>
                   <td className="px-6 py-4">
                     <p className="text-sm font-semibold text-blue-600">{doc.documentNumber}</p>
                   </td>

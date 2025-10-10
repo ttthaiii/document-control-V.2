@@ -1,30 +1,29 @@
-// src/components/rfa/ApprovedDocumentLibrary.tsx
-
+// src/components/rfa/ApprovedDocumentLibrary.tsx (โค้ดฉบับสมบูรณ์)
 'use client'
 
 import React, { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '@/lib/auth/useAuth'
 import { Site, Category, RFADocument, RFAFile } from '@/types/rfa'
-import { Search, Building, Tag, FileText, Calendar, Download, Eye } from 'lucide-react' // ลบ Loader2
+import { Search, Building, Tag, FileText, Calendar, Download, Eye } from 'lucide-react'
 import Spinner from '@/components/shared/Spinner'
-import { useRouter } from 'next/navigation'
-import { STATUS_LABELS } from '@/lib/config/workflow'
 import PDFPreviewModal from './PDFPreviewModal'
+
+// v 1. Import สิ่งที่จำเป็นจาก Firestore SDK และ workflow config
+import { db } from '@/lib/firebase/client'
+import { collection, query, where, getDocs, orderBy } from 'firebase/firestore'
+import { STATUSES, STATUS_LABELS } from '@/lib/config/workflow' // <--- เพิ่ม STATUS_LABELS ที่นี่
+
 
 const formatDate = (date: any): string => {
   if (!date) return 'N/A';
-  if (date._seconds) {
-    return new Date(date._seconds * 1000).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' });
-  }
-  if (typeof date.toDate === 'function') {
-    return date.toDate().toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' });
+  if (date.seconds) {
+    return new Date(date.seconds * 1000).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' });
   }
   const d = new Date(date);
-  if (isNaN(d.getTime())) {
-    return 'Invalid Date';
-  }
+  if (isNaN(d.getTime())) return 'Invalid Date';
   return d.toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' });
 };
+
 
 const useIsMobile = () => {
   const [isMobile, setIsMobile] = useState(false);
@@ -41,7 +40,6 @@ export default function ApprovedDocumentLibrary() {
   const { user, firebaseUser } = useAuth();
   const isMobile = useIsMobile();
 
-  const [hasMounted, setHasMounted] = useState(false);
   const [sites, setSites] = useState<Site[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -57,11 +55,7 @@ export default function ApprovedDocumentLibrary() {
     setSelectedSite('ALL');
     setSelectedCategory('ALL');
   };
-
-  useEffect(() => {
-    setHasMounted(true);
-  }, []);
-
+  
   useEffect(() => {
     const fetchFilterData = async () => {
       if (!firebaseUser) return;
@@ -90,28 +84,37 @@ export default function ApprovedDocumentLibrary() {
 
   useEffect(() => {
     const fetchDocuments = async () => {
-      if (!user || !firebaseUser) return;
+      if (!user?.sites || user.sites.length === 0) {
+        setIsLoading(false);
+        return;
+      }
       setIsLoading(true);
       setError(null);
       
-      const params = new URLSearchParams({
-        view: 'approved',
-        siteId: selectedSite,
-        categoryId: selectedCategory,
-      });
-
       try {
-        const token = await firebaseUser.getIdToken();
-        const response = await fetch(`/api/rfa/list?${params.toString()}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (!response.ok) {
-            const errorBody = await response.json();
-            throw new Error(errorBody.error || `API failed: ${response.status}`);
+        let q = query(
+          collection(db, 'rfaDocuments'),
+          where('siteId', 'in', user.sites),
+          where('isLatest', '==', true),
+          where('status', 'in', [
+            STATUSES.APPROVED, 
+            STATUSES.APPROVED_WITH_COMMENTS, 
+            STATUSES.APPROVED_REVISION_REQUIRED
+          ]),
+          orderBy('updatedAt', 'desc')
+        );
+
+        if (selectedSite !== 'ALL') {
+          q = query(q, where('siteId', '==', selectedSite));
+        }
+        if (selectedCategory !== 'ALL') {
+          q = query(q, where('categoryId', '==', selectedCategory));
         }
         
-        const data = await response.json();
-        setDocuments(data.documents || []);
+        const querySnapshot = await getDocs(q);
+        
+        const docsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as RFADocument));
+        setDocuments(docsData);
 
       } catch (err) {
         setError(err instanceof Error ? err.message : 'ไม่สามารถโหลดข้อมูลเอกสารได้');
@@ -121,22 +124,15 @@ export default function ApprovedDocumentLibrary() {
       }
     };
 
-    const handler = setTimeout(() => {
-        fetchDocuments();
-    }, 300);
-
-    return () => {
-        clearTimeout(handler);
-    };
-
-  }, [firebaseUser, user, selectedSite, selectedCategory]);
+    fetchDocuments();
+  }, [user, selectedSite, selectedCategory]);
 
   const filteredDocuments = useMemo(() => {
     if (!searchTerm) return documents;
     const lowercasedFilter = searchTerm.toLowerCase();
     return documents.filter(doc =>
       doc.title.toLowerCase().includes(lowercasedFilter) ||
-      doc.documentNumber.toLowerCase().includes(lowercasedFilter)
+      (doc.documentNumber && doc.documentNumber.toLowerCase().includes(lowercasedFilter))
     );
   }, [searchTerm, documents]);
 
@@ -178,7 +174,6 @@ export default function ApprovedDocumentLibrary() {
                    {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.categoryCode}</option>)}
                </select>
             </div>
-            {/* เพิ่มปุ่ม Reset */}
             <div className="md:col-span-1">
                 <button 
                     onClick={resetFilters}
@@ -192,7 +187,7 @@ export default function ApprovedDocumentLibrary() {
         </div>
 
         <div className="p-4">
-          {isLoading || !hasMounted ? (
+          {isLoading ? (
             <div className="text-center py-16"><Spinner /></div>
           ) : filteredDocuments.length === 0 ? (
             <div className="text-center py-16 border-2 border-dashed rounded-lg"><p className="text-gray-500">ไม่พบเอกสารที่อนุมัติแล้ว</p></div>

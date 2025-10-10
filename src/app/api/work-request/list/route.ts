@@ -45,7 +45,6 @@ export async function GET(request: NextRequest) {
         documentNumber: docData.documentNumber,
         taskName: docData.taskName,
         status: docData.status,
-        priority: docData.priority,
         updatedAt: docData.updatedAt.toDate(),
         site: { id: docData.siteId, name: 'Loading...' }, 
       });
