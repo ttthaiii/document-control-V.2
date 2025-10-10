@@ -14,15 +14,6 @@ export interface TaskData {
 }
 
 /**
- * ระดับความสำคัญของงาน
- */
-export enum WorkRequestPriority {
-  NORMAL = 'NORMAL',   // ปกติ
-  HIGH = 'HIGH',       // ด่วน
-  URGENT = 'URGENT',     // ด่วนที่สุด
-}
-
-/**
  * สถานะของ Work Request ในกระบวนการ
  */
 export enum WorkRequestStatus {
@@ -57,7 +48,6 @@ export interface WorkRequest {
   site: RFASite;
   taskName: string;
   description: string;
-  priority: WorkRequestPriority;
   status: WorkRequestStatus;
   
   createdAt: any;
@@ -66,7 +56,9 @@ export interface WorkRequest {
   assignedTo?: string;
 
   // --- 👇 นี่คือส่วนที่เพิ่มเข้ามา ---
-  taskData?: TaskData | null; // สำหรับเก็บข้อมูลจาก BIM Tracking
+  planStartDate?: any; // วันที่เริ่มงาน (แผน)
+  dueDate?: any;       // วันที่กำหนดส่ง
+  taskData?: TaskData | null;
   // --- 👆 สิ้นสุดส่วนที่เพิ่มเข้ามา ---
 
   // การจัดการ Revision
