@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { adminDb, adminAuth } from '@/lib/firebase/admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { WorkRequestStatus } from '@/types/work-request';
-import { ROLES } from '@/lib/config/workflow';
+import { ROLES, REVIEWER_ROLES } from '@/lib/config/workflow';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,15 +40,28 @@ export async function POST(
     let canPerformAction = false;
 
     switch (action) {
-      case 'ACCEPT_WORK':
-        if (userData.role === ROLES.BIM && docData.status === WorkRequestStatus.PENDING_BIM && payload.taskData) {
-          canPerformAction = true;
-          newStatus = WorkRequestStatus.IN_PROGRESS;
-          updates.assignedTo = userId;
-          updates.taskData = payload.taskData;
+        
+      case 'SUBMIT_WORK':
+        // เปลี่ยนเงื่อนไขจาก `userId === docData.assignedTo` เป็น `userData.role === ROLES.BIM`
+        if (userData.role === ROLES.BIM && (docData.status === WorkRequestStatus.IN_PROGRESS || docData.status === WorkRequestStatus.REVISION_REQUESTED)) {
+            canPerformAction = true;
+            newStatus = WorkRequestStatus.PENDING_ACCEPTANCE;
         }
         break;
-      // ... (เราจะมาเพิ่ม Case อื่นๆ ที่นี่ในอนาคต) ...
+
+      case 'REQUEST_REVISION':
+        if (REVIEWER_ROLES.includes(userData.role) && docData.status === WorkRequestStatus.PENDING_ACCEPTANCE) {
+          canPerformAction = true;
+          newStatus = WorkRequestStatus.REVISION_REQUESTED;
+        }
+        break;
+
+      case 'COMPLETE':
+        if (REVIEWER_ROLES.includes(userData.role) && docData.status === WorkRequestStatus.PENDING_ACCEPTANCE) {
+          canPerformAction = true;
+          newStatus = WorkRequestStatus.COMPLETED;
+        }
+        break;
     }
 
     if (!canPerformAction || !newStatus) {

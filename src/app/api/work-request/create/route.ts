@@ -2,10 +2,10 @@ import { NextResponse, NextRequest } from "next/server";
 import { adminDb, adminBucket, adminAuth } from "@/lib/firebase/admin";
 import { FieldValue } from 'firebase-admin/firestore';
 import { WorkRequestStatus } from '@/types/work-request';
+import { ROLES, REVIEWER_ROLES } from '@/lib/config/workflow';
 
 export const dynamic = 'force-dynamic';
 
-// Helper function to verify user token from request header
 async function verifyIdTokenFromHeader(req: Request): Promise<string | null> {
     const authHeader = req.headers.get("authorization") || "";
     const match = authHeader.match(/^Bearer (.+)$/i);
@@ -25,53 +25,62 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-        // 1. Get User and Request Data
         const userDoc = await adminDb.collection('users').doc(uid).get();
         if (!userDoc.exists) {
             return NextResponse.json({ success: false, error: 'User not found' }, { status: 403 });
         }
         const userData = userDoc.data()!;
-        const payload = await req.json();
-        const { siteId, taskName, description, priority, files: uploadedFiles, taskData } = await req.json();
 
-        if (!siteId || !taskName || !priority) { // เอา description ออกจากการตรวจสอบ
-            return NextResponse.json({ success: false, error: "Missing required fields (siteId, taskName, priority)." }, { status: 400 });
+        // --- 👇 [เพิ่ม] ตรวจสอบ Role ของผู้ใช้ ---
+        if (!REVIEWER_ROLES.includes(userData.role)) {
+            return NextResponse.json({ success: false, error: "Permission denied. Only Site users can create Work Requests." }, { status: 403 });
         }
+        // --- 👆 [สิ้นสุดการเพิ่ม] ---
 
-        // 3. Generate Running Number (WR-<SiteShortName>-XXXX)
-        const runningNumber = await adminDb.runTransaction(async (transaction) => {
+        // --- 👇 [แก้ไข] เปลี่ยนตัวแปรที่รับจาก request body ---
+        const { siteId, taskName, description, dueDate, files: uploadedFiles } = await req.json();
+
+        if (!siteId || !taskName || !dueDate) { // ตรวจสอบ dueDate แทน priority
+            return NextResponse.json({ success: false, error: "Missing required fields (siteId, taskName, dueDate)." }, { status: 400 });
+        }
+        // --- 👆 [สิ้นสุดการแก้ไข] ---
+
+        // --- 👇 [แก้ไข] ลบ Logic isBimCreator และกำหนดค่าเริ่มต้นตายตัว ---
+        const initialStatus = WorkRequestStatus.PENDING_BIM;
+        const assignedTo = null; // ไม่มีผู้รับผิดชอบตอนสร้าง
+        // --- 👆 [สิ้นสุดการแก้ไข] ---
+
+        const { documentNumber, runningNumber } = await adminDb.runTransaction(async (transaction) => {
             const siteRef = adminDb.collection('sites').doc(siteId);
             const siteDoc = await transaction.get(siteRef);
             if (!siteDoc.exists) throw new Error("Site not found");
             const siteShortName = siteDoc.data()?.shortName;
             if (!siteShortName) throw new Error(`'shortName' is not configured for site ID: ${siteId}`);
 
-            const counterId = `${siteId}_WR`; // Use a specific counter for Work Requests
+            const counterId = `${siteId}_WR`;
             const counterRef = adminDb.collection('counters').doc(counterId);
             const counterDoc = await transaction.get(counterRef);
             
             const nextNumber = (counterDoc.data()?.currentNumber || 0) + 1;
             
             transaction.set(counterRef, { currentNumber: nextNumber }, { merge: true });
-            return String(nextNumber).padStart(4, '0');
+            
+            const paddedNumber = String(nextNumber).padStart(4, '0');
+            const fullDocumentNumber = `WR-${siteShortName}-${paddedNumber}`;
+            
+            return { documentNumber: fullDocumentNumber, runningNumber: paddedNumber };
         });
         
-        const documentNumber = `WR-${(await adminDb.collection('sites').doc(siteId).get()).data()?.shortName}-${runningNumber}`;
-
-        // 4. Move Files from Temp to Permanent Storage
-        const finalFilesData = [];
+        const finalFilesData: any[] = [];
         if (uploadedFiles && uploadedFiles.length > 0) {
             const cdnUrlBase = "https://ttsdoc-cdn.ttthaiii30.workers.dev";
             for (const tempFile of uploadedFiles) {
                 const sourcePath = tempFile.filePath;
-                if (!sourcePath || !sourcePath.startsWith(`temp/${uid}/`)) continue;
-
+                if (!sourcePath || !sourcePath.startsWith(`temp/${uid}/`)) {
+                    continue;
+                }
                 const destinationPath = `sites/${siteId}/work-requests/${documentNumber}/${Date.now()}_${tempFile.fileName}`;
                 await adminBucket.file(sourcePath).move(destinationPath);
-                
-                // Also delete the original temp file
-                await adminBucket.file(sourcePath).delete({ ignoreNotFound: true });
-
                 finalFilesData.push({
                     ...tempFile,
                     fileUrl: `${cdnUrlBase}/${destinationPath}`,
@@ -82,25 +91,27 @@ export async function POST(req: NextRequest) {
             }
         }
         
-        // 5. Create the Work Request Document
         const newWorkRequestRef = adminDb.collection("workRequests").doc();
-        const initialStatus = WorkRequestStatus.PENDING_BIM;
 
+        // --- 👇 [แก้ไข] ปรับข้อมูลที่จะบันทึกลง Firestore ---
         await newWorkRequestRef.set({
             documentNumber,
             runningNumber,
             siteId,
             taskName,
             description: description || '',
-            priority,
+            priority: 'NORMAL', // ใส่ค่า default ไว้ก่อน หรือจะลบออกก็ได้
             status: initialStatus,
             createdBy: uid,
+            assignedTo,
+            planStartDate: null, // วันที่เริ่มงานเป็น null เสมอ
+            dueDate: new Date(dueDate), // ใช้วันที่กำหนดส่งที่รับมา
             createdAt: FieldValue.serverTimestamp(),
             updatedAt: FieldValue.serverTimestamp(),
             revisionNumber: 0,
             isLatest: true,
             files: finalFilesData,
-            taskData: taskData || null, // <-- บันทึก taskData ที่ได้รับมา
+            taskData: null, // taskData เป็น null ตอนสร้างเสมอ
             workflow: [{
                 action: "CREATE",
                 status: initialStatus,
@@ -113,6 +124,7 @@ export async function POST(req: NextRequest) {
             }],
             usersInfo: { [uid]: { email: userData.email, role: userData.role } }
         });
+        // --- 👆 [สิ้นสุดการแก้ไข] ---
 
         return NextResponse.json({ 
             success: true, 
