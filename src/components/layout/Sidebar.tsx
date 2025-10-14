@@ -1,4 +1,4 @@
-// src/components/layout/Sidebar.tsx (แก้ไขแล้ว)
+// src/components/layout/Sidebar.tsx (โค้ดฉบับสมบูรณ์)
 'use client'
 
 import React, { useState, useEffect, useMemo, Suspense } from 'react'
@@ -7,26 +7,20 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth/useAuth'
 import { useLoading } from '@/lib/context/LoadingContext'
 import { 
-  FileText, 
-  HelpCircle, 
-  Wrench, 
-  Building, 
-  BarChart3, 
-  ChevronDown, 
-  ChevronRight,
-  LogOut,
-  Menu,
-  X,
-  Users
+  FileText, HelpCircle, Wrench, BarChart3, ChevronDown, 
+  ChevronRight, LogOut, X, Users
 } from 'lucide-react'
 import { CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES } from '@/lib/config/workflow'
+
+// v 1. Import สิ่งที่จำเป็นจาก Firestore SDK
+import { db } from '@/lib/firebase/client'
+import { collection, query, where, onSnapshot, documentId } from 'firebase/firestore'
 
 interface SidebarProps {
   isOpen: boolean
   onToggle: () => void
 }
 
-// Interface สำหรับ Site ที่จะดึงข้อมูลมา
 interface Site {
   id: string;
   name: string;
@@ -36,32 +30,39 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { user, logout, firebaseUser } = useAuth() // <-- 1. ดึง firebaseUser มาด้วย
+  const { user, logout } = useAuth()
   const { showLoader } = useLoading()
 
   const [showRfaDropdown, setShowRfaDropdown] = useState(false)
-  const [sites, setSites] = useState<Site[]>([]); // <-- 2. เพิ่ม State สำหรับเก็บข้อมูล Sites
+  const [sites, setSites] = useState<Site[]>([]);
 
-  // --- 👇 3. เพิ่ม useEffect เพื่อดึงข้อมูล Sites จาก API ---
+  // v 2. เปลี่ยนจากการเรียก API มาใช้ onSnapshot เพื่อดึงข้อมูล Site
   useEffect(() => {
-    const fetchSites = async () => {
-      if (!firebaseUser) return;
-      try {
-        const token = await firebaseUser.getIdToken();
-        const response = await fetch('/api/sites', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const data = await response.json();
-        if (data.success) {
-          setSites(data.sites || []);
-        }
-      } catch (error) {
-        console.error("Sidebar: Failed to fetch sites", error);
-      }
-    };
-    fetchSites();
-  }, [firebaseUser]);
-  // --- 👆 สิ้นสุดส่วนที่เพิ่ม ---
+    if (!user?.sites || user.sites.length === 0) {
+      setSites([]); // ถ้า user ไม่มี site ให้เคลียร์ค่า state
+      return;
+    }
+
+    // สร้าง Query เพื่อดึงข้อมูลเฉพาะ Site ที่ user มีสิทธิ์
+    const q = query(
+      collection(db, "sites"), 
+      where(documentId(), "in", user.sites)
+    );
+
+    // เริ่ม "ฟัง" ข้อมูลแบบ Real-time (ซึ่งจะอ่านจาก Cache ก่อนเสมอ)
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      const sitesFromDb: Site[] = [];
+      querySnapshot.forEach((doc) => {
+        sitesFromDb.push({ id: doc.id, name: doc.data().name });
+      });
+      setSites(sitesFromDb);
+    }, (error) => {
+      console.error("Sidebar: Failed to fetch sites with onSnapshot", error);
+    });
+
+    // หยุดการ "ฟัง" เมื่อ component ถูกปิด
+    return () => unsubscribe();
+  }, [user]); // ให้ useEffect ทำงานใหม่เมื่อข้อมูล user เปลี่ยนแปลง
 
   
   const isRFAAuthorized = () => {
@@ -75,15 +76,13 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
     return authorizedRoles.includes(user.role);
   }
 
-  // --- 👇 4. แก้ไข useMemo ให้ดึงชื่อจริงๆ มาแสดง ---
+  // v 3. useMemo ส่วนนี้จะทำงานได้ถูกต้องเหมือนเดิม ไม่ต้องแก้ไข
   const userSites = useMemo(() => {
     if (!user?.sites || sites.length === 0) {
       return [];
     }
-    // กรองเอาเฉพาะ Site ที่ user มีสิทธิ์ และ map ให้มี id และ name ที่ถูกต้อง
     return sites.filter(site => user.sites!.includes(site.id));
   }, [user?.sites, sites]);
-  // --- 👆 สิ้นสุดส่วนที่แก้ไข ---
 
 
   useEffect(() => {
@@ -152,7 +151,6 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
             <p className="text-orange-100 text-sm">
               Role: {user.role}
             </p>
-            {/* ส่วนนี้จะแสดงผลถูกต้องโดยอัตโนมัติ */}
             {userSites.length > 0 && (
               <div>
                 <p className="text-orange-100 text-xs">Site:</p>
@@ -168,7 +166,6 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
           </div>
         </div>
 
-        {/* ... ส่วนที่เหลือของ JSX ไม่มีการเปลี่ยนแปลง ... */}
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
           
           <Link

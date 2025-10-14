@@ -265,48 +265,44 @@ export default function RFAListTable({
 
   // Desktop View (Table)
   return (
-    <div className="bg-white rounded-lg shadow overflow-hidden">
-      <div className="overflow-x-auto">
+    // 1. ให้ Container หลักสูงเต็มพื้นที่ (h-full) และเป็น Flexbox แนวตั้ง
+    <div className="sticky top-16 bg-white rounded-lg shadow overflow-hidden h-[calc(100vh-12rem)] flex flex-col">
+      {/* 2. ทำให้ส่วนนี้ (ที่ครอบตาราง) เป็นส่วนที่ Scroll ได้ */}
+      <div className="overflow-auto flex-1">
         <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
+          {/* 3. ทำให้ Header ของตาราง "ติด" อยู่ที่ top-0 ของ container ที่ scroll ได้ */}
+          <thead className="bg-gray-50 sticky top-0 z-10">
             <tr>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                  <button onClick={() => requestSort('runningNumber')} className="flex items-center justify-center w-full">
-                    System No.
-                    <SortIcon columnKey='runningNumber' />
+                    System No. <SortIcon columnKey='runningNumber' />
                  </button>
               </th>
-              {/* ✅ [CHANGE 2] เพิ่มหัวตาราง "โครงการ" */}
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                  <button onClick={() => requestSort('site.name')} className="flex items-center w-full">
-                    โครงการ
-                    <SortIcon columnKey='site.name' />
+                    โครงการ <SortIcon columnKey='site.name' />
                  </button>
               </th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                  <button onClick={() => requestSort('category.categoryCode')} className="flex items-center justify-center w-full">
-                    หมวดหมู่
-                    <SortIcon columnKey='category.categoryCode' />
+                    หมวดหมู่ <SortIcon columnKey='category.categoryCode' />
                  </button>
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">เอกสาร</th>
               <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Rev.</th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                  <button onClick={() => requestSort('pendingDays')} className="flex items-center justify-center w-full">
-                    สถานะ
-                    <SortIcon columnKey='pendingDays' />
+                    สถานะ <SortIcon columnKey='pendingDays' />
                  </button>
               </th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                  <button onClick={() => requestSort('responsibleParty')} className="flex items-center justify-center w-full">
-                    ผู้รับผิดชอบ
-                    <SortIcon columnKey='responsibleParty' />
+                    ผู้รับผิดชอบ <SortIcon columnKey='responsibleParty' />
                  </button>
               </th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                  <button onClick={() => requestSort('updatedAt')} className="flex items-center justify-center w-full">
-                    วันที่อัปเดตล่าสุด
-                    <SortIcon columnKey='updatedAt' />
+                    วันที่อัปเดตล่าสุด <SortIcon columnKey='updatedAt' />
                  </button>
               </th>
             </tr>
@@ -316,15 +312,10 @@ export default function RFAListTable({
               const responsible = getResponsibleParty(doc);
               const pendingDays = calculatePendingDays(doc);
               return (
-                <tr
-                  key={doc.id}
-                  className="hover:bg-gray-50 cursor-pointer"
-                  onClick={() => onDocumentClick(doc)}
-                >
+                <tr key={doc.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => onDocumentClick(doc)}>
                   <td className="px-6 py-4">
                     <p className="text-sm font-semibold text-blue-600 text-center">{doc.runningNumber || 'N/A'}</p>
                   </td>
-                  {/* ✅ [CHANGE 2] เพิ่ม Cell แสดงข้อมูล "โครงการ" */}
                   <td className="px-6 py-4">
                     <p className="text-sm text-gray-800">{doc.site?.name || 'N/A'}</p>
                   </td>
@@ -349,7 +340,6 @@ export default function RFAListTable({
                       <span className={`inline-flex items-center justify-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(doc.status)}`}>
                         {statusLabels[doc.status] || doc.status}
                       </span>
-                      {/* ✅ [FIX 3] เปลี่ยนไปใช้ Array ใหม่ที่ครอบคลุมทุกสถานะ */}
                       {ACTIVE_STATUSES_FOR_PENDING_DAYS.includes(doc.status) && pendingDays > 0 && (
                         <span className="text-xs text-orange-600 text-center">{`ค้าง ${pendingDays} วัน`}</span>
                       )}

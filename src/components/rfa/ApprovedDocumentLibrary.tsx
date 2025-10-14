@@ -147,7 +147,9 @@ export default function ApprovedDocumentLibrary() {
 
   return (
     <>
-      <div className="bg-white rounded-lg shadow">
+      {/* 1. ให้ Container หลักสูงเต็มพื้นที่ และเป็น Flexbox แนวตั้ง */}
+      <div className="bg-white rounded-lg shadow flex flex-col h-full">
+        {/* --- ส่วน Filter (ไม่ Scroll) --- */}
         <div className="p-4 border-b">
           <h2 className="text-xl font-bold text-gray-800 mb-4">
             📚 คลังเอกสารอนุมัติ (Approved Document Library)
@@ -186,7 +188,7 @@ export default function ApprovedDocumentLibrary() {
           {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
         </div>
 
-        <div className="p-4">
+        <div className="p-4 flex-1 min-h-0 overflow-y-auto">
           {isLoading ? (
             <div className="text-center py-16"><Spinner /></div>
           ) : filteredDocuments.length === 0 ? (

@@ -1,4 +1,4 @@
-// src/components/rfa/CreateRFAForm.tsx (UI/Layout ปรับปรุงใหม่)
+// src/components/rfa/CreateRFAForm.tsx (โค้ดฉบับสมบูรณ์)
 'use client'
 
 import React, { useState, useEffect, useMemo } from 'react'
@@ -10,7 +10,12 @@ import Spinner from '@/components/shared/Spinner'
 import { ROLES, Role } from '@/lib/config/workflow';
 import { useNotification } from '@/lib/context/NotificationContext';
 
-// --- Interfaces ---
+// v 1. Import สิ่งที่จำเป็นจาก Firestore SDK
+import { db } from '@/lib/firebase/client'
+import { collection, query, where, getDocs, orderBy, documentId, collectionGroup } from 'firebase/firestore'
+
+
+// --- Interfaces (เหมือนเดิม) ---
 interface Category { id: string; categoryCode: string; categoryName: string; }
 interface UploadedFile { id: string; file: File; status: 'pending' | 'uploading' | 'success' | 'error' | 'retrying'; progress: number; uploadedData?: { fileName: string; fileUrl: string; filePath: string; size: number; contentType: string; }; error?: string; retryCount: number; }
 interface RFAFormData { rfaType: 'RFA-SHOP' | 'RFA-GEN' | 'RFA-MAT' | ''; categoryId: string; documentNumber: string; title: string; description: string; revisionNumber: string; uploadedFiles: UploadedFile[]; selectedProject: string; selectedCategory: string; selectedTask: TaskData | null; }
@@ -52,7 +57,7 @@ export default function CreateRFAForm({
   const [isDocNumAvailable, setIsDocNumAvailable] = useState<boolean | null>(null);
   const [debouncedDocNum, setDebouncedDocNum] = useState('');
 
-  const { firebaseUser } = useAuth();
+  const { firebaseUser, user } = useAuth(); // ใช้ user จาก useAuth โดยตรง
   const { showNotification } = useNotification();
   const { loading: sheetsLoading, error: sheetsError, getCategories, getTasks } = useGoogleSheets();
   const [taskSearchQuery, setTaskSearchQuery] = useState('');
@@ -65,42 +70,44 @@ export default function CreateRFAForm({
     return true; 
   }, [userProp, formData.rfaType]);
 
+  // v 2. เปลี่ยนจากการเรียก API มาใช้ getDocs เพื่อดึงข้อมูล Site
   useEffect(() => {
     const loadSites = async () => {
-      if (!firebaseUser) return;
-      setLoading(true);
-      try {
-        const token = await firebaseUser.getIdToken();
-        const response = await fetch('/api/sites', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (response.ok) {
-          const data = await response.json();
-          setSites(data.sites || []);
+        if (!user?.sites || user.sites.length === 0) return;
+
+        setLoading(true);
+        try {
+            const q = query(collection(db, "sites"), where(documentId(), "in", user.sites));
+            const querySnapshot = await getDocs(q);
+            const sitesFromDb: Site[] = querySnapshot.docs.map(doc => ({
+                id: doc.id,
+                name: doc.data().name,
+                sheetId: doc.data().settings?.googleSheetsConfig?.spreadsheetId || '',
+                sheetName: doc.data().settings?.googleSheetsConfig?.sheetName || '',
+            }));
+            setSites(sitesFromDb);
+        } catch (error) {
+            console.error('Error loading sites:', error);
+            showNotification('error', 'เกิดข้อผิดพลาด', 'ไม่สามารถโหลดรายชื่อโครงการได้');
+        } finally {
+            setLoading(false);
         }
-      } catch (error) {
-        console.error('Error loading sites:', error);
-      } finally {
-        setLoading(false);
-      }
     };
     loadSites();
-  }, [firebaseUser]);
+  }, [user]);
+
 
   useEffect(() => {
-    // ถ้าไม่มี siteId หรือ documentNumber ก็ไม่ต้องทำอะไร
     if (!selectedSite || !formData.documentNumber) {
-      setIsDocNumAvailable(null); // รีเซ็ตสถานะ
+      setIsDocNumAvailable(null); 
       return;
     }
 
     setIsCheckingDocNum(true);
-    // ตั้งเวลาหน่วง (debounce) 500ms
     const handler = setTimeout(() => {
       setDebouncedDocNum(formData.documentNumber);
     }, 500);
 
-    // clear timeout ถ้า user พิมพ์ต่อ
     return () => {
       clearTimeout(handler);
     };
@@ -128,7 +135,7 @@ export default function CreateRFAForm({
 
       } catch (error) {
         console.error("Failed to check duplicate:", error);
-        setIsDocNumAvailable(null); // ไม่สามารถเช็คได้
+        setIsDocNumAvailable(null); 
       } finally {
         setIsCheckingDocNum(false);
       }
@@ -285,6 +292,7 @@ export default function CreateRFAForm({
     updateFormData({ uploadedFiles: formData.uploadedFiles.filter((_, i) => i !== index) });
   };
   
+  // v 3. เปลี่ยน handleSiteChange ให้ดึงข้อมูล Category จาก Firestore โดยตรง
   const handleSiteChange = async (siteId: string) => {
     setSelectedSite(siteId);
     updateFormData({ categoryId: '', selectedCategory: '', selectedTask: null });
@@ -293,24 +301,41 @@ export default function CreateRFAForm({
     setTasks([]);
     setTaskSearchQuery('');
     if (!siteId) return;
+
     const selected = sites.find(s => s.id === siteId);
     if (!selected) return;
+    
+    setLoading(true);
     if (isManualFlow) {
-      if (firebaseUser) {
-        setLoading(true);
         try {
-          const token = await firebaseUser.getIdToken();
-          const response = await fetch(`/api/sites/${siteId}/categories`, { headers: { 'Authorization': `Bearer ${token}` } });
-          const data = await response.json();
-          if (data.success) setSiteCategories(data.categories);
-        } catch (e) { console.error("Failed to fetch site categories:", e); setErrors(prev => ({ ...prev, site: 'ไม่สามารถโหลดหมวดงานได้' })); } finally { setLoading(false); }
-      }
+            const q = query(
+              collection(db, `sites/${siteId}/categories`), 
+              orderBy('categoryCode')
+            );
+            const querySnapshot = await getDocs(q);
+            const cats: Category[] = querySnapshot.docs.map(doc => ({
+                id: doc.id,
+                categoryCode: doc.data().categoryCode,
+                categoryName: doc.data().categoryName
+            }));
+            setSiteCategories(cats);
+        } catch (e) { 
+            console.error("Failed to fetch site categories:", e); 
+            setErrors(prev => ({ ...prev, site: 'ไม่สามารถโหลดหมวดงานได้' }));
+        } finally { 
+            setLoading(false); 
+        }
     } else {
       updateFormData({ selectedProject: selected.name });
       try {
         const cats = await getCategories({ sheetId: selected.sheetId || '' }, selected.name, formData.rfaType);
         setSheetCategories(cats);
-      } catch (e) { console.error("Failed to fetch categories from BIM-Tracking:", e); setErrors(prev => ({ ...prev, site: 'ไม่สามารถโหลดหมวดงานจากระบบ BIM-Tracking ได้' })); }
+      } catch (e) { 
+          console.error("Failed to fetch categories from BIM-Tracking:", e); 
+          setErrors(prev => ({ ...prev, site: 'ไม่สามารถโหลดหมวดงานจาก BIM-Tracking ได้' }));
+      } finally {
+          setLoading(false);
+      }
     }
   };
 
@@ -335,6 +360,7 @@ export default function CreateRFAForm({
     return tasks.filter(t => t.taskName.toLowerCase().includes(taskSearchQuery.toLowerCase()));
   }, [tasks, taskSearchQuery]);
 
+  // ... (ส่วน JSX ที่เหลือทั้งหมดเหมือนเดิม ไม่ต้องแก้ไข) ...
   return (
     <div className={`${isModal ? 'max-w-4xl w-full mx-auto' : ''} bg-white rounded-lg shadow-xl flex flex-col h-full max-h-[95vh]`}>
       <div className="flex items-center justify-between p-6 border-b bg-gray-50 rounded-t-lg">
@@ -345,7 +371,6 @@ export default function CreateRFAForm({
               <span className="font-medium text-gray-600"> - {RFA_TYPE_CONFIG[formData.rfaType].subtitle}</span>
             )}
           </h2>
-          {/*<p className="text-sm text-gray-600 mt-1">{userProp && `โดย ${userProp.email} (${userProp.role})`}</p>*/}
         </div>
         {onClose && <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X /></button>}
       </div>
@@ -381,7 +406,6 @@ export default function CreateRFAForm({
                 ข้อมูลเอกสาร
             </h3>
             <div className="space-y-6 max-w-3xl">
-                {/* --- 👇 [UI/UX] ปรับ Layout ส่วนนี้เป็น Grid --- */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">โครงการ <span className="text-red-500">*</span></label>
@@ -424,7 +448,6 @@ export default function CreateRFAForm({
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div className="sm:col-span-2">
                         <label className="block text-sm font-medium text-gray-700 mb-2">เลขที่เอกสาร</label>
-                        {/* 1. เพิ่ม div ครอบ input และ icon ด้วย class "relative" */}
                         <div className="relative">
                             <input 
                               type="text" 
@@ -435,7 +458,6 @@ export default function CreateRFAForm({
                               }}
                               className={`w-full p-3 border rounded-lg pr-10 ${isDocNumAvailable === false ? 'border-red-500' : ''}`} 
                             />
-                            {/* 2. ลบคลาส "top-6" ออก เพื่อให้ flex จัดตำแหน่งกึ่งกลางได้ถูกต้อง */}
                             <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
                               {isCheckingDocNum && <Loader2 className="h-5 w-5 text-gray-400 animate-spin" />}
                               {!isCheckingDocNum && isDocNumAvailable === true && <Check className="h-5 w-5 text-green-500" />}
