@@ -135,33 +135,40 @@ function WorkRequestDashboardContent() {
     const canCreate = user && (REVIEWER_ROLES.includes(user.role) || user.role === ROLES.ADMIN);
 
     return (
-        <div className="max-w-7xl mx-auto">
-            <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                    <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">
-                        ✍️ Work Requests
-                    </h1>
-                    <p className="text-gray-600 mt-1">รายการคำร้องของานทั้งหมด (Real-time)</p>
-                </div>
-                <div className="flex items-center space-x-3 mt-4 sm:mt-0">
-                    <button className="flex items-center px-3 py-2 bg-gray-100 text-gray-700 rounded-lg cursor-default" disabled>
-                        <RefreshCw className={`w-4 h-4 mr-2 ${!loading ? '' : 'animate-spin'}`} />
-                        Real-time Sync
-                    </button>
-                    {canCreate && (
-                         <button onClick={() => setIsCreateModalOpen(true)} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                            <Plus className="w-4 h-4 mr-2" />
-                            สร้าง Work Request
+        // v 1. เปลี่ยน max-w-7xl เป็น max-w-screen-2xl และทำให้เป็น Flexbox Layout
+        <div className="max-w-screen-2xl mx-auto flex flex-col h-full">
+            {/* --- ส่วนที่ไม่ต้อง Scroll --- */}
+            <div>
+                <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                        <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">
+                            ✍️ Work Requests
+                        </h1>
+                        <p className="text-gray-600 mt-1">รายการคำร้องของานทั้งหมด (Real-time)</p>
+                    </div>
+                    <div className="flex items-center space-x-3 mt-4 sm:mt-0">
+                        <button className="flex items-center px-3 py-2 bg-gray-100 text-gray-700 rounded-lg cursor-default" disabled>
+                            <RefreshCw className={`w-4 h-4 mr-2 ${!loading ? '' : 'animate-spin'}`} />
+                            Real-time Sync
                         </button>
-                    )}
+                        {canCreate && (
+                             <button onClick={() => setIsCreateModalOpen(true)} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                                <Plus className="w-4 h-4 mr-2" />
+                                สร้าง Work Request
+                            </button>
+                        )}
+                    </div>
                 </div>
             </div>
 
-            <WorkRequestListTable
-                documents={documentsWithSiteNames}
-                isLoading={loading}
-                onDocumentClick={handleDocumentClick}
-            />
+            {/* v 2. สร้าง Container ให้ตารางยืดขยายเต็มพื้นที่ที่เหลือ */}
+            <div className="flex-1 min-h-0">
+                <WorkRequestListTable
+                    documents={documentsWithSiteNames}
+                    isLoading={loading}
+                    onDocumentClick={handleDocumentClick}
+                />
+            </div>
             
             {selectedDocId && (
                 <WorkRequestDetailModal

@@ -1,22 +1,25 @@
-// src/app/dashboard/rfa/page.tsx (โค้ดที่แก้ไขแล้ว)
+// src/app/dashboard/rfa/page.tsx (โค้ดฉบับสมบูรณ์)
 'use client'
 
-import React, { Suspense, useMemo, useState, useEffect } from 'react' // ✅ 1. เพิ่ม React เข้ามา
+import React, { Suspense, useMemo, useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth/useAuth'
 import { AuthGuard } from '@/lib/components/shared/AuthGuard'
 import RFAListTable from '@/components/rfa/RFAListTable'
 import DashboardStats from '@/components/rfa/DashboardStats'
 import CreateRFAForm from '@/components/rfa/CreateRFAForm'
-import { RFADocument, Site, Category } from '@/types/rfa' // ✅ 2. import Category เข้ามา
+import { RFADocument, Site, Category } from '@/types/rfa'
 import { STATUSES, STATUS_LABELS, CREATOR_ROLES, APPROVER_ROLES } from '@/lib/config/workflow'
-import { Plus, Search, RefreshCw } from 'lucide-react'
-import { db } from '@/lib/firebase/client'
-import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore'
+import { Plus, RefreshCw } from 'lucide-react'
 import SmartRFAModal from '@/components/rfa/SmartRFAModal'
 import FilterBar from '@/components/rfa/FilterBar' 
 
-// ... Interface ทั้งหมดเหมือนเดิม ...
+// v 1. Import สิ่งที่จำเป็นจาก Firestore SDK
+import { db } from '@/lib/firebase/client'
+import { collection, query, where, onSnapshot, orderBy, documentId, collectionGroup } from 'firebase/firestore'
+
+
+// --- Interfaces (เหมือนเดิม) ---
 interface Filters {
   rfaType: 'ALL' | 'RFA-SHOP' | 'RFA-GEN' | 'RFA-MAT'
   status: string
@@ -25,16 +28,9 @@ interface Filters {
   categoryId: string | 'ALL';
   responsibleParty: 'ALL' | 'SITE' | 'CM' | CreatorRole;
 }
-
-// ❌ 3. ลบ interface Category ที่ซ้ำซ้อนออกไป
-
 type CreatorRole = typeof CREATOR_ROLES[number];
-
-
 const RFA_TYPE_DISPLAY_NAMES: { [key: string]: string } = {
-  'RFA-SHOP': 'Shop Drawing',
-  'RFA-GEN': 'General',
-  'RFA-MAT': 'Material',
+  'RFA-SHOP': 'Shop Drawing', 'RFA-GEN': 'General', 'RFA-MAT': 'Material',
 };
 
 
@@ -43,7 +39,6 @@ function RFAContent() {
     const router = useRouter()
     const searchParams = useSearchParams()
 
-    // --- State ต่างๆ เหมือนเดิม ---
     const [allDocuments, setAllDocuments] = useState<RFADocument[]>([]);
     const [loading, setLoading] = useState(true)
     const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
@@ -60,11 +55,6 @@ function RFAContent() {
         responsibleParty: 'ALL',
     })
 
-    const [isFilterBarStuck, setIsFilterBarStuck] = useState(false);
-    const sentinelRef = React.useRef<HTMLDivElement>(null);
-
-
-    // ... (ส่วน useMemo และ useEffect ทั้งหมดเหมือนเดิม ไม่ต้องแก้ไข) ...
     const availableStatuses = useMemo(() => {
         const allStatusKeys = Object.values(STATUSES);
         if (user && APPROVER_ROLES.includes(user.role)) {
@@ -104,11 +94,7 @@ function RFAContent() {
         setSelectedDocumentId(null);
         const currentQuery = new URLSearchParams(window.location.search);
         currentQuery.delete('docId');
-        
-        // --- 👇 นี่คือส่วนที่แก้ไข ---
-        // เพิ่ม { scroll: false } เข้าไปด้านหลังเพื่อไม่ให้หน้าจอเลื่อน
         router.push(`/dashboard/rfa?${currentQuery.toString()}`, { scroll: false });
-        // --- 👆 สิ้นสุดส่วนที่แก้ไข ---
     };
 
     useEffect(() => {
@@ -118,6 +104,7 @@ function RFAContent() {
         }
     }, [searchParams, filters.rfaType]);
     
+    // useEffect หลักสำหรับดึงเอกสาร RFA (เหมือนเดิม)
     useEffect(() => {
         if (!firebaseUser || !user?.sites || user.sites.length === 0) {
         setLoading(false);
@@ -140,13 +127,13 @@ function RFAContent() {
                 ...data,
                 site: { id: data.siteId, name: data.siteName || 'N/A' },
                 category: { 
-                id: data.categoryId, 
-                categoryCode: data.taskData?.taskCategory || data.categoryId || 'N/A', 
-                categoryName: '' 
+                    id: data.categoryId, 
+                    categoryCode: data.taskData?.taskCategory || data.categoryId || 'N/A', 
+                    categoryName: '' 
                 },
                 createdByInfo: { 
-                email: data.workflow?.[0]?.userName || 'N/A', 
-                role: data.workflow?.[0]?.role || 'N/A' 
+                    email: data.workflow?.[0]?.userName || 'N/A', 
+                    role: data.workflow?.[0]?.role || 'N/A' 
                 },
                 permissions: {},
             } as RFADocument);
@@ -161,47 +148,54 @@ function RFAContent() {
         return () => unsubscribe();
     }, [firebaseUser, user]);
 
+    // v 2. เปลี่ยนจากการเรียก API มาใช้ onSnapshot เพื่อดึงข้อมูล Site และ Category
     useEffect(() => {
-        const fetchSites = async () => {
-          if (!firebaseUser) return;
-          try {
-            const token = await firebaseUser.getIdToken();
-            const response = await fetch('/api/sites', {
-              headers: { 'Authorization': `Bearer ${token}` }
-            });
-            const data = await response.json();
-            if (data.success) {
-              setSites(data.sites || []);
-            }
-          } catch (error) {
-            console.error("Failed to load sites for filter:", error);
-          }
+        if (!user?.sites || user.sites.length === 0) {
+            setSites([]);
+            setCategories([]);
+            return;
+        }
+    
+        // Fetch Sites
+        const sitesQuery = query(collection(db, "sites"), where(documentId(), "in", user.sites));
+        const unsubscribeSites = onSnapshot(sitesQuery, (snapshot) => {
+            const sitesData: Site[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Site));
+            setSites(sitesData);
+        });
+    
+        // Fetch All Categories from user's sites
+        const categoriesQuery = query(collectionGroup(db, 'categories'), where('siteId', 'in', user.sites));
+        const unsubscribeCategories = onSnapshot(categoriesQuery, (snapshot) => {
+            const categoriesData: Category[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Category));
+            // ทำให้ Category ไม่ซ้ำกัน
+            const uniqueCategories = Array.from(new Map(categoriesData.map(cat => [cat.id, cat])).values());
+            setCategories(uniqueCategories);
+        });
+    
+        return () => {
+            unsubscribeSites();
+            unsubscribeCategories();
         };
-        fetchSites();
-    }, [firebaseUser]);
+    }, [user]);
+
 
     const filteredDocuments = useMemo(() => {
-        // 1. สร้าง Map เพื่อให้ค้นหาชื่อโครงการได้ง่ายและเร็ว
         const sitesMap = new Map(sites.map(s => [s.id, s.name]));
-
-        // 2. เพิ่มชื่อโครงการที่ถูกต้องเข้าไปในข้อมูลเอกสารทั้งหมด
         const documentsWithSiteNames = allDocuments.map(doc => ({
             ...doc,
             site: { ...doc.site, name: sitesMap.get(doc.site.id) || 'N/A' }
         }));
         
-        // 3. ใช้ข้อมูลที่เพิ่มชื่อโครงการแล้ว มาทำการกรองต่อไป
         let docsToShow: RFADocument[] = documentsWithSiteNames;
 
         const isCM = user && APPROVER_ROLES.includes(user.role);
         const statusesHiddenFromCM = [STATUSES.PENDING_REVIEW, STATUSES.REVISION_REQUIRED];
 
         if (filters.showAllRevisions) {
-          // ถ้าแสดงทุก revision ก็ใช้ข้อมูลทั้งหมดได้เลย
           docsToShow = documentsWithSiteNames;
         } else {
           const familyMap = new Map<string, RFADocument[]>();
-          documentsWithSiteNames.forEach(doc => { // ใช้ข้อมูลใหม่ที่มีชื่อโครงการแล้ว
+          documentsWithSiteNames.forEach(doc => {
               const familyId = doc.parentRfaId || doc.id;
               if (!familyMap.has(familyId)) {
               familyMap.set(familyId, []);
@@ -253,12 +247,9 @@ function RFAContent() {
                 const status = doc.status;
                 const creatorRole = doc.createdByInfo?.role;
 
-                if (filter === 'SITE') {
-                    return status === STATUSES.PENDING_REVIEW;
-                }
-                if (filter === 'CM') {
-                    return status === STATUSES.PENDING_CM_APPROVAL;
-                }
+                if (filter === 'SITE') return status === STATUSES.PENDING_REVIEW;
+                if (filter === 'CM') return status === STATUSES.PENDING_CM_APPROVAL;
+                
                 if (creatorRole && CREATOR_ROLES.includes(creatorRole as CreatorRole)) {
                     const isRevisionState = status === STATUSES.REVISION_REQUIRED || status === STATUSES.APPROVED_REVISION_REQUIRED;
                     const isRejectedAndLatest = status === STATUSES.REJECTED && doc.isLatest;
@@ -278,29 +269,6 @@ function RFAContent() {
         return docsToShow;
     }, [allDocuments, filters, user, searchTerm, sites]);
 
-
-    const loadCategories = async () => {
-        if (!firebaseUser) return;
-        try {
-        const token = await firebaseUser.getIdToken();
-        const response = await fetch(`/api/rfa/categories?rfaType=ALL`, {
-            headers: { 'Authorization': `Bearer ${token}` },
-        });
-        const data = await response.json();
-        if (data.success) {
-            const uniqueCategories = Array.from(new Map(data.categories.map((cat: Category) => [cat.id, cat])).values());
-            setCategories(uniqueCategories as Category[]);
-        }
-        } catch (error) {
-        console.error('Failed to load categories:', error);
-        }
-    };
-
-    useEffect(() => {
-        if (firebaseUser) {
-        loadCategories();
-        }
-    }, [firebaseUser])
 
     const handleFilterChange = (key: keyof Filters, value: any) => {
         setFilters(prev => ({ ...prev, [key]: value }))
@@ -331,30 +299,6 @@ function RFAContent() {
         setFilters(prev => ({ ...prev, [key]: value }));
     };
 
-    useEffect(() => {
-        const observer = new IntersectionObserver(
-            ([entry]) => {
-                setIsFilterBarStuck(!entry.isIntersecting);
-            },
-            { 
-                rootMargin: '-64px 0px 0px 0px', 
-                threshold: 1.0 
-            }
-        );
-
-        const currentSentinel = sentinelRef.current;
-        if (currentSentinel) {
-            observer.observe(currentSentinel);
-        }
-
-        return () => {
-            if (currentSentinel) {
-                observer.unobserve(currentSentinel);
-            }
-        };
-    }, []);
-
-
     const getStatusColor = (status: string) => {
         switch (status) {
         case STATUSES.APPROVED:
@@ -382,58 +326,37 @@ function RFAContent() {
     if (!user) return null
     
     const filterBarProps = {
-        filters,
-        handleFilterChange,
-        searchTerm,
-        setSearchTerm,
-        resetFilters,
-        sites,
-        categories,
-        availableStatuses,
-        availableResponsibleParties
+        filters, handleFilterChange, searchTerm, setSearchTerm, resetFilters,
+        sites, categories, availableStatuses, availableResponsibleParties
     };
 
     return (
         <AuthGuard>
+        {/* v 1. แก้ไข Layout หลักให้เป็น Flexbox แนวตั้ง และกำหนดความสูงให้เต็มพื้นที่ที่เหลือ */}
         <div className="max-w-screen-2xl mx-auto"> 
-            {/* Header */}
+            
+            {/* --- ส่วน Header, Filter, Chart จะเรียงลำดับลงมาตามปกติ --- */}
             <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">
-                    📋 RFA Documents
-                    {filters.rfaType && filters.rfaType !== 'ALL' && (
-                    <span className="text-orange-600"> - {RFA_TYPE_DISPLAY_NAMES[filters.rfaType]}</span>
-                    )}
-                </h1>
+                    <div>
+                        <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">
+                            📋 RFA Documents
+                            {filters.rfaType && filters.rfaType !== 'ALL' && (
+                            <span className="text-orange-600"> - {RFA_TYPE_DISPLAY_NAMES[filters.rfaType]}</span>
+                            )}
+                        </h1>
+                    </div>
+                    <div className="flex items-center space-x-3 mt-4 sm:mt-0">
+                        <button onClick={() => {}} className="flex items-center px-3 py-2 bg-gray-100 text-gray-700 rounded-lg" disabled={loading}>
+                            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                            {loading ? 'Syncing...' : 'Real-time'}
+                        </button>
+                        <button onClick={handleCreateClick} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                            <Plus className="w-4 h-4 mr-2" />
+                            สร้าง RFA
+                        </button>
+                    </div>
                 </div>
-                <div className="flex items-center space-x-3 mt-4 sm:mt-0">
-                <button onClick={() => {}} className="flex items-center px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200" disabled={loading}>
-                    <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                    {loading ? 'Syncing...' : 'Real-time'}
-                </button>
-                <button onClick={handleCreateClick} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                    <Plus className="w-4 h-4 mr-2" />
-                    สร้าง RFA
-                </button>
-                </div>
-            </div>
 
-            {/* Sticky Filter Bar (conditionally rendered) */}
-            {isFilterBarStuck && (
-                <div className="sticky top-16 z-20 mb-6 animate-fade-in-down">
-                    <FilterBar {...filterBarProps} />
-                </div>
-            )}
-            
-            {/* Primary Filter Bar */}
-            <div className='mb-6'>
-                <FilterBar {...filterBarProps} />
-            </div>
-            
-            {/* Sentinel Element to trigger sticky */}
-            <div ref={sentinelRef} className="h-1"></div>
-
-            {/* Chart */}
             <DashboardStats 
                 allDocuments={filteredDocuments}
                 onChartFilter={handleChartFilter}
@@ -441,25 +364,26 @@ function RFAContent() {
                 categories={categories}
             />
 
-            {/* Document Table */}
-            {loading ? (
-                <div className="text-center p-8">กำลังโหลดเอกสาร...</div>
-            ) : filteredDocuments.length === 0 ? (
-                <div className="text-center bg-white rounded-lg shadow p-8">
-                <p className="text-gray-500">ไม่พบเอกสารที่ตรงกับเงื่อนไข</p>
-                </div>
-            ) : (
-                <RFAListTable
-                documents={filteredDocuments}
-                isLoading={loading}
-                onDocumentClick={handleDocumentClick}
-                getStatusColor={getStatusColor}
-                statusLabels={STATUS_LABELS}
-                getRFATypeColor={getRFATypeColor}
-                />
-            )}
+            <div className='mb-6'>
+                <FilterBar {...filterBarProps} />
+            </div>
+            
+            {/* v 2. เพิ่ม mt-6 (margin-top) ให้กับตาราง */}
+            <div className="mt-6">
+                {loading ? (
+                    <div className="text-center p-8 h-full flex items-center justify-center bg-white rounded-lg shadow">กำลังโหลดเอกสาร...</div>
+                ) : (
+                    <RFAListTable
+                        documents={filteredDocuments}
+                        isLoading={loading}
+                        onDocumentClick={handleDocumentClick}
+                        getStatusColor={getStatusColor}
+                        statusLabels={STATUS_LABELS}
+                        getRFATypeColor={getRFATypeColor}
+                    />
+                )}
+            </div>
 
-            {/* Create Modal */}
             {isCreateModalOpen && (
                 <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
                     <CreateRFAForm
@@ -487,7 +411,6 @@ function RFAContent() {
 
 export default function RFAListPage() {
   return (
-    // 👇 2. ครอบ RFAContent ด้วย <Suspense>
     <Suspense fallback={<div>Loading Page...</div>}>
       <RFAContent />
     </Suspense>

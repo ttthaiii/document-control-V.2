@@ -14,7 +14,22 @@ interface WorkRequestListTableProps {
 // Helper to format date
 const formatDate = (date: any) => {
   if (!date) return 'N/A';
+  
+  // ตรวจสอบว่า date ที่รับมาเป็น Timestamp object หรือไม่
+  if (typeof date.toDate === 'function') {
+    // ถ้าใช่, ให้แปลงด้วยเมธอด .toDate() ก่อน
+    const d = date.toDate();
+    return d.toLocaleDateString('th-TH', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
+  }
+  
+  // ถ้าไม่ใช่ ให้ใช้วิธีเดิมเป็น fallback
   const d = new Date(date);
+  if (isNaN(d.getTime())) return 'Invalid Date'; // กัน Error เพิ่มเติม
+  
   return d.toLocaleDateString('th-TH', {
     day: '2-digit',
     month: 'short',
@@ -68,10 +83,13 @@ export default function WorkRequestListTable({
   }
     
   return (
-    <div className="bg-white rounded-lg shadow overflow-hidden">
-      <div className="overflow-x-auto">
+    // 1. ให้ Container หลักสูงเต็มพื้นที่ (h-full) และเป็น Flexbox แนวตั้ง
+    <div className="bg-white rounded-lg shadow overflow-hidden h-full flex flex-col">
+      {/* 2. ทำให้ส่วนนี้ (ที่ครอบตาราง) เป็นส่วนที่ Scroll ได้ และยืดเต็มที่ */}
+      <div className="overflow-auto flex-1 relative">
         <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
+          {/* 3. ทำให้ Header ของตาราง "ติด" อยู่ที่ top-0 ของ container ที่ scroll ได้ */}
+          <thead className="bg-gray-50 sticky top-0 z-10">
             <tr>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">เลขที่เอกสาร</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">หัวข้อเรื่อง</th>

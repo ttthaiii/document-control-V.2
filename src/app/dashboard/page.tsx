@@ -6,7 +6,12 @@ import { AuthGuard } from '@/lib/components/shared/AuthGuard';
 import ApprovedDocumentLibrary from '@/components/rfa/ApprovedDocumentLibrary';
 
 function DashboardContent() {
-  return <ApprovedDocumentLibrary />;
+  // v ทำให้ Container หลักเป็น Flexbox และสูงเต็มพื้นที่
+  return (
+    <div className="h-full flex flex-col">
+        <ApprovedDocumentLibrary />
+    </div>
+  );
 }
 
 export default function DashboardPage() {
