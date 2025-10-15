@@ -42,8 +42,7 @@ export async function POST(
     switch (action) {
         
       case 'SUBMIT_WORK':
-        // เปลี่ยนเงื่อนไขจาก `userId === docData.assignedTo` เป็น `userData.role === ROLES.BIM`
-        if (userData.role === ROLES.BIM && (docData.status === WorkRequestStatus.IN_PROGRESS || docData.status === WorkRequestStatus.REVISION_REQUESTED)) {
+        if (userData.role === ROLES.BIM && docData.status === WorkRequestStatus.IN_PROGRESS) {
             canPerformAction = true;
             newStatus = WorkRequestStatus.PENDING_ACCEPTANCE;
         }
@@ -83,6 +82,10 @@ export async function POST(
     updates.workflow = FieldValue.arrayUnion(workflowStep);
     updates.updatedAt = FieldValue.serverTimestamp();
     
+    if (payload.files && Array.isArray(payload.files) && payload.files.length > 0) {
+        updates.files = FieldValue.arrayUnion(...payload.files);
+    }
+
     await docRef.update(updates);
 
     return NextResponse.json({ success: true, newStatus });
