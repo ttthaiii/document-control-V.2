@@ -163,6 +163,33 @@ export const onWorkRequestWrite = onDocumentWritten(
         }
     }
 
+    // 👇 เพิ่มส่วนนี้: Handle Revision Creation (มี taskData ตั้งแต่แรก)
+    if (isCreate && dataAfter.taskData?.taskUid) {
+        logger.log(`[WR Sync/${docId}] New Revision detected with existing taskUid: ${dataAfter.taskData.taskUid}`);
+        try {
+            const bimTrackingDb = getBimTrackingDb();
+            const taskRef = bimTrackingDb.collection("tasks").doc(dataAfter.taskData.taskUid);
+            
+            // ตรวจสอบว่า Task มีอยู่จริงหรือไม่
+            const taskDoc = await taskRef.get();
+            if (!taskDoc.exists) {
+                throw new Error(`Task ${dataAfter.taskData.taskUid} not found in BIM Tracking.`);
+            }
+            
+            // อัปเดตสถานะและข้อมูลอื่นๆ
+            await taskRef.update({
+                currentStep: dataAfter.status,
+                lastUpdate: admin.firestore.Timestamp.now(),
+                link: `${process.env.TTSDOC_APP_URL}/dashboard/work-request?docId=${docId}`,
+            });
+            logger.log(`✅ [WR Sync/${docId}] Successfully synced new revision to task ${dataAfter.taskData.taskUid}.`);
+        } catch (error) {
+            logger.error(`[WR Sync/${docId}] Failed to sync new revision to BIM Tracking:`, error);
+            await event.data?.after.ref.update({ syncError: `Sync failed: ${(error as Error).message}` });
+        }
+    }
+    // 👆
+
     // --- Action 2: Handle Status Update ---
     if (isUpdate && dataBefore.status !== dataAfter.status) {
         logger.log(`[WR Sync/${docId}] Status update detected from ${dataBefore.status} to ${dataAfter.status}.`);
@@ -219,49 +246,87 @@ async function createBimTrackingTask(event: any) {
     const activityOrderValue = activityDoc.data()?.order;
     const activityOrder = String(activityOrderValue).padStart(3, '0');
 
+    // 👇 แก้ไขส่วนนี้ - เพิ่มการเช็คและ retry
     const counterRef = bimTrackingDb.collection("projects").doc(projectId);
-    const runningNo = await bimTrackingDb.runTransaction(async (transaction) => {
-        const projectDoc = await transaction.get(counterRef);
-        if (!projectDoc.exists) throw new Error("Project counter document not found!");
-        const currentCounter = projectDoc.data()?.taskCounter || 0;
-        const nextCounter = currentCounter + 1;
-        transaction.update(counterRef, { taskCounter: nextCounter });
-        return String(nextCounter).padStart(3, '0');
-    });
     
-    const generatedTaskNumber = `TTS-BIM-${projectAbbr}-${activityOrder}-${runningNo}`;
-    logger.log(`[WR Sync/${docId}] Generated special taskNumber: ${generatedTaskNumber}`);
+    let generatedTaskNumber: string = '';
+    let attemptCount = 0;
+    const maxAttempts = 10;
+    
+    while (attemptCount < maxAttempts) {
+        // สร้าง running number
+        const runningNo = await bimTrackingDb.runTransaction(async (transaction) => {
+            const projectDoc = await transaction.get(counterRef);
+            const currentCounter = projectDoc.data()?.taskCounter || 0;
+            const nextCounter = currentCounter + 1;
+            
+            logger.log(`[WR Sync/${docId}] Current taskCounter: ${currentCounter}, Next: ${nextCounter}`);
+            
+            transaction.update(counterRef, { taskCounter: nextCounter });
+            return String(nextCounter).padStart(3, '0');
+        });
+        
+        generatedTaskNumber = `TTS-BIM-${projectAbbr}-${activityOrder}-${runningNo}`;
+        
+        // เช็คว่า Task Number นี้มีอยู่แล้วหรือไม่
+        const existingTaskRef = bimTrackingDb.collection("tasks").doc(generatedTaskNumber);
+        const existingTask = await existingTaskRef.get();
+        
+        if (!existingTask.exists) {
+            // ถ้าไม่มี ใช้เลขนี้ได้เลย
+            logger.log(`[WR Sync/${docId}] ✅ Generated unique taskNumber: ${generatedTaskNumber}`);
+            break;
+        }
+        
+        // ถ้ามีแล้ว ให้ retry
+        logger.warn(`[WR Sync/${docId}] ⚠️ Task ${generatedTaskNumber} already exists. Retrying... (Attempt ${attemptCount + 1}/${maxAttempts})`);
+        attemptCount++;
+    }
+    
+    if (attemptCount >= maxAttempts) {
+        throw new Error(`Failed to generate unique task number after ${maxAttempts} attempts. Last attempted: ${generatedTaskNumber}`);
+    }
+    // 👆
 
     const newTaskPayload = {
-      taskName: dataAfter.taskName,
-      taskCategory: "Work Request",
-      projectId: projectId,
-      planStartDate: null,
-      startDate: null,
-      dueDate: dataAfter.dueDate || null,
-      progress: 0,
-      rev: "00",
-      estWorkload: 0,
-      subTaskCount: 0,
-      taskAssignee: "",
-      taskNumber: generatedTaskNumber,
-      totalWH: 0,
-      lastUpdate: admin.firestore.Timestamp.now(),
-      link: `${process.env.TTSDOC_APP_URL}/dashboard/work-request?docId=${docId}`,
-      currentStep: dataAfter.status,
+        taskName: dataAfter.taskName,
+        taskCategory: "Work Request",
+        projectId: projectId,
+        planStartDate: null,
+        startDate: null,
+        dueDate: dataAfter.dueDate || null,
+        progress: 0,
+        rev: "00",
+        documentNumber: dataAfter.documentNumber, // 👈 เพิ่ม documentNumber
+        estWorkload: 0,
+        subTaskCount: 0,
+        taskAssignee: "",
+        taskNumber: generatedTaskNumber,
+        totalWH: 0,
+        lastUpdate: admin.firestore.Timestamp.now(),
+        link: `${process.env.TTSDOC_APP_URL}/dashboard/work-request?docId=${docId}`,
+        currentStep: dataAfter.status,
     };
 
     const newTaskRef = bimTrackingDb.collection("tasks").doc(generatedTaskNumber);
-    await newTaskRef.set(newTaskPayload);
-    logger.log(`[WR Sync/${docId}] Created task ${generatedTaskNumber} in BIM Tracking.`);
+    
+    try {
+        // 👇 เปลี่ยนจาก set() เป็น create() เพื่อป้องกันการ overwrite
+        await newTaskRef.create(newTaskPayload);
+        logger.log(`[WR Sync/${docId}] ✅ Successfully created task ${generatedTaskNumber} in BIM Tracking.`);
+    } catch (error: any) {
+        // ถ้า create() ล้มเหลว (เช่น document มีอยู่แล้ว) ให้ throw error
+        logger.error(`[WR Sync/${docId}] ❌ Failed to create task ${generatedTaskNumber}:`, error);
+        throw new Error(`Task creation failed: ${error.message}`);
+    }
 
     const taskDataToUpdate = {
-      taskUid: newTaskRef.id,
-      taskName: dataAfter.taskName,
-      taskCategory: "Work Request",
-      projectName: siteName,
+        taskUid: newTaskRef.id,
+        taskName: dataAfter.taskName,
+        taskCategory: "Work Request",
+        projectName: siteName,
     };
 
     await event.data?.after.ref.update({ taskData: taskDataToUpdate });
-    logger.log(`[WR Sync/${docId}] Successfully linked task back to ttsdoc.`);
+    logger.log(`[WR Sync/${docId}] ✅ Successfully linked task ${generatedTaskNumber} back to ttsdoc.`);
 }
