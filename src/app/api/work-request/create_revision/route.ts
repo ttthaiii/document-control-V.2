@@ -55,24 +55,34 @@ export async function POST(req: NextRequest) {
 
             const originalData = originalDoc.data()!;
             
+            // ดึงข้อมูล Site
+            const siteDoc = await adminDb.collection('sites').doc(originalData.siteId).get();
+            if (!siteDoc.exists) {
+                throw new Error(`Site with ID ${originalData.siteId} not found.`);
+            }
+            const siteData = siteDoc.data()!;
+            
+            // ตรวจสอบ Task ใน BIM Tracking
             const taskDoc = await bimTrackingDb.collection('tasks').doc(verifiedTaskId).get();
             if (!taskDoc.exists) {
                 throw new Error(`Verified Task ID ${verifiedTaskId} not found in BIM Tracking.`);
             }
 
             const taskDetails = taskDoc.data();
+            
+            // 👇 แก้ตรงนี้ - ใช้วิธีเดียวกับ RFA
             const newTaskData = {
-                taskUid: taskDoc.id,
-                taskName: taskDetails?.taskName || originalData.taskName,
-                taskCategory: "Work Request",
-                projectName: taskDetails?.projectName || originalData.site?.name,
+                ...originalData.taskData, // copy ข้อมูลเดิมมาก่อน
+                taskUid: verifiedTaskId,  // อัปเดตเฉพาะ taskUid เป็น Task ใหม่
+                taskName: taskDetails?.taskName || originalData.taskName, // อัปเดต taskName ถ้ามี
+                projectName: siteData.name, // อัปเดต projectName
             };
+            // 👆
 
             const newRevisionNumber = (originalData.revisionNumber || 0) + 1;
             const docNumPrefix = originalData.documentNumber.split('-REV')[0];
             const newDocumentNumber = `${docNumPrefix}-REV${String(newRevisionNumber).padStart(2, '0')}`;
 
-            // We don't need to move files for Work Requests as they are re-uploaded each time
             const finalFilesData = uploadedFiles.map((file: any) => ({
                 ...file,
                 uploadedAt: new Date().toISOString(),
@@ -85,7 +95,7 @@ export async function POST(req: NextRequest) {
             const newDocData = {
                 ...originalData,
                 documentNumber: newDocumentNumber,
-                taskData: newTaskData,
+                taskData: newTaskData, // ใช้ taskData ที่อัปเดต taskUid แล้ว
                 revisionNumber: newRevisionNumber,
                 status: newStatus,
                 isLatest: true,
@@ -109,7 +119,7 @@ export async function POST(req: NextRequest) {
             };
             
             transaction.set(newWrRef, newDocData);
-            transaction.update(originalWrRef, { isLatest: false, status: WorkRequestStatus.COMPLETED }); // Mark old one as completed
+            transaction.update(originalWrRef, { isLatest: false, status: WorkRequestStatus.COMPLETED });
             
             return { id: newWrRef.id, documentNumber: newDocumentNumber };
         });
