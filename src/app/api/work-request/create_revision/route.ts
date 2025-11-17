@@ -2,7 +2,7 @@
 import { NextResponse, NextRequest } from "next/server";
 import { getAdminDb, getBimTrackingDb, getAdminAuth } from "@/lib/firebase/admin";
 import { FieldValue } from 'firebase-admin/firestore';
-import { WorkRequestStatus } from "@/types/work-request";
+import { WR_STATUSES } from '@/lib/config/workflow';
 import * as admin from "firebase-admin";
 
 export const dynamic = 'force-dynamic';
@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
             }));
 
             const newWrRef = adminDb.collection("workRequests").doc();
-            const newStatus = WorkRequestStatus.PENDING_ACCEPTANCE;
+            const newStatus = WR_STATUSES.PENDING_ACCEPTANCE;
 
             const newDocData = {
                 ...originalData,
@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
             };
             
             transaction.set(newWrRef, newDocData);
-            transaction.update(originalWrRef, { isLatest: false, status: WorkRequestStatus.COMPLETED });
+            transaction.update(originalWrRef, { isLatest: false, status: WR_STATUSES.COMPLETED });
             
             return { id: newWrRef.id, documentNumber: newDocumentNumber };
         });

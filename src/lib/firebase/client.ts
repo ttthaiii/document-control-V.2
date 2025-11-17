@@ -1,8 +1,8 @@
-// src/lib/firebase/client.ts (โค้ดฉบับสมบูรณ์)
-import { initializeApp, getApps } from 'firebase/app';
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-// v 1. Import ฟังก์ชันที่จำเป็นเพิ่มเข้ามา
 import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
+// 1. Import Messaging และ isSupported
+import { getMessaging, isSupported } from 'firebase/messaging';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -13,25 +13,41 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-export const app = getApps().length > 0 ? getApps()[0] : initializeApp(firebaseConfig);
+// Initialize App (ใช้ getApp เพื่อความชัวร์ว่าไม่ init ซ้ำ)
+export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
-// v 2. เพิ่มโค้ดส่วนนี้ทั้งหมดเข้าไปเพื่อเปิดใช้งาน Cache แบบถาวร
+// 2. Export messaging แบบปลอดภัย (เช็คว่ารันบน Browser หรือไม่)
+let messaging: any = null;
+
+if (typeof window !== 'undefined') {
+  // เช็คว่า Browser รองรับ Service Worker และ Push API หรือไม่
+  isSupported().then((supported) => {
+    if (supported) {
+      messaging = getMessaging(app);
+    }
+  });
+}
+
+// Enable Offline Persistence
 try {
-  enableIndexedDbPersistence(db)
-    .then(() => {
-      console.log("✅ Firestore offline persistence enabled.");
-    })
-    .catch((err) => {
-      if (err.code == 'failed-precondition') {
-        // เกิดขึ้นเมื่อผู้ใช้เปิดเว็บไว้หลายแท็บพร้อมกัน
-        console.warn("Firestore persistence failed: Multiple tabs open. Persistence will be enabled in one tab only.");
-      } else if (err.code == 'unimplemented') {
-        // เกิดขึ้นเมื่อเบราว์เซอร์ไม่รองรับ
-        console.warn("Firestore persistence is not supported in this browser.");
-      }
-    });
+  if (typeof window !== 'undefined') {
+    enableIndexedDbPersistence(db)
+      .then(() => {
+        console.log("✅ Firestore offline persistence enabled.");
+      })
+      .catch((err) => {
+        if (err.code == 'failed-precondition') {
+          console.warn("Firestore persistence failed: Multiple tabs open.");
+        } else if (err.code == 'unimplemented') {
+          console.warn("Firestore persistence is not supported in this browser.");
+        }
+      });
+  }
 } catch (error) {
     console.error("An error occurred while enabling Firestore persistence:", error);
 }
+
+// Export ตัว messaging ออกไปให้ไฟล์อื่นใช้
+export { messaging };

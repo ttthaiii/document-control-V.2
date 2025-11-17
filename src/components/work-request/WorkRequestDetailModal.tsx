@@ -3,14 +3,15 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/lib/auth/useAuth';
-import { WorkRequest, WorkRequestStatus, WorkRequestWorkflowStep } from '@/types/work-request';
+import { WorkRequest, WorkRequestWorkflowStep, TaskData } from '@/types/work-request';
+import { WorkRequestStatus } from '@/lib/config/workflow'; // Import Type จาก workflow
 import Spinner from '@/components/shared/Spinner';
 import { RFAFile } from '@/types/rfa';
-import { X, Paperclip, Send, Upload, FileText, Check, AlertTriangle, Download, CornerUpLeft, History, Edit } from 'lucide-react';
-import { ROLES, REVIEWER_ROLES } from '@/lib/config/workflow';
+import { X, Paperclip, Send, Upload, FileText, Check, AlertTriangle, Download, CornerUpLeft, History, Edit, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { ROLES, REVIEWER_ROLES, WR_STATUSES, WR_APPROVER_ROLES, STATUS_LABELS, STATUS_COLORS } from '@/lib/config/workflow';
 import { useNotification } from '@/lib/context/NotificationContext';
 
-// --- Helper Functions ---
+
 const formatFileSize = (bytes: number): string => {
     if (!bytes) return '0 B';
     const k = 1024;
@@ -36,15 +37,10 @@ const formatDate = (date: any, includeTime = true) => {
     return d.toLocaleString('th-TH', options);
 };
 
-const getStatusStyles = (status: WorkRequestStatus) => {
-    switch (status) {
-        case WorkRequestStatus.PENDING_BIM: return { text: 'รอ BIM รับงาน', color: '#0088FE' };
-        case WorkRequestStatus.IN_PROGRESS: return { text: 'กำลังดำเนินการ', color: '#FFBB28' };
-        case WorkRequestStatus.PENDING_ACCEPTANCE: return { text: 'รอ Site ตรวจรับ', color: '#AF19FF' };
-        case WorkRequestStatus.REVISION_REQUESTED: return { text: 'ขอแก้ไข', color: '#FF8042' };
-        case WorkRequestStatus.COMPLETED: return { text: 'เสร็จสิ้น', color: '#28A745' };
-        default: return { text: status, color: '#6c757d' };
-    }
+const getStatusStyles = (status: WorkRequestStatus | string) => { // รับ string ได้เผื่อกรณีสถานะเก่า
+    const label = STATUS_LABELS[status] || status;
+    const color = STATUS_COLORS[status] || '#6c757d'; // Default Gray
+    return { text: label, color: color };
 };
 
 const WorkflowHistoryModal = ({ workflow, onClose }: { workflow: WorkRequestWorkflowStep[], onClose: () => void }) => {
@@ -106,9 +102,13 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
     const [verificationError, setVerificationError] = useState<string | null>(null);
     const [verifiedTaskId, setVerifiedTaskId] = useState<string | null>(null);
 
-    const canSubmitWork = user?.role === ROLES.BIM && document?.status === WorkRequestStatus.IN_PROGRESS;
-    const canSiteReview = user && REVIEWER_ROLES.includes(user.role) && document?.status === WorkRequestStatus.PENDING_ACCEPTANCE;
-    const isRevisionFlow = user?.role === ROLES.BIM && document?.status === WorkRequestStatus.REVISION_REQUESTED;
+    const [rejectComment, setRejectComment] = useState('');
+
+    const canSubmitWork = user?.role === ROLES.BIM && document?.status === WR_STATUSES.IN_PROGRESS;
+    const canSiteReview = user && REVIEWER_ROLES.includes(user.role) && document?.status === WR_STATUSES.PENDING_ACCEPTANCE;
+    const isRevisionFlow = user?.role === ROLES.BIM && document?.status === WR_STATUSES.REVISION_REQUESTED;
+    // --- 👇 [เพิ่ม] ตรวจสอบสิทธิ์สำหรับ PD/PM ---
+    const canPmApprove = user && WR_APPROVER_ROLES.includes(user.role) && document?.status === WR_STATUSES.DRAFT;
 
     const newRevisionNumber = useMemo(() => (document?.revisionNumber || 0) + 1, [document]);
     const newDocumentNumber = useMemo(() => {
@@ -328,6 +328,41 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
         }
     };
 
+    const handlePmAction = async (action: 'APPROVE_DRAFT' | 'REJECT_DRAFT') => {
+        if (!document || !firebaseUser) return;
+
+        // ตรวจสอบ Comment ถ้าเป็นการ Reject
+        if (action === 'REJECT_DRAFT' && !rejectComment.trim()) {
+            showNotification('warning', 'กรุณากรอกเหตุผล', 'ต้องระบุเหตุผลในการไม่อนุมัติ');
+            return;
+        }
+
+        setIsSubmitting(true);
+        try {
+            const token = await firebaseUser.getIdToken();
+            const response = await fetch(`/api/work-request/${document.id}/update`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action,
+                    payload: { comments: rejectComment } // ส่ง rejectComment ไปเป็น comment
+                }),
+            });
+            const result = await response.json();
+            if (result.success) {
+                showNotification('success', 'ดำเนินการสำเร็จ', `สถานะถูกเปลี่ยนเป็น: ${getStatusStyles(result.newStatus).text}`);
+                onUpdate(); // Refresh list
+                onClose();
+            } else {
+                throw new Error(result.error || 'เกิดข้อผิดพลาดในการดำเนินการ');
+            }
+        } catch (error) {
+            showNotification('error', 'เกิดข้อผิดพลาด', error instanceof Error ? error.message : 'Unknown error');
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
     if (loading) {
         return <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center"><Spinner className="w-12 h-12 text-white" /></div>;
     }
@@ -392,8 +427,43 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                         </div>
                     </div>
                     
-                    {(canSiteReview || canSubmitWork || isRevisionFlow) && (
                     <div className="p-4 border-t bg-slate-50">
+                        {/* --- Panel สำหรับ PD/PM อนุมัติ DRAFT --- */}
+                        {canPmApprove && (
+                             <div className="space-y-4">
+                                <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (สำหรับ PM/PD)</h3>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">เหตุผลในการไม่อนุมัติ (ถ้ามี)</label>
+                                    <textarea
+                                        value={rejectComment}
+                                        onChange={(e) => setRejectComment(e.target.value)}
+                                        rows={3}
+                                        placeholder="กรอกเหตุผลที่ไม่อนุมัติ..."
+                                        className="w-full p-2 border rounded-md"
+                                    />
+                                </div>
+                                <div className="flex justify-end gap-3 pt-2">
+                                    <button
+                                        onClick={() => handlePmAction('REJECT_DRAFT')}
+                                        disabled={isSubmitting}
+                                        className="flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:bg-red-300 disabled:cursor-not-allowed"
+                                    >
+                                        <ThumbsDown size={16} className="mr-2" />
+                                        {isSubmitting ? 'กำลังดำเนินการ...' : 'ไม่อนุมัติ'}
+                                    </button>
+                                    <button
+                                        onClick={() => handlePmAction('APPROVE_DRAFT')}
+                                        disabled={isSubmitting}
+                                        className="flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:bg-green-300 disabled:cursor-not-allowed"
+                                    >
+                                        <ThumbsUp size={16} className="mr-2" />
+                                        {isSubmitting ? 'กำลังอนุมัติ...' : 'อนุมัติ (ส่งให้ BIM)'}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* --- Panel สำหรับ Site ตรวจรับงาน --- */}
                         {canSiteReview && (
                             <div className="space-y-4">
                                 <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (สำหรับ Site)</h3>
@@ -407,6 +477,7 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                                 </div>
                             </div>
                         )}
+
                         {canSubmitWork && (
                             <div className="space-y-4">
                                 <h3 className="text-lg font-bold text-slate-800">ส่งมอบงาน (Submit Work)</h3>
@@ -506,7 +577,6 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                             </div>
                         )}
                     </div>
-                    )}
                 </div>
             </div>
             {showHistory && <WorkflowHistoryModal workflow={document.workflow || []} onClose={() => setShowHistory(false)} />}

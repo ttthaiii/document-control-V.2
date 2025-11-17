@@ -1,8 +1,12 @@
+// src/app/api/work-request/[id]/update/route.ts (แก้ไขแล้ว)
 import { NextRequest, NextResponse } from 'next/server';
 import { adminDb, adminAuth } from '@/lib/firebase/admin';
 import { FieldValue } from 'firebase-admin/firestore';
-import { WorkRequestStatus } from '@/types/work-request';
-import { ROLES, REVIEWER_ROLES } from '@/lib/config/workflow';
+// --- 👇 [แก้ไข] Import เพิ่มเติม ---
+import { WR_STATUSES, WR_APPROVER_ROLES, REVIEWER_ROLES, ROLES } from '@/lib/config/workflow';
+import { WorkRequestStatus } from '@/types/work-request'; // Import Type ด้วย
+// --- 👆 สิ้นสุดการแก้ไข ---
+
 
 export const dynamic = 'force-dynamic';
 
@@ -35,36 +39,60 @@ export async function POST(
     }
     const docData = docSnap.data()!;
 
-    let newStatus: WorkRequestStatus | null = null;
+    let newStatus: WorkRequestStatus | null = null; // <-- ใช้ Type WorkRequestStatus
     const updates: { [key: string]: any } = {};
     let canPerformAction = false;
 
     switch (action) {
-        
+
+      // --- 👇 [เพิ่ม] Action ใหม่สำหรับ PD/PM ---
+      case 'APPROVE_DRAFT':
+        if (WR_APPROVER_ROLES.includes(userData.role) && docData.status === WR_STATUSES.DRAFT) {
+          canPerformAction = true;
+          newStatus = WR_STATUSES.PENDING_BIM; // เปลี่ยนเป็นรอ BIM รับงาน
+        }
+        break;
+
+      case 'REJECT_DRAFT':
+        if (WR_APPROVER_ROLES.includes(userData.role) && docData.status === WR_STATUSES.DRAFT) {
+          // ตรวจสอบว่ามี Comment มาด้วยหรือไม่
+          if (!payload || !payload.comments || payload.comments.trim() === '') {
+             return NextResponse.json({ success: false, error: 'Comment is required when rejecting.' }, { status: 400 });
+          }
+          canPerformAction = true;
+          newStatus = WR_STATUSES.REJECTED_BY_PM; // เปลี่ยนเป็น Reject by PM
+        }
+        break;
+      // --- 👆 สิ้นสุดการเพิ่ม ---
+
+      // --- Actions เดิม (ทำงานหลังสถานะ DRAFT) ---
       case 'SUBMIT_WORK':
-        if (userData.role === ROLES.BIM && docData.status === WorkRequestStatus.IN_PROGRESS) {
+        if (userData.role === ROLES.BIM && docData.status === WR_STATUSES.IN_PROGRESS) {
             canPerformAction = true;
-            newStatus = WorkRequestStatus.PENDING_ACCEPTANCE;
+            newStatus = WR_STATUSES.PENDING_ACCEPTANCE;
         }
         break;
 
       case 'REQUEST_REVISION':
-        if (REVIEWER_ROLES.includes(userData.role) && docData.status === WorkRequestStatus.PENDING_ACCEPTANCE) {
+        // แก้ไข: ใช้ REVIEWER_ROLES จาก workflow.ts
+        if (REVIEWER_ROLES.includes(userData.role) && docData.status === WR_STATUSES.PENDING_ACCEPTANCE) {
           canPerformAction = true;
-          newStatus = WorkRequestStatus.REVISION_REQUESTED;
+          newStatus = WR_STATUSES.REVISION_REQUESTED;
         }
         break;
 
       case 'COMPLETE':
-        if (REVIEWER_ROLES.includes(userData.role) && docData.status === WorkRequestStatus.PENDING_ACCEPTANCE) {
+        // แก้ไข: ใช้ REVIEWER_ROLES จาก workflow.ts
+        if (REVIEWER_ROLES.includes(userData.role) && docData.status === WR_STATUSES.PENDING_ACCEPTANCE) {
           canPerformAction = true;
-          newStatus = WorkRequestStatus.COMPLETED;
+          newStatus = WR_STATUSES.COMPLETED;
         }
         break;
     }
 
     if (!canPerformAction || !newStatus) {
-      return NextResponse.json({ success: false, error: 'Permission denied or invalid action' }, { status: 403 });
+      console.warn(`Action "${action}" denied for user ${userId} (Role: ${userData.role}) on doc ${docId} (Status: ${docData.status})`);
+      return NextResponse.json({ success: false, error: 'Permission denied or invalid action for current status.' }, { status: 403 });
     }
 
     const workflowStep = {
@@ -74,15 +102,16 @@ export async function POST(
       userName: userData.email,
       role: userData.role,
       timestamp: new Date().toISOString(),
-      comments: payload.comments || '',
-      files: payload.files || [],
+      comments: payload?.comments || '', // ใช้ Optional chainingเผื่อ payload ไม่มี
+      files: payload?.files || [],     // ใช้ Optional chainingเผื่อ payload ไม่มี
     };
 
     updates.status = newStatus;
     updates.workflow = FieldValue.arrayUnion(workflowStep);
     updates.updatedAt = FieldValue.serverTimestamp();
-    
-    if (payload.files && Array.isArray(payload.files) && payload.files.length > 0) {
+
+    // อัปเดตไฟล์หลัก เฉพาะตอน Submit Work (Logic เดิม)
+    if (action === 'SUBMIT_WORK' && payload?.files && Array.isArray(payload.files) && payload.files.length > 0) {
         updates.files = FieldValue.arrayUnion(...payload.files);
     }
 
