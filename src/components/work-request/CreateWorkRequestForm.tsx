@@ -3,11 +3,11 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth/useAuth';
-import { WorkRequestPriority, TaskData } from '@/types/work-request'; // WorkRequestPriority อาจจะไม่ถูกใช้แล้ว แต่เก็บไว้ก่อนได้
+import { TaskData } from '@/types/work-request';
 import { Site, RFAFile } from '@/types/rfa';
 import Spinner from '@/components/shared/Spinner';
 import { FileText, Upload, X, Check, AlertTriangle, Send } from 'lucide-react';
-import { Role, ROLES, REVIEWER_ROLES } from '@/lib/config/workflow';
+import { Role, WR_CREATOR_ROLES } from '@/lib/config/workflow';
 import { useNotification } from '@/lib/context/NotificationContext';
 
 // Interfaces
@@ -45,11 +45,7 @@ export default function CreateWorkRequestForm({ onClose, userProp }: { onClose: 
   const [loadingSites, setLoadingSites] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-
-  // --- 👇 [แก้ไข] เอา isBimFlow ออก และเพิ่มเงื่อนไขตรวจสอบว่าเป็น Site User หรือไม่ ---
-  const isSiteUser = userProp && REVIEWER_ROLES.includes(userProp.role);
-  // --- 👆 [สิ้นสุดการแก้ไข] ---
-
+  const canCreate = userProp && WR_CREATOR_ROLES.includes(userProp.role);
 
   useEffect(() => {
     const loadSites = async () => {
@@ -173,12 +169,21 @@ export default function CreateWorkRequestForm({ onClose, userProp }: { onClose: 
   };
 
   // --- 👇 [แก้ไข] ถ้าไม่ใช่ Site User ให้แสดงข้อความแจ้งเตือน ---
-  if (!isSiteUser) {
+  if (!canCreate) {
     return (
-        <div className="text-center p-8 bg-yellow-50 rounded-lg">
+        <div className="text-center p-8 bg-yellow-50 rounded-lg border border-yellow-300">
             <AlertTriangle className="mx-auto w-12 h-12 text-yellow-500 mb-4" />
             <h3 className="text-lg font-bold text-yellow-800">ไม่มีสิทธิ์สร้าง Work Request</h3>
-            <p className="text-yellow-700 mt-2">ฟังก์ชันนี้สงวนไว้สำหรับผู้ใช้งานฝั่งโครงการ (Site) เท่านั้น</p>
+            <p className="text-yellow-700 mt-2">
+                เฉพาะ Project Engineer (PE) หรือ Owner Engineer (OE) เท่านั้นที่สามารถสร้างคำร้องขอได้
+            </p>
+            <button
+                type="button"
+                onClick={onClose}
+                className="mt-6 px-6 py-2 text-sm text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300"
+            >
+                ปิด
+            </button>
         </div>
     )
   }

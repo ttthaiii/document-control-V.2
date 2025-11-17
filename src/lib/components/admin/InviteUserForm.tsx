@@ -132,7 +132,9 @@ export function InviteUserForm() {
             <option value={ROLES.PE}>PE (Project Engineer)</option>
             <option value={ROLES.CM}>CM</option>
             <option value={ROLES.ME}>ME (Mechanical/Electrical Engineer)</option>
-            <option value={ROLES.SN}>SN (Sanitary Engineer)</option>          
+            <option value={ROLES.SN}>SN (Sanitary Engineer)</option>
+            <option value={ROLES.PD}>PD (Project Director)</option>
+            <option value={ROLES.PM}>PM (Project Manager)</option>
           </select>
           {errors.role && (
             <p className="text-red-500 text-sm mt-1">{errors.role.message}</p>

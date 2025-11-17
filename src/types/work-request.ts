@@ -1,7 +1,8 @@
 // src/types/work-request.ts
 
 import { RFAFile, RFASite, RFAUserInfo } from './rfa';
-import { Role } from '@/lib/config/workflow';
+import { Role, WorkRequestStatus } from '@/lib/config/workflow';
+export type { WorkRequestStatus }; // <-- เพิ่มบรรทัดนี้เพื่อ export Type
 
 /**
  * Interface for data from BIM Tracking system
@@ -11,17 +12,6 @@ export interface TaskData {
   taskCategory: string;
   taskName: string;
   projectName: string;
-}
-
-/**
- * สถานะของ Work Request ในกระบวนการ
- */
-export enum WorkRequestStatus {
-  PENDING_BIM = 'PENDING_BIM',           // Site สร้างคำขอแล้ว รอ BIM รับงาน
-  IN_PROGRESS = 'IN_PROGRESS',           // BIM กำลังทำงาน
-  PENDING_ACCEPTANCE = 'PENDING_ACCEPTANCE', // BIM ส่งงานแล้ว รอ Site ตรวจรับ
-  REVISION_REQUESTED = 'REVISION_REQUESTED', // Site ขอให้แก้ไข
-  COMPLETED = 'COMPLETED',               // Site กดรับงานแล้ว (กระบวนการสิ้นสุด)
 }
 
 /**
@@ -72,4 +62,5 @@ export interface WorkRequest {
   
   // ข้อมูลเพิ่มเติม
   usersInfo: Record<string, RFAUserInfo>;
+  syncError?: string;
 }

@@ -1,8 +1,7 @@
 import { NextResponse, NextRequest } from "next/server";
 import { adminDb, adminBucket, adminAuth } from "@/lib/firebase/admin";
 import { FieldValue } from 'firebase-admin/firestore';
-import { WorkRequestStatus } from '@/types/work-request';
-import { ROLES, REVIEWER_ROLES } from '@/lib/config/workflow';
+import { WR_STATUSES, WR_CREATOR_ROLES } from '@/lib/config/workflow';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,24 +30,25 @@ export async function POST(req: NextRequest) {
         }
         const userData = userDoc.data()!;
 
-        // --- 👇 [เพิ่ม] ตรวจสอบ Role ของผู้ใช้ ---
-        if (!REVIEWER_ROLES.includes(userData.role)) {
-            return NextResponse.json({ success: false, error: "Permission denied. Only Site users can create Work Requests." }, { status: 403 });
+        // --- 👇 [แก้ไข] ตรวจสอบ Role ของผู้ใช้ (ต้องเป็น PE หรือ OE) ---
+        if (!WR_CREATOR_ROLES.includes(userData.role)) {
+            return NextResponse.json({
+                success: false,
+                error: "Permission denied. Only Project Engineers (PE) or Owner Engineers (OE) can create Work Requests."
+            }, { status: 403 });
         }
-        // --- 👆 [สิ้นสุดการเพิ่ม] ---
+        // --- 👆 สิ้นสุดการแก้ไข ---
 
-        // --- 👇 [แก้ไข] เปลี่ยนตัวแปรที่รับจาก request body ---
         const { siteId, taskName, description, dueDate, files: uploadedFiles } = await req.json();
 
-        if (!siteId || !taskName || !dueDate) { // ตรวจสอบ dueDate แทน priority
+        if (!siteId || !taskName || !dueDate) {
             return NextResponse.json({ success: false, error: "Missing required fields (siteId, taskName, dueDate)." }, { status: 400 });
         }
-        // --- 👆 [สิ้นสุดการแก้ไข] ---
 
-        // --- 👇 [แก้ไข] ลบ Logic isBimCreator และกำหนดค่าเริ่มต้นตายตัว ---
-        const initialStatus = WorkRequestStatus.PENDING_BIM;
-        const assignedTo = null; // ไม่มีผู้รับผิดชอบตอนสร้าง
-        // --- 👆 [สิ้นสุดการแก้ไข] ---
+        // --- 👇 [แก้ไข] กำหนดสถานะเริ่มต้นเป็น DRAFT ---
+        const initialStatus = WR_STATUSES.DRAFT;
+        const assignedTo = null;
+        // --- 👆 สิ้นสุดการแก้ไข ---
 
         const { documentNumber, runningNumber } = await adminDb.runTransaction(async (transaction) => {
             const siteRef = adminDb.collection('sites').doc(siteId);
@@ -60,75 +60,80 @@ export async function POST(req: NextRequest) {
             const counterId = `${siteId}_WR`;
             const counterRef = adminDb.collection('counters').doc(counterId);
             const counterDoc = await transaction.get(counterRef);
-            
+
             const nextNumber = (counterDoc.data()?.currentNumber || 0) + 1;
-            
+
             transaction.set(counterRef, { currentNumber: nextNumber }, { merge: true });
-            
+
             const paddedNumber = String(nextNumber).padStart(4, '0');
             const fullDocumentNumber = `WR-${siteShortName}-${paddedNumber}`;
-            
+
             return { documentNumber: fullDocumentNumber, runningNumber: paddedNumber };
         });
-        
+
         const finalFilesData: any[] = [];
         if (uploadedFiles && uploadedFiles.length > 0) {
             const cdnUrlBase = "https://ttsdoc-cdn.ttthaiii30.workers.dev";
             for (const tempFile of uploadedFiles) {
                 const sourcePath = tempFile.filePath;
                 if (!sourcePath || !sourcePath.startsWith(`temp/${uid}/`)) {
+                    console.warn(`Skipping invalid file path during WR creation: ${sourcePath}`);
                     continue;
                 }
                 const destinationPath = `sites/${siteId}/work-requests/${documentNumber}/${Date.now()}_${tempFile.fileName}`;
-                await adminBucket.file(sourcePath).move(destinationPath);
-                finalFilesData.push({
-                    ...tempFile,
-                    fileUrl: `${cdnUrlBase}/${destinationPath}`,
-                    filePath: destinationPath,
-                    uploadedAt: new Date().toISOString(),
-                    uploadedBy: uid,
-                });
+                // Error Handling เพิ่มเติม
+                try {
+                    await adminBucket.file(sourcePath).move(destinationPath);
+                    finalFilesData.push({
+                        ...tempFile,
+                        fileUrl: `${cdnUrlBase}/${destinationPath}`,
+                        filePath: destinationPath,
+                        uploadedAt: new Date().toISOString(),
+                        uploadedBy: uid,
+                    });
+                } catch (moveError) {
+                    console.error(`Failed to move file ${sourcePath} to ${destinationPath}:`, moveError);
+                    // อาจจะแจ้งเตือนผู้ใช้ หรือบันทึก Error ลง DB
+                }
             }
         }
-        
+
         const newWorkRequestRef = adminDb.collection("workRequests").doc();
 
-        // --- 👇 [แก้ไข] ปรับข้อมูลที่จะบันทึกลง Firestore ---
         await newWorkRequestRef.set({
             documentNumber,
             runningNumber,
             siteId,
             taskName,
             description: description || '',
-            status: initialStatus,
+            status: initialStatus, // <-- ใช้สถานะ DRAFT
             createdBy: uid,
             assignedTo,
-            planStartDate: null, // วันที่เริ่มงานเป็น null เสมอ
-            dueDate: new Date(dueDate), // ใช้วันที่กำหนดส่งที่รับมา
+            planStartDate: null,
+            dueDate: new Date(dueDate),
             createdAt: FieldValue.serverTimestamp(),
             updatedAt: FieldValue.serverTimestamp(),
             revisionNumber: 0,
             isLatest: true,
             files: finalFilesData,
-            taskData: null, // taskData เป็น null ตอนสร้างเสมอ
+            taskData: null,
             workflow: [{
-                action: "CREATE",
+                action: "CREATE_DRAFT", // <-- เปลี่ยน Action แรก
                 status: initialStatus,
                 userId: uid,
                 userName: userData.email,
                 role: userData.role,
                 timestamp: new Date().toISOString(),
                 files: finalFilesData,
-                comments: description || '',
+                comments: description || 'สร้างเอกสารฉบับร่าง',
             }],
             usersInfo: { [uid]: { email: userData.email, role: userData.role } }
         });
-        // --- 👆 [สิ้นสุดการแก้ไข] ---
 
-        return NextResponse.json({ 
-            success: true, 
-            id: newWorkRequestRef.id, 
-            documentNumber: documentNumber 
+        return NextResponse.json({
+            success: true,
+            id: newWorkRequestRef.id,
+            documentNumber: documentNumber
         }, { status: 201 });
 
     } catch (err: any) {
