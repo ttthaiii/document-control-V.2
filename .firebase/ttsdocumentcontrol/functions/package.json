@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "@ducanh2912/next-pwa": "^10.2.9",
     "@hookform/resolvers": "^5.2.1",
     "@mantine/core": "^7.17.8",
     "@mantine/form": "^7.17.8",

@@ -1,26 +1,15 @@
-// src/lib/auth/useAuth.ts
-
+// src/lib/auth/useAuth.tsx
 'use client'
 
 import React, { useState, useEffect, useContext, createContext, ReactNode } from 'react';
 import { User, onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase/client';
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore'; // ลบ arrayUnion ออกแล้ว
+import { getToken, deleteToken, onMessage, MessagePayload } from 'firebase/messaging';
+import { auth, db, messaging } from '@/lib/firebase/client';
 import { Role } from '@/lib/config/workflow';
 
-// Cache interface
-interface UserCache {
-  user: AppUser | null;
-  timestamp: number;
-  firebaseUserId: string;
-}
-
-// Cache variables
-let userCache: UserCache | null = null;
-const CACHE_DURATION = 5 * 60 * 1000; // 5 นาที
-
-// User interface for our app
-interface AppUser {
+// ... (Interfaces เหมือนเดิม) ...
+export interface AppUser {
   id: string;
   email: string;
   role: Role;
@@ -31,162 +20,198 @@ interface AppUser {
   acceptedAt?: Date;
 }
 
-// Auth context interface
 interface AuthContextType {
   user: AppUser | null;
   firebaseUser: User | null;
   loading: boolean;
   error: string | null;
-  refetch: () => Promise<void>;
   logout: () => Promise<void>;
+  requestNotificationPermission: () => Promise<void>;
 }
 
-// Create context with a default value
 const AuthContext = createContext<AuthContextType>({
   user: null,
   firebaseUser: null,
   loading: true,
   error: null,
-  refetch: async () => {},
   logout: async () => {},
+  requestNotificationPermission: async () => {},
 });
 
-// Auth Provider component
+const isMobileDevice = () => {
+  if (typeof window === 'undefined') return false;
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+};
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchUserData = async (currentFirebaseUser: User) => {
-    try {
-      setError(null);
-      
-      // ✅ ตรวจสอบ cache ก่อน
-      if (userCache && 
-          userCache.firebaseUserId === currentFirebaseUser.uid &&
-          (Date.now() - userCache.timestamp) < CACHE_DURATION) {
-        console.log(`📋 Using cached user data for: ${currentFirebaseUser.email}`);
-        setUser(userCache.user);
-        return;
-      }
+  // ฟังก์ชันจัดการ FCM Token
+  const handleFCMToken = async (uid: string, action: 'SAVE' | 'REMOVE') => {
+    if (!messaging) return;
 
-      console.log(`🔄 Fetching fresh user data for: ${currentFirebaseUser.email}`);
-      
-      const userDocRef = doc(db, 'users', currentFirebaseUser.uid);
-      const userDocSnap = await getDoc(userDocRef);
-      
-      if (userDocSnap.exists()) {
-        const userData = userDocSnap.data();
-        const appUser: AppUser = {
-          id: currentFirebaseUser.uid,
-          email: currentFirebaseUser.email || '',
-          role: userData.role,
-          sites: userData.sites || [],
-          status: userData.status || 'ACTIVE',
-          createdFromInvitation: userData.createdFromInvitation,
-          createdAt: userData.createdAt?.toDate(),
-          acceptedAt: userData.acceptedAt?.toDate(),
-        };
-        
-        // ✅ บันทึกลง cache
-        userCache = {
-          user: appUser,
-          timestamp: Date.now(),
-          firebaseUserId: currentFirebaseUser.uid
-        };
-        
-        setUser(appUser);
-      } else {
-        setError('ไม่พบข้อมูลผู้ใช้ในระบบ');
-        setUser(null);
+    if (!isMobileDevice() && action === 'SAVE') {
+        console.log('💻 Desktop detected: Notifications are disabled for desktop devices.');
+        return;
+    }
+
+    try {
+      if (action === 'SAVE') {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          const currentToken = await getToken(messaging, {
+            vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY 
+          });
+          
+          if (currentToken) {
+            // ✅ ใช้แบบทับของเดิม (Overwrite) เพื่อแก้ปัญหาแจ้งเตือนซ้ำ
+            await updateDoc(doc(db, 'users', uid), {
+              fcmTokens: [currentToken], 
+              lastLogin: new Date()
+            });
+            console.log('📱 Mobile Notification Token Updated');
+          }
+        }
+      } else if (action === 'REMOVE') {
+        await deleteToken(messaging);
       }
     } catch (err) {
-      console.error('Error fetching user data:', err);
-      setError('เกิดข้อผิดพลาดในการโหลดข้อมูลผู้ใช้');
-      setUser(null);
-    }
-  };
-
-  const refetch = async () => {
-    if (firebaseUser) {
-      // ล้าง cache ก่อน refetch
-      userCache = null;
-      await fetchUserData(firebaseUser);
+      console.error('FCM Token Error:', err);
     }
   };
 
   useEffect(() => {
-    // ใน useEffect หลังจากบรรทัด setLoading(true)
-    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
-      // ✅ เพิ่ม: ถ้าไม่มี user เปลี่ยนแปลง ไม่ต้อง setLoading
-      if (fbUser?.uid === firebaseUser?.uid && user) {
-        return; // Skip ถ้า user เดิม
-      }
-      
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+      // ลงทะเบียนไฟล์ sw.js (ที่ next-pwa สร้างให้ตอน build)
+      navigator.serviceWorker
+        .register('/sw.js')
+        .then((registration) => {
+          console.log('✅ PWA Service Worker (sw.js) registered successfully:', registration.scope);
+        })
+        .catch((err) => {
+          console.error('❌ PWA Service Worker registration failed:', err);
+        });
+    }
+  }, []);
+  
+  // ส่วนรับข้อความ Foreground (เหมือนเดิม)
+  useEffect(() => {
+    if (typeof window !== 'undefined' && messaging && isMobileDevice()) {
+      const unsubscribe = onMessage(messaging, (payload: MessagePayload) => {
+        console.log('📩 Foreground Message Received:', payload);
+        const title = payload.data?.title || 'การแจ้งเตือนใหม่';
+        const body = payload.data?.body || '';
+        const url = payload.data?.url;
+
+        if (Notification.permission === 'granted') {
+           const notification = new Notification(title, {
+             body: body,
+             icon: '/favicon.ico',
+           });
+           notification.onclick = () => {
+             if (url) window.location.href = url;
+             notification.close();
+           };
+        }
+      });
+      return () => unsubscribe();
+    }
+  }, []);
+
+  // ส่วน Auth State Change (เหมือนเดิม)
+  useEffect(() => {
+    let unsubscribeSnapshot: (() => void) | null = null;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (fbUser) => {
       setLoading(true);
       setFirebaseUser(fbUser);
-      
+
+      if (unsubscribeSnapshot) {
+        unsubscribeSnapshot();
+        unsubscribeSnapshot = null;
+      }
+
       if (fbUser) {
-        await fetchUserData(fbUser);
+        const userDocRef = doc(db, 'users', fbUser.uid);
+        unsubscribeSnapshot = onSnapshot(userDocRef, 
+          (docSnap) => {
+            if (docSnap.exists()) {
+              const userData = docSnap.data();
+              if (userData.status === 'DISABLED') {
+                signOut(auth);
+                setUser(null);
+                setError('บัญชีของคุณถูกระงับการใช้งาน');
+                return;
+              }
+              setUser({
+                id: fbUser.uid,
+                email: fbUser.email || '',
+                role: userData.role,
+                sites: userData.sites || [],
+                status: userData.status || 'ACTIVE',
+                createdFromInvitation: userData.createdFromInvitation,
+                createdAt: userData.createdAt?.toDate(),
+                acceptedAt: userData.acceptedAt?.toDate(),
+              });
+            } else {
+              setUser(null);
+            }
+            setLoading(false);
+          }, 
+          (err) => {
+            console.error('Snapshot Error:', err);
+            setLoading(false);
+          }
+        );
+        handleFCMToken(fbUser.uid, 'SAVE');
       } else {
         setUser(null);
-        setError(null);
-        userCache = null; // ✅ เพิ่มบรรทัดนี้
+        setLoading(false);
       }
-      
-      setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeSnapshot) unsubscribeSnapshot();
+    };
   }, []);
 
   const logout = async () => {
     try {
+      if (user?.id) {
+        await handleFCMToken(user.id, 'REMOVE');
+      }
       await signOut(auth);
-      // ✅ ล้าง cache เมื่อ logout
-      userCache = null;
       setUser(null);
-      setFirebaseUser(null);
-      setError(null);
     } catch (err) {
       console.error('Logout error:', err);
       throw err;
     }
   };
 
-  const value = {
-    user,
-    firebaseUser,
-    loading,
-    error,
-    refetch,
-    logout,
+  const requestNotificationPermission = async () => {
+    if (!isMobileDevice()) {
+        alert('ระบบแจ้งเตือนรองรับเฉพาะการใช้งานบนโทรศัพท์มือถือเท่านั้น');
+        return;
+    }
+    if (user?.id) {
+      await handleFCMToken(user.id, 'SAVE');
+      alert('เปิดรับการแจ้งเตือนเรียบร้อยแล้ว');
+    }
   };
 
   return (
-    <AuthContext.Provider value={value}>
+    <AuthContext.Provider value={{ 
+      user, firebaseUser, loading, error, logout, requestNotificationPermission 
+    }}>
       {children}
     </AuthContext.Provider>
   );
 }
 
-// ✅ เพิ่ม utility functions
-export function clearUserCache() {
-  userCache = null;
-  console.log('🗑️ User cache cleared');
-}
-
-export function getCacheInfo() {
-  return {
-    hasCache: !!userCache,
-    cacheAge: userCache ? Date.now() - userCache.timestamp : 0,
-    cachedUserId: userCache?.firebaseUserId || null,
-    isExpired: userCache ? (Date.now() - userCache.timestamp) > CACHE_DURATION : true
-  };
-}
-
-// Hook to use auth context
-export function useAuth(): AuthContextType {
+export function useAuth() {
   return useContext(AuthContext);
 }
