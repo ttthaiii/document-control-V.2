@@ -36,6 +36,7 @@ const getBimTrackingApp = () => {
 export const adminDb = getTtsdocApp().firestore();
 export const adminAuth = getTtsdocApp().auth();
 export const adminBucket = getTtsdocApp().storage().bucket();
+export const adminMessaging = getTtsdocApp().messaging();
 export const bimTrackingDb = getBimTrackingApp().firestore();
 
 // Getter functions for lazy initialization in other server-side files if needed

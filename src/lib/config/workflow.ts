@@ -12,6 +12,7 @@ export const ROLES = {
   PM: 'PM',
   PD: 'PD',
   SE: 'SE',
+  FM: 'FM',
   ADMIN_SITE_2: 'Adminsite2',
 } as const;
 
@@ -19,11 +20,11 @@ type ObjectValues<T> = T[keyof T];
 export type Role = ObjectValues<typeof ROLES>;
 
 // ✅ 2. อัปเดต Role Groups เดิมให้เรียกใช้ค่าจาก ROLES Object และใช้ Type ใหม่
-export const CREATOR_ROLES: Role[] = [ROLES.BIM, ROLES.ME, ROLES.SN];
-export const REVIEWER_ROLES: Role[] = [ROLES.SITE_ADMIN, ROLES.ADMIN_SITE_2, ROLES.OE, ROLES.PE];
-export const APPROVER_ROLES: Role[] = [ROLES.CM, ROLES.PD];
-export const OBSERVER_ALL_ROLES: Role[] = [ROLES.PM];
-export const OBSERVER_FINISHED_ROLES: Role[] = [ROLES.SE];
+export const CREATOR_ROLES: Role[] = [ROLES.BIM, ROLES.ME, ROLES.SN, ROLES.ADMIN];
+export const REVIEWER_ROLES: Role[] = [ROLES.SITE_ADMIN, ROLES.ADMIN_SITE_2, ROLES.OE, ROLES.PE, ROLES.ADMIN];
+export const APPROVER_ROLES: Role[] = [ROLES.CM, ROLES.PD, ROLES.ADMIN];
+export const OBSERVER_ALL_ROLES: Role[] = [ROLES.PM, ROLES.ADMIN];
+export const OBSERVER_FINISHED_ROLES: Role[] = [ROLES.SE, ROLES.FM];
 export const WR_CREATOR_ROLES: Role[] = [ROLES.PE, ROLES.OE, ROLES.ADMIN];
 export const WR_APPROVER_ROLES: Role[] = [ROLES.PD, ROLES.PM, ROLES.ADMIN];
 

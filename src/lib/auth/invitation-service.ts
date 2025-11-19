@@ -1,6 +1,8 @@
 import { adminAuth, adminDb } from '../firebase/admin';
 import { randomBytes } from 'crypto';
 import { Role } from '@/lib/config/workflow';
+// ✅ 1. Import FieldValue
+import { FieldValue } from 'firebase-admin/firestore';
 
 export interface CreateInvitationData {
   email: string;
@@ -8,8 +10,6 @@ export interface CreateInvitationData {
   sites: string[];
 }
 
-// ✅ 1. Define the missing InvitationData type
-// This should match the data structure in your 'invitations' collection
 export interface InvitationData extends CreateInvitationData {
     status: 'PENDING' | 'ACCEPTED' | 'EXPIRED';
     createdAt: Date;
@@ -17,16 +17,15 @@ export interface InvitationData extends CreateInvitationData {
     createdByAdmin: boolean;
 }
 
-
 export class InvitationService {
-  // Create invitation token
+  // Create invitation token (ส่วนนี้เหมือนเดิม)
   static async createInvitation(data: CreateInvitationData) {
     try {
       const token = randomBytes(32).toString('hex');
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
       await adminDb.collection('invitations').doc(token).set({
-        ...data, // Use spread operator for cleaner code
+        ...data,
         status: 'PENDING',
         createdAt: new Date(),
         expiresAt: expiresAt,
@@ -48,20 +47,22 @@ export class InvitationService {
     }
   }
 
-  // Accept invitation
+  // Accept invitation (✅ แก้ไขส่วนนี้)
   static async acceptInvitation(token: string, password: string) {
     try {
       const invitationDoc = await adminDb.collection('invitations').doc(token).get();
       
-      // ✅ 2. Add a check to ensure the invitation exists
       if (!invitationDoc.exists) {
         throw new Error("Invalid or expired invitation token.");
       }
       
       const invitation = invitationDoc.data() as InvitationData;
 
-      // You can add more checks here (e.g., if status is not 'PENDING')
+      if (invitation.status !== 'PENDING') {
+         throw new Error("Invitation has already been used or expired.");
+      }
       
+      // 1. สร้าง User Authentication
       const userRecord = await adminAuth.createUser({
         email: invitation.email,
         password: password,
@@ -70,6 +71,7 @@ export class InvitationService {
 
       const sitesToStore = Array.isArray(invitation.sites) ? invitation.sites : [invitation.sites].filter(Boolean);
 
+      // 2. สร้าง User Profile ใน Firestore
       await adminDb.collection('users').doc(userRecord.uid).set({
         email: invitation.email,
         role: invitation.role,
@@ -79,6 +81,21 @@ export class InvitationService {
         acceptedAt: new Date(),
       });
 
+      // ✅✅✅ 3. เพิ่ม User ID เข้าไปใน Field 'members' ของทุก Site ที่เกี่ยวข้อง ✅✅✅
+      // เพื่อให้มองเห็น Sidebar
+      if (sitesToStore.length > 0) {
+        const updatePromises = sitesToStore.map(siteId => 
+            adminDb.collection('sites').doc(siteId).update({
+                members: FieldValue.arrayUnion(userRecord.uid)
+            }).catch(err => {
+                console.error(`Warning: Failed to add user to site ${siteId}`, err);
+            })
+        );
+        await Promise.all(updatePromises);
+      }
+      // ✅✅✅ จบส่วนที่เพิ่ม ✅✅✅
+
+      // 4. อัปเดตสถานะคำเชิญ
       await adminDb.collection('invitations').doc(token).update({
         status: 'ACCEPTED',
         acceptedAt: new Date(),
@@ -97,7 +114,7 @@ export class InvitationService {
     }
   }
 
-  // Get invitation details
+  // Get invitation details (ส่วนนี้เหมือนเดิม)
   static async getInvitation(token: string) {
     try {
       const invitationDoc = await adminDb.collection('invitations').doc(token).get();
@@ -106,7 +123,7 @@ export class InvitationService {
         return { success: false, error: 'Invalid invitation' };
       }
 
-      const invitation = invitationDoc.data()!; // Using '!' asserts that data exists
+      const invitation = invitationDoc.data()!;
       
       return {
         success: true,

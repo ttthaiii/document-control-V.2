@@ -122,19 +122,19 @@ export function InviteUserForm() {
             ตำแหน่งงาน
           </label>
           <select
-            {...register('role', { required: 'กรุณาเลือกตำแหน่งงาน' })}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            {...register('role', { required: 'กรุณาเลือกตำแหน่ง' })}
+            className="w-full p-2 border rounded-md focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+            disabled={loading}
           >
-            <option value="">-- เลือกตำแหน่งงาน --</option>
-            <option value={ROLES.BIM}>BIM</option>
-            <option value={ROLES.SITE_ADMIN}>Site Admin</option>
-            <option value={ROLES.OE}>OE (Owner Engineer)</option>
-            <option value={ROLES.PE}>PE (Project Engineer)</option>
-            <option value={ROLES.CM}>CM</option>
-            <option value={ROLES.ME}>ME (Mechanical/Electrical Engineer)</option>
-            <option value={ROLES.SN}>SN (Sanitary Engineer)</option>
-            <option value={ROLES.PD}>PD (Project Director)</option>
-            <option value={ROLES.PM}>PM (Project Manager)</option>
+            <option value="">-- กรุณาเลือกตำแหน่ง --</option>
+            
+            {/* ✅ เปลี่ยนจาก Hardcode เป็นการวนลูปจาก ROLES */}
+            {Object.values(ROLES).map((role) => (
+              <option key={role} value={role}>
+                {role}
+              </option>
+            ))}
+
           </select>
           {errors.role && (
             <p className="text-red-500 text-sm mt-1">{errors.role.message}</p>

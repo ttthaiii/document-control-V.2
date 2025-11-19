@@ -38,29 +38,29 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
 
   // v 2. เปลี่ยนจากการเรียก API มาใช้ onSnapshot เพื่อดึงข้อมูล Site
   useEffect(() => {
-    if (!user?.sites || user.sites.length === 0) {
-      setSites([]); // ถ้า user ไม่มี site ให้เคลียร์ค่า state
-      return;
+    // ✅ แก้ไข Query: ดึง Site ที่มีชื่อฉันอยู่ใน 'members'
+    if (!user?.id) {
+        setSites([]);
+        return;
     }
 
-    // สร้าง Query เพื่อดึงข้อมูลเฉพาะ Site ที่ user มีสิทธิ์
+    // เปลี่ยนเงื่อนไขการค้นหา
     const q = query(
       collection(db, "sites"), 
-      where(documentId(), "in", user.sites)
+      where("members", "array-contains", user.id) // 👈 ค้นหาว่า ID ฉันอยู่ในอาเรย์ members ไหม
     );
 
-    // เริ่ม "ฟัง" ข้อมูลแบบ Real-time (ซึ่งจะอ่านจาก Cache ก่อนเสมอ)
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
       const sitesFromDb: Site[] = [];
       querySnapshot.forEach((doc) => {
+        // ดึงข้อมูลมาแสดง
         sitesFromDb.push({ id: doc.id, name: doc.data().name });
       });
       setSites(sitesFromDb);
     }, (error) => {
-      console.error("Sidebar: Failed to fetch sites with onSnapshot", error);
+      console.error("Sidebar: Failed to fetch sites", error);
     });
 
-    // หยุดการ "ฟัง" เมื่อ component ถูกปิด
     return () => unsubscribe();
   }, [user]); // ให้ useEffect ทำงานใหม่เมื่อข้อมูล user เปลี่ยนแปลง
 
@@ -257,7 +257,7 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
             </div>
           )}
 
-          {isRFAAuthorized() && (
+          {/*{isRFAAuthorized() && (
             <Link
               href="/rfi"
               onClick={showLoader}
@@ -273,7 +273,7 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
               <HelpCircle size={18} />
               <span>RFI</span>
             </Link>
-          )}
+          )}*/}
 
           <Link
             href="/dashboard/work-request"
