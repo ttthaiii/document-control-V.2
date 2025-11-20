@@ -19,17 +19,18 @@ const messaging = firebase.messaging();
 
 messaging.onBackgroundMessage((payload) => {
   console.log('[firebase-messaging-sw.js] Received background message ', payload);
-  
+  /*
   // ✅ แก้การดึงค่า: ดึงจาก payload.data แทน
   const notificationTitle = payload.data.title; 
   const notificationOptions = {
     body: payload.data.body, // ดึงจาก data
-    icon: '/favicon.ico',
+    icon: '/favicon.i co',
     data: payload.data // ส่ง object data ต่อไปให้ event click
   };
 
   self.registration.showNotification(notificationTitle, notificationOptions);
-});
+*/
+  });
 
 // 4. จัดการเมื่อ User กดที่ Notification
 self.addEventListener('notificationclick', function(event) {
