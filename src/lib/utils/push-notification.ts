@@ -41,11 +41,17 @@ export async function sendPushNotification(userIds: string[], payload: Notificat
 
     // 3. สร้างข้อความ
     const message = {
-    data: {
+      // ✅ ใส่ notification กลับมา (เพื่อให้ iOS ยอมแสดงผล)
+      notification: {
+        title: payload.title,
+        body: payload.body,
+      },
+      // ✅ ใส่ data ไว้เหมือนเดิม (เพื่อส่ง URL หรือข้อมูลอื่นๆ)
+      data: {
         title: payload.title,
         body: payload.body,
         url: payload.url || '/dashboard',
-        click_action: 'FLUTTER_NOTIFICATION_CLICK',
+        click_action: payload.url || '/dashboard', // ใส่เผื่อไว้สำหรับบาง Browser
       },
       tokens: allTokens, 
     };
