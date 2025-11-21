@@ -1,4 +1,4 @@
-// src/components/layout/Sidebar.tsx (โค้ดฉบับสมบูรณ์)
+// src/components/layout/Sidebar.tsx
 'use client'
 
 import React, { useState, useEffect, useMemo, Suspense } from 'react'
@@ -7,14 +7,12 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth/useAuth'
 import { useLoading } from '@/lib/context/LoadingContext'
 import { 
-  FileText, HelpCircle, Wrench, BarChart3, ChevronDown, 
-  ChevronRight, LogOut, X, Users
+  FileText, BarChart3, ChevronDown, 
+  ChevronRight, LogOut, X, Users, Wrench
 } from 'lucide-react'
-import { CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES } from '@/lib/config/workflow'
-
-// v 1. Import สิ่งที่จำเป็นจาก Firestore SDK
+import { CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, ROLES, Role } from '@/lib/config/workflow'
 import { db } from '@/lib/firebase/client'
-import { collection, query, where, onSnapshot, documentId } from 'firebase/firestore'
+import { collection, query, where, onSnapshot } from 'firebase/firestore'
 
 interface SidebarProps {
   isOpen: boolean
@@ -24,6 +22,8 @@ interface SidebarProps {
 interface Site {
   id: string;
   name: string;
+  roleSettings?: any;
+  userOverrides?: any;
 }
 
 function SidebarContent({ isOpen, onToggle }: SidebarProps) {
@@ -36,54 +36,83 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
   const [showRfaDropdown, setShowRfaDropdown] = useState(false)
   const [sites, setSites] = useState<Site[]>([]);
 
-  // v 2. เปลี่ยนจากการเรียก API มาใช้ onSnapshot เพื่อดึงข้อมูล Site
+  // 1. ดึงข้อมูล Site (ใช้ members query ที่ตรงกับ Rules ใหม่)
   useEffect(() => {
-    // ✅ แก้ไข Query: ดึง Site ที่มีชื่อฉันอยู่ใน 'members'
     if (!user?.id) {
         setSites([]);
         return;
     }
 
-    // เปลี่ยนเงื่อนไขการค้นหา
+    console.group("🔍 DEBUG: Sidebar Permission");
+    console.log("User ID (from Auth):", `"${user.id}"`); // ใส่ "" เพื่อดูว่ามีเว้นวรรคเกินมาไหม
+    console.log("Length:", user.id.length);
+    console.groupEnd();
+    
     const q = query(
       collection(db, "sites"), 
-      where("members", "array-contains", user.id) // 👈 ค้นหาว่า ID ฉันอยู่ในอาเรย์ members ไหม
+      where("members", "array-contains", user.id)
     );
 
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
       const sitesFromDb: Site[] = [];
       querySnapshot.forEach((doc) => {
-        // ดึงข้อมูลมาแสดง
-        sitesFromDb.push({ id: doc.id, name: doc.data().name });
+        const data = doc.data();
+        sitesFromDb.push({ 
+            id: doc.id, 
+            name: data.name,
+            roleSettings: data.roleSettings,
+            userOverrides: data.userOverrides
+        });
       });
       setSites(sitesFromDb);
     }, (error) => {
-      console.error("Sidebar: Failed to fetch sites", error);
+      console.error("Sidebar fetch error:", error);
     });
 
     return () => unsubscribe();
-  }, [user]); // ให้ useEffect ทำงานใหม่เมื่อข้อมูล user เปลี่ยนแปลง
+  }, [user]); 
 
+  // 2. ฟังก์ชันเช็คสิทธิ์รายเมนู (Shop / Gen / Mat)
+  const checkMenuAccess = (rfaType: 'SHOP' | 'GEN' | 'MAT') => {
+      if (!user) return false;
+      if (user.role === 'Admin') return true;
+
+      // A. เช็ค Default Role
+      let defaultAllowedRoles: Role[] = [];
+      if (rfaType === 'SHOP') defaultAllowedRoles = [ROLES.BIM, ROLES.ME, ROLES.SN, ROLES.SITE_ADMIN, ROLES.ADMIN];
+      else if (rfaType === 'GEN') defaultAllowedRoles = [ROLES.BIM, ROLES.SITE_ADMIN, ROLES.ADMIN, ROLES.ME, ROLES.SN];
+      else if (rfaType === 'MAT') defaultAllowedRoles = [ROLES.SITE_ADMIN, ROLES.ADMIN, ROLES.OE, ROLES.PE];
+      
+      if (defaultAllowedRoles.includes(user.role)) return true;
+
+      // B. เช็ค Override (สิทธิ์พิเศษ)
+      return sites.some(site => {
+          const overrides = site.userOverrides?.[user.id]?.RFA;
+          
+          const createAction = rfaType === 'SHOP' ? 'create_shop' : rfaType === 'GEN' ? 'create_gen' : 'create_mat';
+          const commonActions = ['review', 'approve'];
+
+          if (overrides) {
+              // ถ้าได้รับอนุญาตให้สร้าง Type นี้โดยเฉพาะ -> ให้เห็น
+              if (overrides[createAction] === true) return true; 
+              // ถ้าเป็นคนตรวจ/อนุมัติ -> ให้เห็นหมดทุกเมนู
+              if (commonActions.some(act => overrides[act] === true)) return true; 
+          }
+          return false;
+      });
+  };
+
+  const canViewShop = checkMenuAccess('SHOP');
+  const canViewGen = checkMenuAccess('GEN');
+  const canViewMat = checkMenuAccess('MAT');
   
-  const isRFAAuthorized = () => {
-    if (!user) return false;
-    const authorizedRoles = [
-      ...CREATOR_ROLES, 
-      ...REVIEWER_ROLES, 
-      ...APPROVER_ROLES, 
-      'Admin'
-    ];
-    return authorizedRoles.includes(user.role);
-  }
+  // แสดงเมนูหลักถ้ามีสิทธิ์ย่อยอย่างน้อย 1 อย่าง
+  const canViewAnyRFA = canViewShop || canViewGen || canViewMat;
 
-  // v 3. useMemo ส่วนนี้จะทำงานได้ถูกต้องเหมือนเดิม ไม่ต้องแก้ไข
   const userSites = useMemo(() => {
-    if (!user?.sites || sites.length === 0) {
-      return [];
-    }
+    if (!user?.sites || sites.length === 0) return [];
     return sites.filter(site => user.sites!.includes(site.id));
   }, [user?.sites, sites]);
-
 
   useEffect(() => {
     if (pathname.includes('/rfa') || pathname.includes('/dashboard/rfa')) {
@@ -113,9 +142,7 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
     return pathname === path || pathname.startsWith(path + '/')
   }
 
-  if (!user) {
-    return null
-  }
+  if (!user) return null
 
   return (
     <>
@@ -183,7 +210,8 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
             Dashboard
           </Link>
 
-          {isRFAAuthorized() && (
+          {/* ✅ แสดงเมนู RFA เฉพาะเมื่อมีสิทธิ์ */}
+          {canViewAnyRFA && (
             <div className="space-y-1">
               <button
                 onClick={toggleRfaDropdown}
@@ -205,75 +233,64 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
               
               {showRfaDropdown && (
                 <div className="ml-6 space-y-1 border-l-2 border-orange-200 pl-4">
-                  <Link
-                    href="/dashboard/rfa?type=RFA-SHOP"
-                    onClick={showLoader}
-                    className={`
-                      flex items-center gap-3 px-3 py-2 rounded-md text-sm
-                      transition-colors duration-200
-                      ${(pathname === '/dashboard/rfa' && searchParams.get('type') === 'RFA-SHOP')
-                        ? 'bg-blue-100 text-blue-900 font-medium' 
-                        : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'
-                      }
-                    `}
-                  >
-                    <div className="w-2 h-2 bg-blue-500 rounded-full" />
-                    <span>🏗️ Shop Drawing</span>
-                  </Link>
+                  {/* ✅ แสดงเฉพาะเมนูย่อยที่ได้รับอนุญาต */}
+                  {canViewShop && (
+                    <Link
+                        href="/dashboard/rfa?type=RFA-SHOP"
+                        onClick={showLoader}
+                        className={`
+                          flex items-center gap-3 px-3 py-2 rounded-md text-sm
+                          transition-colors duration-200
+                          ${(pathname === '/dashboard/rfa' && searchParams.get('type') === 'RFA-SHOP')
+                            ? 'bg-blue-100 text-blue-900 font-medium' 
+                            : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'
+                          }
+                        `}
+                    >
+                        <div className="w-2 h-2 bg-blue-500 rounded-full" />
+                        <span>🏗️ Shop Drawing</span>
+                    </Link>
+                  )}
 
-                  <Link
-                    href="/dashboard/rfa?type=RFA-GEN"
-                    onClick={showLoader}
-                    className={`
-                      flex items-center gap-3 px-3 py-2 rounded-md text-sm
-                      transition-colors duration-200
-                      ${(pathname === '/dashboard/rfa' && searchParams.get('type') === 'RFA-GEN')
-                        ? 'bg-green-100 text-green-900 font-medium' 
-                        : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'
-                      }
-                    `}
-                  >
-                    <div className="w-2 h-2 bg-green-500 rounded-full" />
-                    <span>📋 General</span>
-                  </Link>
+                  {canViewGen && (
+                    <Link
+                        href="/dashboard/rfa?type=RFA-GEN"
+                        onClick={showLoader}
+                        className={`
+                          flex items-center gap-3 px-3 py-2 rounded-md text-sm
+                          transition-colors duration-200
+                          ${(pathname === '/dashboard/rfa' && searchParams.get('type') === 'RFA-GEN')
+                            ? 'bg-green-100 text-green-900 font-medium' 
+                            : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'
+                          }
+                        `}
+                    >
+                        <div className="w-2 h-2 bg-green-500 rounded-full" />
+                        <span>📋 General</span>
+                    </Link>
+                  )}
 
-                  <Link
-                    href="/dashboard/rfa?type=RFA-MAT"
-                    onClick={showLoader}
-                    className={`
-                      flex items-center gap-3 px-3 py-2 rounded-md text-sm
-                      transition-colors duration-200
-                      ${(pathname === '/dashboard/rfa' && searchParams.get('type') === 'RFA-MAT')
-                        ? 'bg-orange-100 text-orange-900 font-medium' 
-                        : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'
-                      }
-                    `}
-                  >
-                    <div className="w-2 h-2 bg-orange-500 rounded-full" />
-                    <span>🧱 Material</span>
-                  </Link>
+                  {canViewMat && (
+                    <Link
+                        href="/dashboard/rfa?type=RFA-MAT"
+                        onClick={showLoader}
+                        className={`
+                          flex items-center gap-3 px-3 py-2 rounded-md text-sm
+                          transition-colors duration-200
+                          ${(pathname === '/dashboard/rfa' && searchParams.get('type') === 'RFA-MAT')
+                            ? 'bg-orange-100 text-orange-900 font-medium' 
+                            : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'
+                          }
+                        `}
+                    >
+                        <div className="w-2 h-2 bg-orange-500 rounded-full" />
+                        <span>🧱 Material</span>
+                    </Link>
+                  )}
                 </div>
               )}
             </div>
           )}
-
-          {/*{isRFAAuthorized() && (
-            <Link
-              href="/rfi"
-              onClick={showLoader}
-              className={`
-                flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
-                transition-colors duration-200
-                ${isPathActive('/rfi') 
-                  ? 'bg-orange-200 text-orange-900' 
-                  : 'text-gray-700 hover:bg-orange-100 hover:text-orange-800'
-                }
-              `}
-            >
-              <HelpCircle size={18} />
-              <span>RFI</span>
-            </Link>
-          )}*/}
 
           <Link
             href="/dashboard/work-request"
@@ -293,32 +310,6 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
 
         </nav>
 
-        {user && user.role === 'Admin' && (
-          <div className="px-4 py-2">
-            <div className="border-t border-orange-200" />
-            <div className="mt-2 space-y-1">
-              <p className="px-3 text-xs font-semibold uppercase text-gray-500 tracking-wider pt-2">
-                Admin
-              </p>
-              <Link
-                href="/admin"
-                onClick={showLoader}
-                className={`
-                  flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
-                  transition-colors duration-200
-                  ${isPathActive('/admin') 
-                    ? 'bg-red-100 text-red-800' 
-                    : 'text-gray-700 hover:bg-red-50 hover:text-red-700'
-                  }
-                `}
-              >
-                <Users size={18} />
-                <span>Invite Users</span>
-              </Link>
-            </div>
-          </div>
-        )}
-        
         <div className="p-4 border-t border-orange-200">
           <button
             onClick={handleLogout}
