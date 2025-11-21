@@ -157,7 +157,10 @@ function RFAContent() {
         }
     
         // Fetch Sites
-        const sitesQuery = query(collection(db, "sites"), where(documentId(), "in", user.sites));
+        const sitesQuery = query(
+            collection(db, "sites"), 
+            where("members", "array-contains", user.id)
+        );
         const unsubscribeSites = onSnapshot(sitesQuery, (snapshot) => {
             const sitesData: Site[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Site));
             setSites(sitesData);

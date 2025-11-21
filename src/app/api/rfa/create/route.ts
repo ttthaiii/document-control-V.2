@@ -1,19 +1,18 @@
 // src/app/api/rfa/create/route.ts
 import { NextResponse } from "next/server";
-// 🔽 1. Import adminAuth เข้ามาด้วย 🔽
-import { adminDb, adminBucket, adminAuth } from "@/lib/firebase/admin"; 
-// 🗑️ 2. ลบ getAuth ที่ไม่ได้ใช้แล้วออกไป 🗑️
-// import { getAuth } from "firebase-admin/auth";
+import { adminDb, adminBucket, adminAuth } from "@/lib/firebase/admin";
 import { FieldValue } from 'firebase-admin/firestore';
 import { ROLES, REVIEWER_ROLES, STATUSES, Role } from '@/lib/config/workflow';
+// 👇 1. Import ฟังก์ชันเช็คสิทธิ์
+import { checkPermission } from '@/lib/auth/permission-check';
 
 export const dynamic = 'force-dynamic';
 
-// ... (ฟังก์ชัน toSlugId, ensureCategory ไม่ต้องแก้ไข) ...
 function toSlugId(input: string): string {
   if (!input) return '';
   return input.trim().replace(/[^\p{L}\p{N}]+/gu, "_").replace(/^_+|_+$/g, "").toUpperCase();
 }
+
 async function ensureCategory(siteId: string, categoryIdOrName: string, defaults?: Partial<{ name: string; description: string; createdBy: string; rfaType: string; }>): Promise<{ id: string; created: boolean }> {
     const docId = toSlugId(categoryIdOrName);
     const ref = adminDb.doc(`sites/${siteId}/categories/${docId}`);
@@ -34,13 +33,11 @@ async function ensureCategory(siteId: string, categoryIdOrName: string, defaults
     return { id: docId, created: true };
 }
 
-
 async function verifyIdTokenFromHeader(req: Request): Promise<string | null> {
     const authHeader = req.headers.get("authorization") || "";
     const match = authHeader.match(/^Bearer (.+)$/i);
     if (!match) return null;
     try {
-        // 🔽 3. เปลี่ยนไปใช้ adminAuth ที่เรา import เข้ามา 🔽
         const decoded = await adminAuth.verifyIdToken(match[1]);
         return decoded.uid;
     } catch {
@@ -52,11 +49,9 @@ async function readRequest(req: Request): Promise<any> {
     return req.json().catch(() => ({}));
 }
 
-
 export async function POST(req: Request) {
   const uid = await verifyIdTokenFromHeader(req);
   if (!uid) {
-    // แก้ไข: ส่ง Response ที่มี success: false กลับไปเพื่อให้ Frontend จับ Error ได้ง่ายขึ้น
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 
@@ -69,16 +64,43 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: 'User not found' }, { status: 403 });
     }
     const userData = userDoc.data();
-    const userRole = userData?.role;
+    const userRole = userData?.role as Role; // Cast type ให้ชัดเจน
 
-    // ✅ FIX 2: อ่าน body ที่ถูกแก้ไขแล้ว และดึง payload ออกมา
     const body = await readRequest(req);
     const { payload } = body;
     const { rfaType, siteId, categoryId, title, description, taskData, documentNumber, revisionNumber, uploadedFiles } = payload || {};
 
     if (!rfaType || !siteId || !title || !uploadedFiles || uploadedFiles.length === 0 || !categoryId) {
-        return NextResponse.json({ error: "Missing required fields. Required: rfaType, siteId, categoryId, title, uploadedFiles." }, { status: 400 });
+        return NextResponse.json({ error: "Missing required fields." }, { status: 400 });
     }
+
+    // --- ✅ ส่วนที่เพิ่มใหม่: ตรวจสอบสิทธิ์ RFA ---
+    let actionKey = '';
+    switch (rfaType) {
+        case 'RFA-SHOP': actionKey = 'create_shop'; break;
+        case 'RFA-GEN': actionKey = 'create_gen'; break;
+        case 'RFA-MAT': actionKey = 'create_mat'; break;
+        default: actionKey = '';
+    }
+
+    if (actionKey) {
+        const canCreate = await checkPermission(
+            siteId,
+            userRole,
+            'RFA',
+            actionKey,
+            uid
+        );
+
+        if (!canCreate) {
+            return NextResponse.json({
+                success: false,
+                error: `Permission denied. Role '${userRole}' cannot create ${rfaType} in this site.`
+            }, { status: 403 });
+        }
+    }
+    // --- ✅ จบส่วนตรวจสอบสิทธิ์ ---
+
 
     if (documentNumber) {
         const existingDocQuery = adminDb.collection('rfaDocuments')
@@ -90,7 +112,7 @@ export async function POST(req: Request) {
         if (!existingDocSnapshot.empty) {
             return NextResponse.json(
                 { success: false, error: `เลขที่เอกสาร "${documentNumber.trim()}" นี้ถูกใช้ไปแล้วในโครงการนี้` },
-                { status: 409 } // 409 Conflict เป็น HTTP Status ที่เหมาะสม
+                { status: 409 }
             );
         }
     }
@@ -116,7 +138,6 @@ export async function POST(req: Request) {
       return `${rfaType}-${siteShortName}-${formattedNumber}`;
     });
 
-    const rawCategoryKey = categoryId || taskData?.taskCategory || rfaType;
     const { id: finalCategoryId } = await ensureCategory(siteId, categoryId, {
       name: categoryId,
       createdBy: uid,
@@ -124,19 +145,16 @@ export async function POST(req: Request) {
     });
 
     const docNumForPath = documentNumber || runningNumber;
-
     const finalFilesData = [];
     const cdnUrlBase = "https://ttsdoc-cdn.ttthaiii30.workers.dev";
 
     for (const tempFile of uploadedFiles) {
         const sourcePath = tempFile.filePath;
         if (!sourcePath || !sourcePath.startsWith(`temp/${uid}/`)) {
-            console.warn(`Skipping invalid or unauthorized file path: ${sourcePath}`);
             continue;
         }
         
         tempFilePathsToDelete.push(sourcePath);
-
         const originalName = tempFile.fileName;
         const timestamp = Date.now();
         const destinationPath = `sites/${siteId}/rfa/${docNumForPath}/${timestamp}_${originalName}`;
@@ -155,16 +173,13 @@ export async function POST(req: Request) {
     let initialStatus = STATUSES.PENDING_REVIEW;
     let initialAction = "CREATE";
     
-    // ใช้ (userRole as Role) เพื่อยืนยัน Type ให้ TypeScript
-    const isReviewer = REVIEWER_ROLES.includes(userRole as Role);
+    const isReviewer = REVIEWER_ROLES.includes(userRole);
     const isEngineer = userRole === ROLES.ME || userRole === ROLES.SN;
 
-    // Case 1: Engineer สร้าง RFA-SHOP, จะถูกส่งไป CM เลย
     if (rfaType === 'RFA-SHOP' && isEngineer) {
       initialStatus = STATUSES.PENDING_CM_APPROVAL;
       initialAction = "CREATE_AND_SUBMIT_TO_CM";
     }
-    // Case 2: Reviewer (Site Admin, OE, etc.) สร้างเอกสาร, จะถูกส่งไป CM เลย
     else if (isReviewer && ['RFA-MAT', 'RFA-GEN', 'RFA-SHOP'].includes(rfaType)) {
       initialStatus = STATUSES.PENDING_CM_APPROVAL;
       initialAction = "CREATE_AND_SUBMIT";

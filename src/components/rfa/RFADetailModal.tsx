@@ -1,15 +1,18 @@
+// src/components/rfa/RFADetailModal.tsx
 'use client'
 
 import React, { useState, useMemo, useEffect } from 'react'
 import { RFADocument, RFAPermissions, RFAWorkflowStep, RFAFile, RFASite } from '@/types/rfa'
-import { X, Paperclip, Clock, User, Check, Send, AlertTriangle, FileText, Download, History, MessageSquare, Edit3, Upload, ThumbsUp, ThumbsDown, Eye } from 'lucide-react'
+// 👇 แก้ไข: เพิ่ม Check เข้าไปใน import
+import { X, Paperclip, Send, AlertTriangle, FileText, Download, History, MessageSquare, Edit3, Upload, ThumbsUp, ThumbsDown, Check } from 'lucide-react'
 import Spinner from '@/components/shared/Spinner';
 import { useAuth } from '@/lib/auth/useAuth'
-import { Role, STATUS_LABELS, STATUSES, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUS_COLORS } from '@/lib/config/workflow'
+import { Role, STATUS_LABELS, STATUSES, STATUS_COLORS } from '@/lib/config/workflow'
 import PDFPreviewModal from './PDFPreviewModal'
 import { useNotification } from '@/lib/context/NotificationContext';
+import { usePermission } from '@/lib/hooks/usePermission';
 
-// --- (Helper Functions and other components are unchanged) ---
+// --- Helper Functions ---
 const formatDate = (dateString: string | undefined): string => {
   if (!dateString) return 'N/A';
   return new Date(dateString).toLocaleString('th-TH', {
@@ -24,15 +27,9 @@ const formatFileSize = (bytes: number): string => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 };
 
-const WorkflowHistoryModal = ({ workflow, onClose, userRole }: { workflow: RFAWorkflowStep[], onClose: () => void, userRole?: string }) => {
-    const filteredWorkflow = useMemo(() => {
-        // แก้ไขบรรทัดนี้: เพิ่ม as Role
-        if (userRole && APPROVER_ROLES.includes(userRole as Role)) {
-            const statusesToHide = [STATUSES.PENDING_REVIEW, STATUSES.REVISION_REQUIRED];
-            return workflow.filter(item => !statusesToHide.includes(item.status));
-        }
-        return workflow;
-    }, [workflow, userRole]);
+// --- Workflow History Modal ---
+const WorkflowHistoryModal = ({ workflow, onClose }: { workflow: RFAWorkflowStep[], onClose: () => void }) => {
+    const historyItems = [...workflow].reverse();
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-[60] flex items-center justify-center p-4">
@@ -48,8 +45,8 @@ const WorkflowHistoryModal = ({ workflow, onClose, userRole }: { workflow: RFAWo
                 </div>
                 <div className="p-6 overflow-y-auto">
                     <div className="border-l-2 border-gray-200 ml-2">
-                        {filteredWorkflow.length > 0 ? (
-                            filteredWorkflow.map((item, index) => (
+                        {historyItems.length > 0 ? (
+                            historyItems.map((item, index) => (
                             <div key={index} className="relative pl-6 pb-8 last:pb-0">
                                 <div className="absolute -left-[9px] top-1 w-4 h-4 bg-blue-500 rounded-full border-2 border-white"></div>
                                 <p className="font-semibold text-gray-800">{STATUS_LABELS[item.status] || item.status}</p>
@@ -58,27 +55,6 @@ const WorkflowHistoryModal = ({ workflow, onClose, userRole }: { workflow: RFAWo
                                 {item.comments && (
                                     <div className="mt-2 p-2 bg-gray-50 rounded-md text-xs italic">
                                         <p className="text-gray-600">"{item.comments}"</p>
-                                    </div>
-                                )}
-                                {item.files && item.files.length > 0 && (
-                                    <div className="mt-2 pl-2 border-l-2 border-gray-100">
-                                        <p className="text-xs font-semibold text-gray-500 mb-1">ไฟล์แนบ ณ ขั้นตอนนี้:</p>
-                                        <ul className="space-y-1">
-                                            {item.files.map((file, fileIndex) => (
-                                                <li key={fileIndex} className="flex items-center text-xs text-gray-600">
-                                                    <FileText size={12} className="mr-2 flex-shrink-0" />
-                                                    <a
-                                                        href={file.fileUrl}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
-                                                        className="truncate hover:underline"
-                                                        title={file.fileName}
-                                                    >
-                                                        {file.fileName}
-                                                    </a>
-                                                </li>
-                                            ))}
-                                        </ul>
                                     </div>
                                 )}
                             </div>
@@ -93,6 +69,7 @@ const WorkflowHistoryModal = ({ workflow, onClose, userRole }: { workflow: RFAWo
     );
 };
 
+// --- Interfaces ---
 interface RFADetailModalProps {
   document: RFADocument | null
   onClose: () => void
@@ -120,7 +97,7 @@ interface FullRFADocument extends RFADocument {
     };
 }
 
-export default function RFADetailModal({ document: initialDoc, onClose, onUpdate,showOverlay = true}: RFADetailModalProps) {
+export default function RFADetailModal({ document: initialDoc, onClose, onUpdate, showOverlay = true}: RFADetailModalProps) {
   const { user, firebaseUser } = useAuth();
   const [document, setDocument] = useState<FullRFADocument | null>(initialDoc as FullRFADocument);
   const [isLoading, setIsLoading] = useState(true);
@@ -138,6 +115,9 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const [verifiedTaskId, setVerifiedTaskId] = useState<string | null>(null);
   const [newDocumentNumberInput, setNewDocumentNumberInput] = useState('');
   const { showNotification } = useNotification();
+
+  // Hook Permissions
+  const { can } = usePermission(document?.site?.id);
 
   useEffect(() => {
     const fetchFullDocument = async () => {
@@ -167,19 +147,11 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   }, [initialDoc, firebaseUser]);
 
   const latestFiles = useMemo(() => {
-    if (!document) {
-        return [];
-    }
-    if (!document.workflow || document.workflow.length === 0) {
-        return document.files || [];
-    }
+    if (!document) return [];
+    if (!document.workflow || document.workflow.length === 0) return document.files || [];
     const reversedWorkflow = [...document.workflow].reverse();
     const latestStepWithFiles = reversedWorkflow.find(step => step.files && step.files.length > 0);
-    
-    if (latestStepWithFiles && latestStepWithFiles.files) {
-        return latestStepWithFiles.files;
-    }
-    return [];
+    return latestStepWithFiles?.files || [];
   }, [document]);
 
   const latestCommentItem = useMemo(() => {
@@ -193,26 +165,18 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   useEffect(() => {
     if (isRevisionFlow && document?.creatorRole === 'BIM' && firebaseUser && document) {
         const verifyTask = async () => {
-            if (!document.site?.name || !document.documentNumber || !document.taskData?.taskName) {
+             if (!document.site?.name || !document.documentNumber || !document.taskData?.taskName) {
                 setVerificationError("ข้อมูลเอกสารไม่สมบูรณ์ ไม่สามารถตรวจสอบ Task ได้");
                 return;
             }
-
             setIsVerifyingTask(true);
-            setIsTaskVerified(false);
-            setVerificationError(null);
-            setVerifiedTaskId(null);
             
-            try {
+             try {
                 const token = await firebaseUser.getIdToken();
                 const newRevNumber = (document.revisionNumber || 0) + 1;
-
                 const response = await fetch('/api/bim-tracking/verify-task', {
                     method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         documentNumber: document.documentNumber.split('-REV')[0],
                         projectName: document.site.name,
@@ -220,7 +184,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                         taskName: document.taskData.taskName,
                     }),
                 });
-
                 const result = await response.json();
                 if (response.ok && result.success) {
                     if (result.exists) {
@@ -230,7 +193,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                         setVerificationError('กรุณาสร้าง Task สำหรับ Revision นี้ในระบบ BIM Tracking ก่อน');
                     }
                 } else {
-                    throw new Error(result.error || 'ไม่สามารถตรวจสอบ Task ได้');
+                     setVerificationError(result.message || 'ไม่สามารถตรวจสอบ Task ได้');
                 }
             } catch (error: any) {
                 setVerificationError(error.message);
@@ -238,29 +201,22 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 setIsVerifyingTask(false);
             }
         };
-
         verifyTask();
     }
   }, [isRevisionFlow, document, firebaseUser]);
 
   if (isLoading) {
-    return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
-            <Spinner className="h-12 w-12 text-white" />
-        </div>
-    );
+    return <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center"><Spinner className="h-12 w-12 text-white" /></div>;
   }
-
   if (!document) return null;
   
-  const permissions = document.permissions || {} as RFAPermissions;
   const isResubmissionFlow = document.status === STATUSES.REVISION_REQUIRED && isCreator;
   const newRevisionNumber = (document.revisionNumber || 0) + 1;
   const newDocumentNumber = `${document.documentNumber.split('-REV')[0]}-REV${String(newRevisionNumber).padStart(2, '0')}`;
   const displayDetailOrComment = latestCommentItem?.comments || document.description;
   const displayLabel = latestCommentItem ? `ความคิดเห็นล่าสุด` : 'รายละเอียดเพิ่มเติม';
 
-  const uploadTempFile = async (file: File): Promise<Partial<UploadedFile>> => {
+   const uploadTempFile = async (file: File): Promise<Partial<UploadedFile>> => {
     try {
         if (!firebaseUser) throw new Error('กรุณาล็อกอินก่อนอัปโหลดไฟล์');
         const token = await firebaseUser.getIdToken();
@@ -316,39 +272,28 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     }
     setFiles(prev => prev.filter((_, i) => i !== index));
   };
-  
-  const handleAction = async (action: string) => {
+
+   const handleAction = async (action: string) => {
     const actionsRequiringFile = ['REQUEST_REVISION', 'SEND_TO_CM', 'SUBMIT_REVISION'];
     if (actionsRequiringFile.includes(action) && newFiles.filter(f => f.status === 'success').length === 0) {
         alert('กรุณาแนบไฟล์ประกอบการดำเนินการ');
         return;
     }
-
     setIsSubmitting(true);
     try {
       const token = await firebaseUser?.getIdToken();
-      
-      // --- 👇 [แก้ไข] สร้าง payload และเพิ่ม documentNumber เข้าไป ---
-      const payload: {
-          action: string;
-          comments: string;
-          newFiles: any[];
-          documentNumber?: string; // ทำให้เป็น optional
-      } = {
+      const payload: any = {
           action,
           comments: comment,
           newFiles: newFiles.filter(f => f.status === 'success').map(f => f.uploadedData)
       };
-
       if (needsDocNumber && newDocumentNumberInput.trim()) {
           payload.documentNumber = newDocumentNumberInput.trim();
       }
-      // --- 👆 สิ้นสุดการแก้ไข ---
-
-      const response = await fetch(`/api/rfa/${document.id}`, {
+      const response = await fetch(`/api/rfa/${document!.id}`, {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload), // 👈 ใช้ payload ที่สร้างขึ้นใหม่
+        body: JSON.stringify(payload),
       });
       const result = await response.json();
       if (result.success) {
@@ -375,7 +320,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     try {
       const token = await firebaseUser?.getIdToken();
       const payload = {
-        originalDocId: document.id,
+        originalDocId: document!.id,
         uploadedFiles: successfulUploads.map(f => f.uploadedData),
         comments: revisionComment,
         verifiedTaskId: verifiedTaskId,
@@ -399,19 +344,25 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       setIsSubmitting(false);
     }
   };
+
   const handleResubmitRevision = async () => {
     await handleAction('SUBMIT_REVISION');
   };
-  
-  const { role: userRole } = user || {};
-  const { status, creatorRole } = document;
+
+  // Permission Logic
+  const { status } = document;
   const cmSystemType = document.site?.cmSystemType || 'INTERNAL';
-  const isSiteReviewing = REVIEWER_ROLES.includes(userRole as Role) && status === STATUSES.PENDING_REVIEW;
-  const isSiteFinalApproving = REVIEWER_ROLES.includes(userRole as Role) && status === STATUSES.PENDING_FINAL_APPROVAL;
-  const isSiteActingAsExternalCM = REVIEWER_ROLES.includes(userRole as Role) && status === STATUSES.PENDING_CM_APPROVAL && cmSystemType === 'EXTERNAL';
-  const isInternalCmApproving = APPROVER_ROLES.includes(userRole as Role) && status === STATUSES.PENDING_CM_APPROVAL && cmSystemType === 'INTERNAL';
+
+  const canReview = can('RFA', 'review');
+  const canApprove = can('RFA', 'approve');
+
+  const isSiteReviewing = canReview && status === STATUSES.PENDING_REVIEW;
+  const isSiteFinalApproving = canReview && status === STATUSES.PENDING_FINAL_APPROVAL;
+  const isSiteActingAsExternalCM = canReview && status === STATUSES.PENDING_CM_APPROVAL && cmSystemType === 'EXTERNAL';
+  
+  const isInternalCmApproving = canApprove && status === STATUSES.PENDING_CM_APPROVAL && cmSystemType === 'INTERNAL';
+
   const overlayClasses = showOverlay ? 'bg-black bg-opacity-50' : ''  
- 
   const isActionDisabled = isSubmitting || newFiles.filter(f => f.status === 'success').length === 0;
   const needsDocNumber = isSiteReviewing && !document.documentNumber;
 
@@ -443,7 +394,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
 
           {/* Main Content */}
           <div className="p-6 overflow-y-auto space-y-6">
-            <div className="bg-gray-50 p-4 rounded-lg">
+             <div className="bg-gray-50 p-4 rounded-lg">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                   <div>
                       <strong className="text-gray-500 block mb-1">สถานะ:</strong>
@@ -481,7 +432,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 {latestFiles.length > 0 ? (
                   latestFiles.map((file, index) => {
                     const isPdf = file.contentType === 'application/pdf' || file.fileName.toLowerCase().endsWith('.pdf');
-                    
                     const FileContent = () => (
                       <div className="flex items-center min-w-0">
                         <FileText className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
@@ -491,26 +441,14 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                         </div>
                       </div>
                     );
-
                     return (
                       <li key={index} className="bg-slate-50 border border-slate-200 rounded-md">
                         {isPdf ? (
-                          <button 
-                            onClick={() => setPreviewFile(file)}
-                            className="w-full text-left p-2 rounded-md hover:bg-blue-100 group transition-colors duration-200"
-                            title={`ดูตัวอย่างไฟล์ ${file.fileName}`}
-                          >
+                          <button onClick={() => setPreviewFile(file)} className="w-full text-left p-2 rounded-md hover:bg-blue-100 group transition-colors duration-200">
                             <FileContent />
                           </button>
                         ) : (
-                          <a 
-                            href={file.fileUrl}
-                            download={file.fileName}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="w-full text-left p-2 rounded-md hover:bg-blue-100 group transition-colors duration-200 flex"
-                            title={`ดาวน์โหลด ${file.fileName}`}
-                          >
+                          <a href={file.fileUrl} download={file.fileName} target="_blank" rel="noopener noreferrer" className="w-full text-left p-2 rounded-md hover:bg-blue-100 group transition-colors duration-200 flex">
                             <FileContent />
                           </a>
                         )}
@@ -524,7 +462,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
             </div>
           </div>
           
-      
           {/* Action Panels */}
           <div className="p-4 border-t bg-slate-50">
             {isSiteReviewing && (
@@ -773,7 +710,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
           <WorkflowHistoryModal 
               workflow={document.workflow || []} 
               onClose={() => setShowHistory(false)} 
-              userRole={user?.role}
           />
         )}
         <PDFPreviewModal

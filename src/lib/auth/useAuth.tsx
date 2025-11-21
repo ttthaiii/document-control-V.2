@@ -3,7 +3,8 @@
 
 import React, { useState, useEffect, useContext, createContext, ReactNode } from 'react';
 import { User, onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, onSnapshot, updateDoc } from 'firebase/firestore'; // ลบ arrayUnion ออกแล้ว
+// ✅ แก้ไข: เพิ่ม getDoc เข้าไปใน import แล้ว
+import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore'; 
 import { getToken, deleteToken, onMessage, MessagePayload } from 'firebase/messaging';
 import { auth, db, messaging } from '@/lib/firebase/client';
 import { Role } from '@/lib/config/workflow';
@@ -67,11 +68,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           });
           
           if (currentToken) {
-            // ✅ ใช้แบบทับของเดิม (Overwrite) เพื่อแก้ปัญหาแจ้งเตือนซ้ำ
-            await updateDoc(doc(db, 'users', uid), {
+            // ใช้ setDoc + merge: true เพื่อสร้างเอกสารใหม่ถ้ายังไม่มี
+            await setDoc(doc(db, 'users', uid), {
               fcmTokens: [currentToken], 
               lastLogin: new Date()
-            });
+            }, { merge: true });
+
             console.log('📱 Mobile Notification Token Updated');
           }
         }
@@ -85,7 +87,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-      // ลงทะเบียนไฟล์ sw.js (ที่ next-pwa สร้างให้ตอน build)
       navigator.serviceWorker
         .register('/sw.js')
         .then((registration) => {
@@ -97,7 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
   
-  // ส่วนรับข้อความ Foreground (เหมือนเดิม)
+  // ส่วนรับข้อความ Foreground
   useEffect(() => {
     if (typeof window !== 'undefined' && messaging && isMobileDevice()) {
       const unsubscribe = onMessage(messaging, (payload: MessagePayload) => {
@@ -121,7 +122,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // ส่วน Auth State Change (เหมือนเดิม)
+  // ส่วน Auth State Change
   useEffect(() => {
     let unsubscribeSnapshot: (() => void) | null = null;
 
@@ -136,6 +137,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (fbUser) {
         const userDocRef = doc(db, 'users', fbUser.uid);
+        
+        // ✅ เพิ่ม Logic: เช็คก่อนว่ามี Doc ไหม ถ้าไม่มีให้สร้างทันที ก่อนจะเริ่ม Listen
+        // วิธีนี้ช่วยแก้ปัญหา Permission Error ได้ชะงัดที่สุด
+        try {
+            const docSnapCheck = await getDoc(userDocRef);
+            if (!docSnapCheck.exists()) {
+                console.log("User doc not found, creating new one...");
+                await setDoc(userDocRef, {
+                    email: fbUser.email,
+                    role: 'BIM', // กำหนด Role เริ่มต้น (อาจเปลี่ยนได้ตาม Logic ของคุณ)
+                    status: 'ACTIVE',
+                    createdAt: new Date(),
+                    updatedAt: new Date(),
+                    fcmTokens: [],
+                }, { merge: true });
+            }
+        } catch (err) {
+            console.error("Error checking/creating user doc:", err);
+        }
+
         unsubscribeSnapshot = onSnapshot(userDocRef, 
           (docSnap) => {
             if (docSnap.exists()) {
@@ -163,9 +184,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }, 
           (err) => {
             console.error('Snapshot Error:', err);
+            // ถ้า Error ลองพยายามสร้างใหม่อีกครั้ง (เผื่อกรณี Race condition)
+            handleFCMToken(fbUser.uid, 'SAVE');
             setLoading(false);
           }
         );
+        
         handleFCMToken(fbUser.uid, 'SAVE');
       } else {
         setUser(null);

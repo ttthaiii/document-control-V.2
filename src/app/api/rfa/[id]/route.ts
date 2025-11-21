@@ -2,19 +2,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminDb, adminBucket, adminAuth } from '@/lib/firebase/admin';
 import { FieldValue } from 'firebase-admin/firestore';
-import { ROLES, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUSES } from '@/lib/config/workflow';
+import { STATUSES, Role } from '@/lib/config/workflow'; // ❌ ลบ CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES ออก
 import { RFAFile } from '@/types/rfa';
-// 1. ✅ Import ฟังก์ชันส่งแจ้งเตือน
 import { sendPushNotification } from '@/lib/utils/push-notification';
+// 👇 1. Import checkPermission
+import { checkPermission } from '@/lib/auth/permission-check';
 
 export const dynamic = 'force-dynamic';
 
-// --- GET Function (คงเดิม) ---
+// --- GET Function (คงเดิม ไม่ต้องแก้ไข) ---
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-    // ... (เนื้อหา GET เหมือนเดิมทุกประการ ไม่ต้องแก้) ...
+    // ... (เนื้อหา GET คงเดิมตามไฟล์ต้นฉบับ) ...
     try {
         const authHeader = request.headers.get('authorization');
         if (!authHeader?.startsWith('Bearer ')) {
@@ -60,13 +61,14 @@ export async function GET(
             categoryCode: rfaData.taskData?.taskCategory || rfaData.categoryId || 'N/A' 
         };
         
+        // TODO: ส่วน permissions นี้ใน GET อาจจะต้องปรับให้ Dynamic ด้วยในอนาคต (แต่ตอนนี้ปล่อยไว้ก่อนได้เพื่อให้ UI ทำงานไปก่อน)
         const permissions = {
             canView: true,
-            canEdit: CREATOR_ROLES.includes(userData.role) && rfaData.status === STATUSES.REVISION_REQUIRED,
-            canSendToCm: REVIEWER_ROLES.includes(userData.role) && rfaData.status === STATUSES.PENDING_REVIEW,
-            canRequestRevision: REVIEWER_ROLES.includes(userData.role) && rfaData.status === STATUSES.PENDING_REVIEW,
-            canApprove: APPROVER_ROLES.includes(userData.role) && rfaData.status === STATUSES.PENDING_CM_APPROVAL,
-            canReject: APPROVER_ROLES.includes(userData.role) && rfaData.status === STATUSES.PENDING_CM_APPROVAL,
+            canEdit: rfaData.createdBy === userId && rfaData.status === STATUSES.REVISION_REQUIRED,
+            canSendToCm: true, // เดี๋ยวเราคุมสิทธิ์ตอนกดปุ่มด้วย Hook อีกที
+            canRequestRevision: true,
+            canApprove: true,
+            canReject: true,
             canDownloadFiles: true
         };
         
@@ -87,7 +89,7 @@ export async function GET(
     }
 }
 
-// --- PUT Function (อัปเดต) ---
+// --- PUT Function (แก้ไขใหม่เป็น Dynamic Permission) ---
 export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -106,7 +108,7 @@ export async function PUT(
         if (!userDoc.exists) return NextResponse.json({ error: 'User not found' }, { status: 404 });
         
         const userData = userDoc.data()!;
-        const userRole = userData.role;
+        const userRole = userData.role as Role; // Cast type
         const body = await request.json();
         const { action, comments, newFiles, documentNumber } = body;
 
@@ -119,41 +121,75 @@ export async function PUT(
         const docData = rfaDoc.data()!;
         const siteDoc = await adminDb.collection('sites').doc(docData.siteId).get();
         const cmSystemType = siteDoc.data()?.cmSystemType || 'INTERNAL';
-        // 2. ✅ เตรียมตัวแปรชื่อโครงการและชื่อเรื่อง
         const siteName = siteDoc.data()?.name || 'โครงการทั่วไป';
         const documentTitle = docData?.title || 'ไม่ระบุชื่อเรื่อง';
 
         let newStatus = docData.status;
         let canPerformAction = false;
+
+        // --- ✅ ส่วนที่แก้ไข: ใช้ checkPermission แทน Hardcode Role ---
         
-        // Check Permission Logic (เหมือนเดิม)
-        if (REVIEWER_ROLES.includes(userRole)) {
+        // 1. เช็คสิทธิ์ Review (สำหรับ Site Admin / PE / OE)
+        const canReview = await checkPermission(docData.siteId, userRole, 'RFA', 'review', userId);
+        
+        // 2. เช็คสิทธิ์ Approve (สำหรับ CM / PD)
+        const canApprove = await checkPermission(docData.siteId, userRole, 'RFA', 'approve', userId);
+
+        // 3. เช็คสิทธิ์ Create/Revise (สำหรับ Creator)
+        // หา key create ตามประเภท RFA
+        let createActionKey = '';
+        if (docData.rfaType === 'RFA-SHOP') createActionKey = 'create_shop';
+        else if (docData.rfaType === 'RFA-GEN') createActionKey = 'create_gen';
+        else if (docData.rfaType === 'RFA-MAT') createActionKey = 'create_mat';
+
+        const canRevise = createActionKey 
+            ? await checkPermission(docData.siteId, userRole, 'RFA', createActionKey, userId)
+            : false;
+
+
+        // --- Logic การตรวจสอบ Action ---
+
+        // A. กรณี Reviewer (Site Admin)
+        if (canReview) {
+            // ส่งต่อ CM หรือ ตีกลับ (ในขั้นตอนตรวจสอบเบื้องต้น)
             if (docData.status === STATUSES.PENDING_REVIEW && (action === 'SEND_TO_CM' || action === 'REQUEST_REVISION')) {
                 canPerformAction = true;
             }
+            // กรณี External CM: Reviewer ทำหน้าที่อนุมัติแทน
             else if (docData.status === STATUSES.PENDING_CM_APPROVAL && cmSystemType === 'EXTERNAL' && ['APPROVE', 'APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED', 'REJECT'].includes(action)) {
                 canPerformAction = true;
             }
+            // Final Approval (Site Admin อนุมัติปิดท้าย)
             else if (docData.status === STATUSES.PENDING_FINAL_APPROVAL && cmSystemType === 'INTERNAL' && ['APPROVE', 'APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED', 'REJECT'].includes(action)) {
                 canPerformAction = true;
             }
         }
-        else if (APPROVER_ROLES.includes(userRole) && docData.status === STATUSES.PENDING_CM_APPROVAL && cmSystemType === 'INTERNAL') {
-            if (['APPROVE', 'APPROVE_WITH_COMMENTS', 'REJECT'].includes(action)) {
-                canPerformAction = true;
+
+        // B. กรณี Approver (CM/PD)
+        if (canApprove) {
+            // อนุมัติ (ในขั้นตอน Internal CM)
+            if (docData.status === STATUSES.PENDING_CM_APPROVAL && cmSystemType === 'INTERNAL') {
+                if (['APPROVE', 'APPROVE_WITH_COMMENTS', 'REJECT', 'APPROVE_REVISION_REQUIRED'].includes(action)) {
+                    canPerformAction = true;
+                }
             }
         }
-        else if (CREATOR_ROLES.includes(userRole) && docData.createdBy === userId) {
+
+        // C. กรณี Creator ส่งงานแก้ไข (Revision)
+        if (canRevise && docData.createdBy === userId) {
+            // ส่งงานแก้ไข (เมื่อสถานะเป็น REVISION_REQUIRED)
             if (docData.status === STATUSES.REVISION_REQUIRED && action === 'SUBMIT_REVISION') {
                 canPerformAction = true;
             }
         }
 
         if (!canPerformAction) {
-          return NextResponse.json({ success: false, error: 'Permission denied for this action or invalid document status.' }, { status: 403 });
+          return NextResponse.json({ success: false, error: `Permission denied for action '${action}' on status '${docData.status}'.` }, { status: 403 });
         }
         
-        // Update Status Logic (เหมือนเดิม)
+        // --- จบส่วนการตรวจสอบสิทธิ์ (ส่วนล่างเหมือนเดิม) ---
+
+        // Update Status Logic
         switch(action) {
             case 'SEND_TO_CM': newStatus = STATUSES.PENDING_CM_APPROVAL; break;
             case 'REQUEST_REVISION': newStatus = STATUSES.REVISION_REQUIRED; break;
@@ -177,7 +213,7 @@ export async function PUT(
                 break;
         }
         
-        // Handle Files (เหมือนเดิม)
+        // Handle Files
         let finalDocFiles: RFAFile[] = docData.files || [];
         let workflowFiles: RFAFile[] = [];
 
@@ -228,8 +264,7 @@ export async function PUT(
         // Save to DB
         await rfaDocRef.update(updates);
 
-        // 3. ส่วนส่งแจ้งเตือน (Notification Logic)
-        // ตรวจสอบว่าเป็นสถานะที่ควรแจ้งเตือนหรือไม่
+        // Notification Logic
         const notifyStatuses = [
             STATUSES.APPROVED, 
             STATUSES.APPROVED_WITH_COMMENTS, 
@@ -237,21 +272,13 @@ export async function PUT(
         ];
         
         if (notifyStatuses.includes(newStatus)) {
-             
-             // -------------------------------------------------------
-             // 🔍 ส่วนที่แก้ไข: ค้นหา User ที่เป็น SE และ FM ในโครงการนี้
-             // -------------------------------------------------------
              const targetUserIds: string[] = [];
-             
              try {
-                 // 1. ดึง Users ที่มี siteId ตรงกับเอกสาร และสถานะ Active
-                 // หมายเหตุ: เราดึงคนใน Site มาก่อน แล้วค่อยกรอง Role ใน Code (เพื่อเลี่ยงปัญหา Index ของ Firestore)
                  const usersSnapshot = await adminDb.collection('users')
                     .where('sites', 'array-contains', docData.siteId)
                     .where('status', '==', 'ACTIVE')
                     .get();
 
-                 // 2. กรองเอาเฉพาะ SE และ FM
                  const targetRoles = ['SE', 'FM'];
                  
                  usersSnapshot.forEach(doc => {
@@ -260,20 +287,13 @@ export async function PUT(
                          targetUserIds.push(doc.id);
                      }
                  });
-                 
-                 console.log(`🎯 Found ${targetUserIds.length} targets (SE/FM) for notification in site ${docData.siteId}`);
-
              } catch (err) {
                  console.error('Error fetching target users:', err);
              }
-             // -------------------------------------------------------
 
-
-             // ถ้าเจอคนรับ ให้ส่งแจ้งเตือน
              if (targetUserIds.length > 0) {
                  const docNum = documentNumber || docData.documentNumber || 'RFA-xxxx';
                  
-                 // สร้างข้อความ
                  let notiTitle = `✅ อนุมัติแล้ว: ${docNum}`;
                  let notiBody = `โครงการ: ${siteName}\nเอกสารเรื่อง "${documentTitle}" ได้รับการอนุมัติแล้ว พร้อมใช้งาน`;
     
@@ -294,8 +314,6 @@ export async function PUT(
                     body: notiBody,
                     url: `/dashboard/rfa/${params.id}`,
                  });
-             } else {
-                 console.log('⚠️ No SE or FM found in this site to notify.');
              }
         }
 
