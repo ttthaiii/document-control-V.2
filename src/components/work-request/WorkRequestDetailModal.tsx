@@ -1,17 +1,16 @@
-// src/components/work-request/WorkRequestDetailModal.tsx
+// src/components/work-request/WorkRequestDetailModal.tsx (ฉบับสมบูรณ์)
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/lib/auth/useAuth';
 import { WorkRequest, WorkRequestWorkflowStep, TaskData } from '@/types/work-request';
-import { WorkRequestStatus } from '@/lib/config/workflow';
+import { WorkRequestStatus } from '@/lib/config/workflow'; // Import Type จาก workflow
 import Spinner from '@/components/shared/Spinner';
 import { RFAFile } from '@/types/rfa';
 import { X, Paperclip, Send, Upload, FileText, Check, AlertTriangle, Download, CornerUpLeft, History, Edit, ThumbsUp, ThumbsDown } from 'lucide-react';
-import { ROLES, WR_STATUSES, STATUS_LABELS, STATUS_COLORS } from '@/lib/config/workflow';
+import { ROLES, REVIEWER_ROLES, WR_STATUSES, WR_APPROVER_ROLES, STATUS_LABELS, STATUS_COLORS } from '@/lib/config/workflow';
 import { useNotification } from '@/lib/context/NotificationContext';
-// 👇 1. Import Hook
-import { usePermission } from '@/lib/hooks/usePermission';
+
 
 const formatFileSize = (bytes: number): string => {
     if (!bytes) return '0 B';
@@ -38,9 +37,9 @@ const formatDate = (date: any, includeTime = true) => {
     return d.toLocaleString('th-TH', options);
 };
 
-const getStatusStyles = (status: WorkRequestStatus | string) => {
+const getStatusStyles = (status: WorkRequestStatus | string) => { // รับ string ได้เผื่อกรณีสถานะเก่า
     const label = STATUS_LABELS[status] || status;
-    const color = STATUS_COLORS[status] || '#6c757d';
+    const color = STATUS_COLORS[status] || '#6c757d'; // Default Gray
     return { text: label, color: color };
 };
 
@@ -78,6 +77,7 @@ const WorkflowHistoryModal = ({ workflow, onClose }: { workflow: WorkRequestWork
     );
 };
 
+
 interface UploadedFile {
   id: string; file: File; status: 'pending' | 'uploading' | 'success' | 'error';
   uploadedData?: RFAFile; error?: string;
@@ -101,24 +101,14 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
     const [isTaskVerified, setIsTaskVerified] = useState(false);
     const [verificationError, setVerificationError] = useState<string | null>(null);
     const [verifiedTaskId, setVerifiedTaskId] = useState<string | null>(null);
+
     const [rejectComment, setRejectComment] = useState('');
 
-    // 👇 2. เรียกใช้ Hook เพื่อดึงสิทธิ์ของ Site นี้
-    const { can } = usePermission(document?.site?.id);
-
-    // 👇 3. ปรับ Logic เช็คสิทธิ์ให้เป็น Dynamic
-    // สิทธิ์ส่งงาน (Execute)
-    const canSubmitWork = can('WORK_REQUEST', 'execute') && document?.status === WR_STATUSES.IN_PROGRESS;
-    
-    // สิทธิ์ตรวจรับงาน (Inspect/Review)
-    const canSiteReview = can('WORK_REQUEST', 'inspect') && document?.status === WR_STATUSES.PENDING_ACCEPTANCE;
-    
-    // สิทธิ์อนุมัติ Draft (Approve Draft)
-    const canPmApprove = can('WORK_REQUEST', 'approve_draft') && document?.status === WR_STATUSES.DRAFT;
-    
-    // สิทธิ์แก้ Flow Revision (ยังคงเช็ค Role BIM เป็นหลัก หรือจะใช้ execute ก็ได้)
+    const canSubmitWork = user?.role === ROLES.BIM && document?.status === WR_STATUSES.IN_PROGRESS;
+    const canSiteReview = user && REVIEWER_ROLES.includes(user.role) && document?.status === WR_STATUSES.PENDING_ACCEPTANCE;
     const isRevisionFlow = user?.role === ROLES.BIM && document?.status === WR_STATUSES.REVISION_REQUESTED;
-
+    // --- 👇 [เพิ่ม] ตรวจสอบสิทธิ์สำหรับ PD/PM ---
+    const canPmApprove = user && WR_APPROVER_ROLES.includes(user.role) && document?.status === WR_STATUSES.DRAFT;
 
     const newRevisionNumber = useMemo(() => (document?.revisionNumber || 0) + 1, [document]);
     const newDocumentNumber = useMemo(() => {
@@ -341,6 +331,7 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
     const handlePmAction = async (action: 'APPROVE_DRAFT' | 'REJECT_DRAFT') => {
         if (!document || !firebaseUser) return;
 
+        // ตรวจสอบ Comment ถ้าเป็นการ Reject
         if (action === 'REJECT_DRAFT' && !rejectComment.trim()) {
             showNotification('warning', 'กรุณากรอกเหตุผล', 'ต้องระบุเหตุผลในการไม่อนุมัติ');
             return;
@@ -354,13 +345,13 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                 headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     action,
-                    payload: { comments: rejectComment }
+                    payload: { comments: rejectComment } // ส่ง rejectComment ไปเป็น comment
                 }),
             });
             const result = await response.json();
             if (result.success) {
                 showNotification('success', 'ดำเนินการสำเร็จ', `สถานะถูกเปลี่ยนเป็น: ${getStatusStyles(result.newStatus).text}`);
-                onUpdate();
+                onUpdate(); // Refresh list
                 onClose();
             } else {
                 throw new Error(result.error || 'เกิดข้อผิดพลาดในการดำเนินการ');
@@ -440,7 +431,7 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                         {/* --- Panel สำหรับ PD/PM อนุมัติ DRAFT --- */}
                         {canPmApprove && (
                              <div className="space-y-4">
-                                <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (อนุมัติคำขอ)</h3>
+                                <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (สำหรับ PM/PD)</h3>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">เหตุผลในการไม่อนุมัติ (ถ้ามี)</label>
                                     <textarea
@@ -475,7 +466,7 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                         {/* --- Panel สำหรับ Site ตรวจรับงาน --- */}
                         {canSiteReview && (
                             <div className="space-y-4">
-                                <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (ตรวจรับงาน)</h3>
+                                <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (สำหรับ Site)</h3>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">หมายเหตุ / คอมเมนต์ (ถ้ามี)</label>
                                     <textarea value={actionComment} onChange={(e) => setActionComment(e.target.value)} rows={3} placeholder="หากต้องการให้แก้ไข กรุณาใส่รายละเอียด..." className="w-full p-2 border rounded-md" />

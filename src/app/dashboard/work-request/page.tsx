@@ -9,16 +9,23 @@ import WorkRequestListTable from '@/components/work-request/WorkRequestListTable
 import WorkRequestDetailModal from '@/components/work-request/WorkRequestDetailModal';
 import CreateWorkRequestForm from '@/components/work-request/CreateWorkRequestForm';
 import { WorkRequest, WorkRequestStatus } from '@/types/work-request';
-import { Plus, RefreshCw, ThumbsUp, ThumbsDown, X } from 'lucide-react';
-import { ROLES, WR_APPROVER_ROLES } from '@/lib/config/workflow';
+import { Plus, RefreshCw, ThumbsUp, ThumbsDown, AlertTriangle, X } from 'lucide-react';
+import { ROLES, WR_APPROVER_ROLES, WR_CREATOR_ROLES, WR_STATUSES, Role } from '@/lib/config/workflow';
 import { db } from '@/lib/firebase/client';
-import { collection, query, where, onSnapshot, orderBy, DocumentData } from 'firebase/firestore';
+// ✅ เพิ่ม documentId ใน import
+import { collection, query, where, onSnapshot, orderBy, DocumentData, documentId } from 'firebase/firestore';
 import { useNotification } from '@/lib/context/NotificationContext';
 import Spinner from '@/components/shared/Spinner';
-// 👇 Import Hook
-import { usePermission } from '@/lib/hooks/usePermission';
+import { PERMISSION_KEYS, PERMISSION_DEFAULTS } from '@/lib/config/permissions';
 
-// ... (RejectReasonModal component คงเดิม ไม่ต้องแก้) ...
+interface ApiSite {
+  id: string;
+  name: string;
+  userOverrides?: {
+    [userId: string]: Record<string, any>
+  };
+}
+
 const RejectReasonModal = ({
     isOpen,
     onClose,
@@ -81,11 +88,6 @@ const RejectReasonModal = ({
     );
 };
 
-interface ApiSite {
-  id: string;
-  name: string;
-}
-
 function WorkRequestDashboardContent() {
     const { user, firebaseUser } = useAuth();
     const router = useRouter();
@@ -101,44 +103,44 @@ function WorkRequestDashboardContent() {
     const [showRejectModal, setShowRejectModal] = useState(false);
     const [docIdToRejectSingle, setDocIdToRejectSingle] = useState<string | null>(null);
 
-    // 👇 ใช้ Hook (Trick: ส่ง null ไปก่อน เพราะเรายังไม่รู้ site แต่เราจะใช้ checkPermission ใน Loop ได้ไหม? ไม่ได้)
-    // ดังนั้นในหน้ารวม เราจะใช้ Role-based display ไปก่อน เพื่อความเร็ว
-    // ส่วนการเช็คสิทธิ์จริงๆ API จะจัดการเอง
-    const isApprover = true;
-    
-    // ส่วนการสร้าง เราเปิดปุ่มให้ทุกคนเห็นได้ แล้วไปเช็คใน Modal เอา
-    const canCreate = true;
-
     useEffect(() => {
         const fetchSites = async () => {
             if (!firebaseUser) return;
             try {
-                const token = await firebaseUser.getIdToken();
-                const response = await fetch('/api/sites', {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                const data = await response.json();
-                if (data.success) {
-                    setSites(data.sites || []);
+                // const token = await firebaseUser.getIdToken(); // ไม่ได้ใช้ token ตรงนี้แล้วเพราะใช้ onSnapshot
+                if (user?.sites && user.sites.length > 0) {
+                    // ใช้ documentId() แทน __name__ เพื่อความปลอดภัยและถูกต้องตาม SDK ใหม่
+                    const q = query(collection(db, "sites"), where(documentId(), "in", user.sites));
+                    onSnapshot(q, (snapshot) => {
+                        const sitesData = snapshot.docs.map(doc => ({
+                            id: doc.id,
+                            name: doc.data().name,
+                            userOverrides: doc.data().userOverrides
+                        }));
+                        setSites(sitesData);
+                    });
                 }
             } catch (error) {
-                console.error("Sidebar: Failed to fetch sites", error);
+                console.error("Failed to fetch sites", error);
             }
         };
         fetchSites();
-    }, [firebaseUser]);
+    }, [firebaseUser, user]);
 
     useEffect(() => {
         if (!firebaseUser || !user?.sites || user.sites.length === 0) {
             setLoading(false);
             return;
         }
+
         setLoading(true);
+
         const q = query(
             collection(db, 'workRequests'),
             where('siteId', 'in', user.sites),
             orderBy('updatedAt', 'desc')
         );
+
         const unsubscribe = onSnapshot(q, (querySnapshot) => {
             const documentsFromDb: WorkRequest[] = [];
             querySnapshot.forEach((doc) => {
@@ -163,20 +165,24 @@ function WorkRequestDashboardContent() {
                     files: data.files || [],
                     workflow: data.workflow || [],
                     usersInfo: data.usersInfo || {},
-                    site: { id: data.siteId, name: '...' }, 
+                    site: { id: data.siteId, name: '...' },
                 });
             });
+
             setAllDocuments(documentsFromDb);
             setLoading(false);
         }, (error) => {
             console.error("Failed to fetch real-time work requests:", error);
             setLoading(false);
         });
+
         return () => unsubscribe();
     }, [firebaseUser, user]);
 
     const documentsWithSiteNames = useMemo(() => {
-        if (sites.length === 0) return allDocuments;
+        if (sites.length === 0) {
+            return allDocuments;
+        }
         const sitesMap = new Map(sites.map(site => [site.id, site.name]));
         return allDocuments.map(doc => ({
             ...doc,
@@ -187,10 +193,35 @@ function WorkRequestDashboardContent() {
         }));
     }, [allDocuments, sites]);
 
+    const canCreateWR = useMemo(() => {
+        if (!user) return false;
+        const permKey = `WR.${PERMISSION_KEYS.WORK_REQUEST.CREATE}`;
+        const [group, key] = permKey.split('.');
+        
+        const defaultRoles = PERMISSION_DEFAULTS[permKey] || [];
+        const defaultAllowed = defaultRoles.includes(user.role as Role);
 
-    const handleDocumentClick = (doc: WorkRequest) => setSelectedDocId(doc.id);
-    const handleCloseDetailModal = () => setSelectedDocId(null);
-    const handleCloseCreateModal = () => setIsCreateModalOpen(false);
+        return sites.some(site => {
+            const override = site.userOverrides?.[user.id]?.[group]?.[key];
+            if (override !== undefined) return override === true;
+            return defaultAllowed;
+        });
+    }, [user, sites]);
+
+    const handleDocumentClick = (doc: WorkRequest) => {
+        setSelectedDocId(doc.id);
+    };
+    
+    const handleCloseDetailModal = () => {
+        setSelectedDocId(null);
+    };
+
+    const handleCloseCreateModal = () => {
+        setIsCreateModalOpen(false);
+    };
+    
+    const canCreate = user && WR_CREATOR_ROLES.includes(user.role); // เก็บไว้เผื่อใช้ (แต่ตอนนี้ใช้ canCreateWR แทนใน UI)
+    const isApprover = user && WR_APPROVER_ROLES.includes(user.role); // TODO: อาจต้องปรับให้รองรับ Override ในอนาคต
 
     const handleBatchAction = useCallback(async (action: 'APPROVE_DRAFT' | 'REJECT_DRAFT', reason?: string) => {
         const idsToUpdate = docIdToRejectSingle ? [docIdToRejectSingle] : selectedDraftIds;
@@ -232,22 +263,25 @@ function WorkRequestDashboardContent() {
         if (selectedDraftIds.length === 0) return;
         handleBatchAction('APPROVE_DRAFT');
     };
+
     const handleBatchRejectClick = () => {
         if (selectedDraftIds.length === 0) return;
         setDocIdToRejectSingle(null);
         setShowRejectModal(true);
     };
+
     const handleSingleRejectClick = (docId: string) => {
         setDocIdToRejectSingle(docId);
         setShowRejectModal(true);
     };
-    const handleRejectSubmit = (reason: string) => handleBatchAction('REJECT_DRAFT', reason);
-    const handleRejectSubmitSingle = (reason: string) => {
-        if(docIdToRejectSingle) handleSingleAction('REJECT_DRAFT', docIdToRejectSingle, reason);
+
+    const handleRejectSubmit = (reason: string) => {
+        handleBatchAction('REJECT_DRAFT', reason);
     };
 
+    // แยก Logic Single Action ให้ชัดเจน (ไม่ต้องผ่าน handleBatchAction) เพื่อลดความสับสน
     const handleSingleAction = useCallback(async (action: 'APPROVE_DRAFT' | 'REJECT_DRAFT', docId: string, reason?: string) => {
-        setIsBatchSubmitting(true); 
+        setIsBatchSubmitting(true);
         try {
             if (!firebaseUser) throw new Error('กรุณาล็อกอินก่อน');
             const token = await firebaseUser.getIdToken();
@@ -277,10 +311,19 @@ function WorkRequestDashboardContent() {
         }
     }, [firebaseUser, showNotification]);
 
-     const handleSingleApproveClickNew = (docId: string) => handleSingleAction('APPROVE_DRAFT', docId);
-     const handleSingleRejectClickNew = (docId: string) => {
+     const handleSingleApproveClickNew = (docId: string) => {
+        handleSingleAction('APPROVE_DRAFT', docId);
+    };
+
+    const handleSingleRejectClickNew = (docId: string) => {
         setDocIdToRejectSingle(docId);
         setShowRejectModal(true);
+    };
+
+    const handleRejectSubmitSingle = (reason: string) => {
+        if(docIdToRejectSingle) {
+            handleSingleAction('REJECT_DRAFT', docIdToRejectSingle, reason);
+        }
     };
 
     return (
@@ -298,8 +341,8 @@ function WorkRequestDashboardContent() {
                             <RefreshCw className={`w-4 h-4 mr-2 ${!loading ? '' : 'animate-spin'}`} />
                             Real-time Sync
                         </button>
-                        {/* ปุ่ม Create เปิดให้ทุกคนเห็น แต่ไปเช็คสิทธิ์ใน Modal */}
-                        {canCreate && (
+                        
+                        {canCreateWR && (
                              <button onClick={() => setIsCreateModalOpen(true)} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                                 <Plus className="w-4 h-4 mr-2" />
                                 สร้าง Work Request
@@ -375,8 +418,9 @@ function WorkRequestDashboardContent() {
 
 export default function WorkRequestDashboardPage() {
     return (
-        // เอา AuthGuard ออก หรือเปิดกว้าง เพราะเราคุมสิทธิ์ในแต่ละปุ่มแล้ว
-        <AuthGuard>
+        <AuthGuard requiredRoles={[
+            ROLES.ADMIN, ROLES.SITE_ADMIN, ROLES.BIM, ...WR_CREATOR_ROLES, ...WR_APPROVER_ROLES
+        ]}>
             <Suspense fallback={<div className="text-center p-8">Loading Page...</div>}>
                 <WorkRequestDashboardContent />
             </Suspense>

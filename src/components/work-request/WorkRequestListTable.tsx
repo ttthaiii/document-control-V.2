@@ -1,8 +1,7 @@
-// src/components/work-request/WorkRequestListTable.tsx
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { useAuth } from '@/lib/auth/useAuth';
+import { useAuth } from '@/lib/auth/useAuth'; // Import useAuth
 import { WorkRequest, WorkRequestStatus } from '@/types/work-request';
 import Spinner from '@/components/shared/Spinner';
 import { FileText, Calendar, Building, ThumbsUp, ThumbsDown } from 'lucide-react';
@@ -14,12 +13,16 @@ interface WorkRequestListTableProps {
   onDocumentClick: (document: WorkRequest) => void;
   selectedIds: string[];
   onSelectionChange: (ids: string[]) => void;
-  onApproveRejectClick?: (action: 'APPROVE_DRAFT' | 'REJECT_DRAFT', docId: string) => void;
+  onApproveRejectClick?: (action: 'APPROVE_DRAFT' | 'REJECT_DRAFT', docId: string) => void; // Optional สำหรับปุ่มในแถว
 }
 
+// Helper to format date
 const formatDate = (date: any) => {
   if (!date) return 'N/A';
+  
+  // ตรวจสอบว่า date ที่รับมาเป็น Timestamp object หรือไม่
   if (typeof date.toDate === 'function') {
+    // ถ้าใช่, ให้แปลงด้วยเมธอด .toDate() ก่อน
     const d = date.toDate();
     return d.toLocaleDateString('th-TH', {
       day: '2-digit',
@@ -27,8 +30,11 @@ const formatDate = (date: any) => {
       year: 'numeric',
     });
   }
+  
+  // ถ้าไม่ใช่ ให้ใช้วิธีเดิมเป็น fallback
   const d = new Date(date);
-  if (isNaN(d.getTime())) return 'Invalid Date';
+  if (isNaN(d.getTime())) return 'Invalid Date'; // กัน Error เพิ่มเติม
+  
   return d.toLocaleDateString('th-TH', {
     day: '2-digit',
     month: 'short',
@@ -36,20 +42,23 @@ const formatDate = (date: any) => {
   });
 };
 
+// Helper to get status styles
 const getStatusStyles = (status: WorkRequestStatus | string) => {
-    const label = STATUS_LABELS[status] || status;
-    const color = STATUS_COLORS[status] || '#6c757d';
+    const label = STATUS_LABELS[status] || status; // ใช้ STATUS_LABELS
+    const color = STATUS_COLORS[status] || '#6c757d'; // ใช้ STATUS_COLORS
 
+    // แปลง hex color เป็น Tailwind class (ถ้าต้องการ) หรือใช้ style inline
+    // ตัวอย่างการแปลงคร่าวๆ (อาจจะต้องปรับปรุง)
     let textColor = 'text-gray-800';
     let bgColor = 'bg-gray-100';
 
-    if (color === '#0088FE') { bgColor = 'bg-blue-100'; textColor = 'text-blue-800'; }
-    else if (color === '#FFBB28') { bgColor = 'bg-yellow-100'; textColor = 'text-yellow-800'; }
-    else if (color === '#AF19FF') { bgColor = 'bg-purple-100'; textColor = 'text-purple-800'; }
-    else if (color === '#FD7E14') { bgColor = 'bg-orange-100'; textColor = 'text-orange-800'; }
-    else if (color === '#28A745') { bgColor = 'bg-green-100'; textColor = 'text-green-800'; }
-    else if (color === '#6c757d') { bgColor = 'bg-gray-100'; textColor = 'text-gray-800'; }
-    else if (color === '#DC3545') { bgColor = 'bg-red-100'; textColor = 'text-red-800'; }
+    if (color === '#0088FE') { bgColor = 'bg-blue-100'; textColor = 'text-blue-800'; } // PENDING_BIM
+    else if (color === '#FFBB28') { bgColor = 'bg-yellow-100'; textColor = 'text-yellow-800'; } // IN_PROGRESS
+    else if (color === '#AF19FF') { bgColor = 'bg-purple-100'; textColor = 'text-purple-800'; } // PENDING_ACCEPTANCE
+    else if (color === '#FD7E14') { bgColor = 'bg-orange-100'; textColor = 'text-orange-800'; } // REVISION_REQUESTED
+    else if (color === '#28A745') { bgColor = 'bg-green-100'; textColor = 'text-green-800'; } // COMPLETED
+    else if (color === '#6c757d') { bgColor = 'bg-gray-100'; textColor = 'text-gray-800'; } // DRAFT
+    else if (color === '#DC3545') { bgColor = 'bg-red-100'; textColor = 'text-red-800'; } // REJECTED_BY_PM
 
     return { text: label, colorClasses: `${bgColor} ${textColor}` };
 };
@@ -63,10 +72,7 @@ export default function WorkRequestListTable({
   onApproveRejectClick,
 }: WorkRequestListTableProps) {
     const { user } = useAuth();
-    
-    // ✅ 1. ปรับแก้: ให้ทุกคนมองเห็นปุ่ม Action (แต่กดได้หรือไม่ Backend จะคุมเอง)
-    const isApprover = true; 
-    
+    const isApprover = user && WR_APPROVER_ROLES.includes(user.role);
     const handleCheckboxChange = (docId: string, isChecked: boolean) => {
         if (isChecked) {
             onSelectionChange([...selectedIds, docId]);
@@ -91,22 +97,27 @@ export default function WorkRequestListTable({
 
         const userRole = user.role;
 
-        // Logic การกรอง (ยังคงไว้เหมือนเดิม เพื่อให้เห็นเฉพาะงานที่เกี่ยวข้อง)
+        // 1. ถ้าเป็น Admin หรือ Approver (PD/PM): แสดงทั้งหมด
         if (userRole === ROLES.ADMIN || WR_APPROVER_ROLES.includes(userRole)) {
             return documents;
         }
+        // 2. ถ้าเป็น BIM: ซ่อน DRAFT และ REJECTED_BY_PM
         else if (userRole === ROLES.BIM) {
             return documents.filter(doc =>
                 doc.status !== WR_STATUSES.DRAFT &&
                 doc.status !== WR_STATUSES.REJECTED_BY_PM
             );
         }
+        // --- 👇 [แก้ไข] ตอนนี้ WR_CREATOR_ROLES ถูก Import แล้ว ---
+        // 3. ถ้าเป็น Creator (PE/OE): แสดงที่ตัวเองสร้าง หรือที่ไม่ใช่ Draft/Rejected
         else if (WR_CREATOR_ROLES.includes(userRole) && user.sites && user.sites.length > 0) {
              return documents.filter(doc =>
                 doc.createdBy === user.id ||
                 (doc.status !== WR_STATUSES.DRAFT && doc.status !== WR_STATUSES.REJECTED_BY_PM)
             );
         }
+        // --- 👆 สิ้นสุดการแก้ไข ---
+        // 4. Role อื่นๆ ที่เหลือ: ซ่อน DRAFT และ REJECTED_BY_PM
         else {
              return documents.filter(doc =>
                 doc.status !== WR_STATUSES.DRAFT &&
@@ -118,6 +129,9 @@ export default function WorkRequestListTable({
 
     const draftItems = useMemo(() => filteredDocuments.filter(doc => doc.status === WR_STATUSES.DRAFT), [filteredDocuments]);
     const isAllSelected = draftItems.length > 0 && selectedIds.length === draftItems.length;
+
+    // For mobile view, you might want to add a state like in RFAListTable
+    const isMobile = false; // Simplified for now
 
   if (isLoading) {
     return (
@@ -167,12 +181,14 @@ return (
               <tbody className="bg-white divide-y divide-gray-200">
                 {filteredDocuments.map((doc) => {
                   const statusStyle = getStatusStyles(doc.status);
+                  // --- 👇 [แก้ไข] ประกาศ isDraft และ isSelected ตรงนี้ ---
                   const isDraft = doc.status === WR_STATUSES.DRAFT;
                   const isSelected = selectedIds.includes(doc.id);
                   return (
                     <tr
                       key={doc.id}
                       className={`hover:bg-gray-50 ${isDraft ? 'bg-yellow-50 hover:bg-yellow-100' : ''}`}
+                      // ทำให้กดทั้งแถวได้ ยกเว้นกดปุ่ม Action หรือ Checkbox
                       onClick={(e) => {
                            const target = e.target as HTMLElement;
                           if (target.tagName !== 'INPUT' && !target.closest('button')) {
@@ -188,9 +204,9 @@ return (
                                       className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                                       checked={isSelected}
                                       onChange={(e) => handleCheckboxChange(doc.id, e.target.checked)}
-                                      onClick={e => e.stopPropagation()} 
+                                      onClick={e => e.stopPropagation()} // ป้องกันการ trigger onClick ของแถว
                                   />
-                              ) : null} 
+                              ) : null} {/* ไม่แสดง Checkbox ถ้าไม่ใช่ Draft */}
                           </td>
                       )}   
 
@@ -204,9 +220,11 @@ return (
                         <p className="text-sm text-gray-600">{doc.site?.name || 'N/A'}</p>
                       </td>
                       <td className="px-6 py-4 text-center">
+                        {/* --- 👇 [แก้ไข] ใช้ statusStyle.colorClasses --- */}
                         <span className={`inline-flex items-center justify-center px-2.5 py-1 rounded-full text-xs font-semibold ${statusStyle.colorClasses}`}>
                           {statusStyle.text}
                         </span>
+                        {/* --- 👆 สิ้นสุดการแก้ไข --- */}
                       </td>
                       <td className="px-6 py-4 text-center">
                         <span className="text-sm text-gray-600">{formatDate(doc.updatedAt)}</span>
@@ -236,6 +254,7 @@ return (
                     </tr>
                   );
                 })}
+                 {/* --- 👆 สิ้นสุดการแก้ไข --- */}
               </tbody>
             </table>
           </div>

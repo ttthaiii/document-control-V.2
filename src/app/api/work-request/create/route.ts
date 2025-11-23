@@ -1,8 +1,7 @@
 import { NextResponse, NextRequest } from "next/server";
 import { adminDb, adminBucket, adminAuth } from "@/lib/firebase/admin";
 import { FieldValue } from 'firebase-admin/firestore';
-import { WR_STATUSES } from '@/lib/config/workflow'; // 👈 เอา WR_CREATOR_ROLES ออกแล้ว
-import { checkPermission } from '@/lib/auth/permission-check';
+import { WR_STATUSES, WR_CREATOR_ROLES } from '@/lib/config/workflow';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,31 +29,26 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ success: false, error: 'User not found' }, { status: 403 });
         }
         const userData = userDoc.data()!;
+
+        // --- 👇 [แก้ไข] ตรวจสอบ Role ของผู้ใช้ (ต้องเป็น PE หรือ OE) ---
+        if (!WR_CREATOR_ROLES.includes(userData.role)) {
+            return NextResponse.json({
+                success: false,
+                error: "Permission denied. Only Project Engineers (PE) or Owner Engineers (OE) can create Work Requests."
+            }, { status: 403 });
+        }
+        // --- 👆 สิ้นสุดการแก้ไข ---
+
         const { siteId, taskName, description, dueDate, files: uploadedFiles } = await req.json();
 
         if (!siteId || !taskName || !dueDate) {
             return NextResponse.json({ success: false, error: "Missing required fields (siteId, taskName, dueDate)." }, { status: 400 });
         }
 
-        // ✅ ตรวจสอบสิทธิ์แบบ Dynamic (อ่านจาก DB)
-        const canCreate = await checkPermission(
-            siteId, 
-            userData.role, 
-            'WORK_REQUEST', 
-            'create',
-            uid // 👈 เพิ่มบรรทัดนี้
-        );
-
-        if (!canCreate) {
-             return NextResponse.json({
-                success: false,
-                error: `Permission denied. Role '${userData.role}' cannot create Work Requests in this site.`
-            }, { status: 403 });
-        }
-        
-        // --- กำหนดสถานะเริ่มต้นเป็น DRAFT ---
+        // --- 👇 [แก้ไข] กำหนดสถานะเริ่มต้นเป็น DRAFT ---
         const initialStatus = WR_STATUSES.DRAFT;
         const assignedTo = null;
+        // --- 👆 สิ้นสุดการแก้ไข ---
 
         const { documentNumber, runningNumber } = await adminDb.runTransaction(async (transaction) => {
             const siteRef = adminDb.collection('sites').doc(siteId);
@@ -87,6 +81,7 @@ export async function POST(req: NextRequest) {
                     continue;
                 }
                 const destinationPath = `sites/${siteId}/work-requests/${documentNumber}/${Date.now()}_${tempFile.fileName}`;
+                // Error Handling เพิ่มเติม
                 try {
                     await adminBucket.file(sourcePath).move(destinationPath);
                     finalFilesData.push({
@@ -98,6 +93,7 @@ export async function POST(req: NextRequest) {
                     });
                 } catch (moveError) {
                     console.error(`Failed to move file ${sourcePath} to ${destinationPath}:`, moveError);
+                    // อาจจะแจ้งเตือนผู้ใช้ หรือบันทึก Error ลง DB
                 }
             }
         }
@@ -110,7 +106,7 @@ export async function POST(req: NextRequest) {
             siteId,
             taskName,
             description: description || '',
-            status: initialStatus,
+            status: initialStatus, // <-- ใช้สถานะ DRAFT
             createdBy: uid,
             assignedTo,
             planStartDate: null,
@@ -122,7 +118,7 @@ export async function POST(req: NextRequest) {
             files: finalFilesData,
             taskData: null,
             workflow: [{
-                action: "CREATE_DRAFT",
+                action: "CREATE_DRAFT", // <-- เปลี่ยน Action แรก
                 status: initialStatus,
                 userId: uid,
                 userName: userData.email,
