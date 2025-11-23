@@ -1,10 +1,8 @@
-// src/app/api/rfa/create_revision/route.ts
+// src/app/api/rfa/create_revision/route.ts (แก้ไขสมบูรณ์)
 import { NextResponse } from "next/server";
 import { adminDb, adminBucket, adminAuth } from "@/lib/firebase/admin";
 import { FieldValue } from 'firebase-admin/firestore';
-import { STATUSES, Role } from '@/lib/config/workflow';
-// 👇 1. Import checkPermission
-import { checkPermission } from '@/lib/auth/permission-check';
+import { STATUSES } from '@/lib/config/workflow';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,75 +25,43 @@ export async function POST(req: Request) {
     }
 
     try {
+        // --- 🔽 [แก้ไขจุดที่ 1] 🔽 ---
+        // รับ verifiedTaskId เพิ่มจาก request body
         const { originalDocId, uploadedFiles, verifiedTaskId } = await req.json();
 
+        // ตรวจสอบ `verifiedTaskId` เพิ่มเติม (สำหรับ Role ที่ไม่ใช่ Manual Flow)
         const userDoc = await adminDb.collection('users').doc(uid).get();
-        if (!userDoc.exists) return NextResponse.json({ error: 'User not found' }, { status: 403 });
-        const userData = userDoc.data()!;
-        const userRole = userData.role as Role;
+        const userData = userDoc.data();
+        if (!userData) return NextResponse.json({ error: 'User not found' }, { status: 403 });
 
-        // Check manual flow for legacy logic
-        const isManualFlow = userRole === 'ME' || userRole === 'SN';
+        const isManualFlow = userData.role === 'ME' || userData.role === 'SN';
 
         if (!originalDocId || !uploadedFiles || uploadedFiles.length === 0 || (!isManualFlow && !verifiedTaskId)) {
-            return NextResponse.json({ error: "Missing required fields." }, { status: 400 });
+            return NextResponse.json({ error: "Missing required fields (originalDocId, uploadedFiles, and verifiedTaskId for non-manual flow)" }, { status: 400 });
         }
         
-        // 👇 2. ดึงข้อมูลเอกสารเดิมมาเช็คสิทธิ์ก่อนเริ่ม Transaction
         const originalRfaRef = adminDb.collection("rfaDocuments").doc(originalDocId);
-        const originalDocSnap = await originalRfaRef.get();
         
-        if (!originalDocSnap.exists) {
-             return NextResponse.json({ error: "Original document not found" }, { status: 404 });
-        }
-        const originalData = originalDocSnap.data()!;
-
-        // ตรวจสอบความเป็นเจ้าของ (Optional: ปกติคนแก้ควรเป็นคนสร้าง)
-        if (originalData.createdBy !== uid && userRole !== 'Admin') {
-             return NextResponse.json({ error: "Only the document creator can submit a revision." }, { status: 403 });
-        }
-
-        // 👇 3. ตรวจสอบสิทธิ์แบบ Dynamic (ว่า Role นี้ยังสร้าง RFA ประเภทนี้ได้อยู่ไหม)
-        let actionKey = '';
-        switch (originalData.rfaType) {
-            case 'RFA-SHOP': actionKey = 'create_shop'; break;
-            case 'RFA-GEN': actionKey = 'create_gen'; break;
-            case 'RFA-MAT': actionKey = 'create_mat'; break;
-            default: actionKey = '';
-        }
-
-        if (actionKey) {
-            const canRevise = await checkPermission(
-                originalData.siteId,
-                userRole,
-                'RFA',
-                actionKey,
-                uid
-            );
-
-            if (!canRevise) {
-                return NextResponse.json({
-                    success: false,
-                    error: `Permission denied. Role '${userRole}' cannot create/revise ${originalData.rfaType} in this site.`
-                }, { status: 403 });
-            }
-        }
-        // 👆 จบส่วนตรวจสอบสิทธิ์
-
         await adminDb.runTransaction(async (transaction) => {
-            // ... (Logic ใน Transaction เหมือนเดิมทุกประการ ไม่ต้องแก้) ...
             const originalDoc = await transaction.get(originalRfaRef);
-            if (!originalDoc.exists) throw new Error("Original document not found");
-            
-            const currentData = originalDoc.data()!; // ใช้ข้อมูลล่าสุดใน Transaction
-            
-            const newTaskData = verifiedTaskId ? {
-                ...currentData.taskData,
-                taskUid: verifiedTaskId,
-            } : currentData.taskData;
+            if (!originalDoc.exists) {
+                throw new Error("Original document not found");
+            }
 
-            const newRevisionNumber = (currentData.revisionNumber || 0) + 1;
-            const newDocumentNumber = currentData.documentNumber;
+            const originalData = originalDoc.data()!;
+            
+            // --- 🔽 [แก้ไขจุดที่ 2] 🔽 ---
+            // สร้าง object taskData ใหม่ โดยใช้ verifiedTaskId ที่ได้รับมา
+            // ถ้าเป็น Manual Flow จะไม่มี verifiedTaskId ก็ให้ใช้ของเดิมไป
+            const newTaskData = verifiedTaskId ? {
+                ...originalData.taskData,
+                taskUid: verifiedTaskId,
+            } : originalData.taskData;
+            // --- 👆 [สิ้นสุดการแก้ไข] 👆 ---
+
+
+            const newRevisionNumber = (originalData.revisionNumber || 0) + 1;
+            const newDocumentNumber = originalData.documentNumber;
 
             const finalFilesData = [];
             const cdnUrlBase = "https://ttsdoc-cdn.ttthaiii30.workers.dev";
@@ -103,7 +69,7 @@ export async function POST(req: Request) {
                 const sourcePath = tempFile.filePath;
                 if (!sourcePath || !sourcePath.startsWith(`temp/${uid}/`)) continue;
 
-                const destinationPath = `sites/${currentData.siteId}/rfa/${newDocumentNumber}/${Date.now()}_${tempFile.fileName}`;
+                const destinationPath = `sites/${originalData.siteId}/rfa/${newDocumentNumber}/${Date.now()}_${tempFile.fileName}`;
                 await adminBucket.file(sourcePath).move(destinationPath);
 
                 finalFilesData.push({
@@ -119,15 +85,15 @@ export async function POST(req: Request) {
             const newStatus = STATUSES.PENDING_REVIEW;
 
             transaction.set(newRfaRef, {
-                ...currentData,
-                taskData: newTaskData,
+                ...originalData,
+                taskData: newTaskData, // <-- ใช้ taskData ที่อัปเดตแล้ว
                 revisionNumber: newRevisionNumber,
                 documentNumber: newDocumentNumber,
                 status: newStatus,
                 currentStep: newStatus,
                 isLatest: true,
-                parentRfaId: currentData.parentRfaId || originalDocId,
-                revisionHistory: [...(currentData.revisionHistory || []), originalDocId],
+                parentRfaId: originalData.parentRfaId || originalDoc.id,
+                revisionHistory: [...(originalData.revisionHistory || []), originalDoc.id],
                 createdAt: FieldValue.serverTimestamp(),
                 updatedAt: FieldValue.serverTimestamp(),
                 files: finalFilesData,

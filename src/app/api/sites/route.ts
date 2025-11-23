@@ -1,4 +1,4 @@
-// src/app/api/sites/route.ts
+// src/app/api/sites/route.ts (แก้ไขแล้ว)
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth, adminDb } from '@/lib/firebase/admin';
 import { ROLES } from '@/lib/config/workflow';
@@ -24,10 +24,13 @@ export async function GET(request: NextRequest) {
 
     let siteSnapshots: FirebaseFirestore.DocumentSnapshot[];
 
+    // --- 👇 จุดที่แก้ไขคือตรงนี้ครับ 👇 ---
     if (userProfile.role === ROLES.ADMIN) { 
+      // 1. ถ้าเป็น Admin: ให้ดึงข้อมูลจาก collection 'sites' มาทั้งหมด
       const allSitesSnapshot = await adminDb.collection('sites').get();
       siteSnapshots = allSitesSnapshot.docs;
     } else {
+      // 2. ถ้าเป็น Role อื่น: ใช้ Logic เดิม คือดึงจาก userProfile.sites
       const userSiteIds = userProfile.sites || [];
       if (userSiteIds.length === 0) {
         return NextResponse.json({ success: true, sites: [] });
@@ -37,9 +40,10 @@ export async function GET(request: NextRequest) {
       );
       siteSnapshots = await Promise.all(sitesPromises);
     }
+    // --- สิ้นสุดจุดที่แก้ไข ---
 
     const sites = siteSnapshots
-      .filter(doc => doc.exists)
+      .filter(doc => doc.exists) // กรองเอาเฉพาะ Site ที่มีอยู่จริง
       .map(doc => {
         const data = doc.data()!;
         return {
@@ -47,8 +51,6 @@ export async function GET(request: NextRequest) {
           name: data.name,
           sheetId: data.settings?.googleSheetsConfig?.spreadsheetId || null,
           sheetName: data.settings?.googleSheetsConfig?.sheetName || null,
-          // 👇 ✅ เพิ่มบรรทัดนี้: ส่ง roleSettings กลับไปด้วย
-          roleSettings: data.roleSettings || null 
         };
       });
 

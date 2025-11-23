@@ -1,28 +1,28 @@
-// src/components/rfa/CreateRFAForm.tsx
+// src/components/rfa/CreateRFAForm.tsx (โค้ดฉบับสมบูรณ์)
 'use client'
 
 import React, { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { FileText, Upload, X, Check, AlertTriangle, Info, Paperclip, Loader2, Send } from 'lucide-react'
+import { FileText, Upload, X, Check, AlertTriangle, Info, Paperclip,Loader2 } from 'lucide-react'
 import { useGoogleSheets } from '@/lib/hooks/useGoogleSheets'
 import { useAuth } from '@/lib/auth/useAuth'
 import Spinner from '@/components/shared/Spinner'
 import { ROLES, Role } from '@/lib/config/workflow';
 import { useNotification } from '@/lib/context/NotificationContext';
-import { db } from '@/lib/firebase/client'
-import { collection, query, where, getDocs, documentId } from 'firebase/firestore'
-// 👇 Import Hook
-import { usePermission } from '@/lib/hooks/usePermission';
 
+// v 1. Import สิ่งที่จำเป็นจาก Firestore SDK
+import { db } from '@/lib/firebase/client'
+import { collection, query, where, getDocs, orderBy, documentId, collectionGroup } from 'firebase/firestore'
+
+
+// --- Interfaces (เหมือนเดิม) ---
 interface Category { id: string; categoryCode: string; categoryName: string; }
 interface UploadedFile { id: string; file: File; status: 'pending' | 'uploading' | 'success' | 'error' | 'retrying'; progress: number; uploadedData?: { fileName: string; fileUrl: string; filePath: string; size: number; contentType: string; }; error?: string; retryCount: number; }
 interface RFAFormData { rfaType: 'RFA-SHOP' | 'RFA-GEN' | 'RFA-MAT' | ''; categoryId: string; documentNumber: string; title: string; description: string; revisionNumber: string; uploadedFiles: UploadedFile[]; selectedProject: string; selectedCategory: string; selectedTask: TaskData | null; }
 interface TaskData { taskCategory: string; taskName: string; projectName: string; taskUid?: string; }
 interface Site { id: string; name: string; sheetId?: string; sheetName?: string; }
 interface User { id: string; email: string; role: Role; sites: string[]; }
-
 const INITIAL_FORM_DATA: RFAFormData = { rfaType: '', categoryId: '', documentNumber: '', title: '', description: '', revisionNumber: '00', uploadedFiles: [], selectedProject: '', selectedCategory: '', selectedTask: null }
-
 type RFAConfig = { title: string; subtitle: string; icon: string; description: string; workflow: string; allowedRoles: Role[]; color: string; };
 const RFA_TYPE_CONFIG: Record<'RFA-SHOP' | 'RFA-GEN' | 'RFA-MAT', RFAConfig> = {
   'RFA-SHOP': { title: 'RFA-SHOP', subtitle: 'Shop Drawing Approval', icon: '🏗️', description: 'สำหรับการขออนุมัติ Shop Drawing', workflow: 'ผู้สร้าง → Site Admin → CM', allowedRoles: [ROLES.BIM, ROLES.ME, ROLES.SN, ROLES.SITE_ADMIN, ROLES.ADMIN], color: 'blue' },
@@ -30,15 +30,6 @@ const RFA_TYPE_CONFIG: Record<'RFA-SHOP' | 'RFA-GEN' | 'RFA-MAT', RFAConfig> = {
   'RFA-MAT': { title: 'RFA-MAT', subtitle: 'Material Approval', icon: '🧱', description: 'สำหรับการขออนุมัติวัสดุ', workflow: 'Site Admin → CM', allowedRoles: [ROLES.SITE_ADMIN, ROLES.ADMIN], color: 'orange' }
 };
 
-// ✅ Helper Function สำหรับแปลง Type เป็น Action Key
-const getActionFromType = (type: string) => {
-    switch (type) {
-        case 'RFA-SHOP': return 'create_shop';
-        case 'RFA-GEN': return 'create_gen';
-        case 'RFA-MAT': return 'create_mat';
-        default: return '';
-    }
-};
 
 export default function CreateRFAForm({ 
   onClose, 
@@ -66,14 +57,11 @@ export default function CreateRFAForm({
   const [isDocNumAvailable, setIsDocNumAvailable] = useState<boolean | null>(null);
   const [debouncedDocNum, setDebouncedDocNum] = useState('');
 
-  const { firebaseUser, user } = useAuth(); 
+  const { firebaseUser, user } = useAuth(); // ใช้ user จาก useAuth โดยตรง
   const { showNotification } = useNotification();
   const { loading: sheetsLoading, error: sheetsError, getCategories, getTasks } = useGoogleSheets();
   const [taskSearchQuery, setTaskSearchQuery] = useState('');
   const [siteCategories, setSiteCategories] = useState<Category[]>([]);
-
-  // 👇 เรียกใช้ Hook เช็คสิทธิ์
-  const { can, loading: permissionLoading } = usePermission(selectedSite);
 
   const isManualFlow = useMemo(() => {
     if (!userProp) return true;
@@ -82,16 +70,14 @@ export default function CreateRFAForm({
     return true; 
   }, [userProp, formData.rfaType]);
 
+  // v 2. เปลี่ยนจากการเรียก API มาใช้ getDocs เพื่อดึงข้อมูล Site
   useEffect(() => {
     const loadSites = async () => {
         if (!user?.sites || user.sites.length === 0) return;
 
         setLoading(true);
         try {
-            const q = query(
-                collection(db, "sites"), 
-                where("members", "array-contains", user.id)
-            );
+            const q = query(collection(db, "sites"), where(documentId(), "in", user.sites));
             const querySnapshot = await getDocs(q);
             const sitesFromDb: Site[] = querySnapshot.docs.map(doc => ({
                 id: doc.id,
@@ -108,7 +94,7 @@ export default function CreateRFAForm({
         }
     };
     loadSites();
-  }, [user, showNotification]);
+  }, [user]);
 
 
   useEffect(() => {
@@ -171,10 +157,9 @@ export default function CreateRFAForm({
         if (!formData.rfaType) {
           newErrors.rfaType = 'กรุณาเลือกประเภท RFA';
         } else {
-          // ✅ ใช้ getActionFromType และ can() เพื่อเช็คสิทธิ์แบบ Dynamic
-          const action = getActionFromType(formData.rfaType);
-          if (selectedSite && !permissionLoading && !can('RFA', action)) {
-             newErrors.rfaType = `คุณไม่มีสิทธิ์สร้าง ${formData.rfaType} ในโครงการนี้`;
+          const config = RFA_TYPE_CONFIG[formData.rfaType];
+          if (userProp && !config.allowedRoles.includes(userProp.role)) {
+            newErrors.rfaType = `คุณไม่มีสิทธิ์สร้าง ${formData.rfaType}`;
           }
         }
     }
@@ -202,7 +187,7 @@ export default function CreateRFAForm({
     if (validateForm()) {
         setIsConfirmationModalOpen(true);
     } else {
-        // alert('กรุณากรอกข้อมูลให้ครบถ้วน');
+        alert('กรุณากรอกข้อมูลให้ครบถ้วน');
     }
   }
 
@@ -302,11 +287,12 @@ export default function CreateRFAForm({
   };
 
   const removeFile = (index: number) => {
-    // const fileToRemove = formData.uploadedFiles[index];
-    // if (fileToRemove.uploadedData?.filePath) { /* Assuming deleteTempFile exists */ }
+    const fileToRemove = formData.uploadedFiles[index];
+    if (fileToRemove.uploadedData?.filePath) { /* Assuming deleteTempFile exists */ }
     updateFormData({ uploadedFiles: formData.uploadedFiles.filter((_, i) => i !== index) });
   };
   
+  // v 3. เปลี่ยน handleSiteChange ให้ดึงข้อมูล Category จาก Firestore โดยตรง
   const handleSiteChange = async (siteId: string) => {
     setSelectedSite(siteId);
     updateFormData({ categoryId: '', selectedCategory: '', selectedTask: null });
@@ -324,7 +310,7 @@ export default function CreateRFAForm({
         try {
             const q = query(
               collection(db, `sites/${siteId}/categories`), 
-              // orderBy('categoryCode') // เอาออกถ้าไม่มี index
+              orderBy('categoryCode')
             );
             const querySnapshot = await getDocs(q);
             const cats: Category[] = querySnapshot.docs.map(doc => ({
@@ -374,6 +360,7 @@ export default function CreateRFAForm({
     return tasks.filter(t => t.taskName.toLowerCase().includes(taskSearchQuery.toLowerCase()));
   }, [tasks, taskSearchQuery]);
 
+  // ... (ส่วน JSX ที่เหลือทั้งหมดเหมือนเดิม ไม่ต้องแก้ไข) ...
   return (
     <div className={`${isModal ? 'max-w-4xl w-full mx-auto' : ''} bg-white rounded-lg shadow-xl flex flex-col h-full max-h-[95vh]`}>
       <div className="flex items-center justify-between p-6 border-b bg-gray-50 rounded-t-lg">
@@ -390,42 +377,21 @@ export default function CreateRFAForm({
       
       <div className="flex-1 p-4 sm:p-6 overflow-y-auto bg-slate-50 space-y-6">
         
-        {/* ส่วนเลือก Project ย้ายขึ้นมาบนสุดเพื่อให้เลือกก่อน (เพื่อให้รู้สิทธิ์) */}
-        <section className="bg-white p-6 rounded-lg border border-gray-200">
-            <h3 className="flex items-center text-lg font-semibold text-gray-900 border-b pb-4 mb-6">
-                <span className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center mr-3 font-bold text-base">1</span>
-                เลือกโครงการ
-            </h3>
-            <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">โครงการ <span className="text-red-500">*</span></label>
-                <select value={selectedSite} onChange={(e) => handleSiteChange(e.target.value)} className="w-full p-3 border rounded-lg bg-gray-50">
-                    <option value="">-- เลือกโครงการ --</option>
-                    {sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
-                </select>
-                {errors.site && <p className="text-red-600 text-sm mt-1">{errors.site}</p>}
-            </div>
-        </section>
-
         {!presetRfaType && (
-            <section className={`bg-white p-6 rounded-lg border border-gray-200 ${!selectedSite ? 'opacity-50 pointer-events-none' : ''}`}>
+            <section className="bg-white p-6 rounded-lg border border-gray-200">
                 <h3 className="flex items-center text-lg font-semibold text-gray-900 border-b pb-4 mb-6">
-                  <span className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center mr-3 font-bold text-base">2</span>
+                  <span className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center mr-3 font-bold text-base">1</span>
                   เลือกประเภทเอกสาร
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {Object.entries(RFA_TYPE_CONFIG).map(([type, config]) => {
-                        // ✅ ใช้ can() เช็คเพื่อแสดงสถานะปุ่ม
-                        const action = getActionFromType(type);
-                        // ถ้ายังโหลดไม่เสร็จ ให้ถือว่า false ไปก่อน
-                        const isAllowed = selectedSite ? can('RFA', action) : false; 
-
+                        const isAllowed = userProp ? config.allowedRoles.includes(userProp.role) : false;
                         return (
                         <div key={type} onClick={() => isAllowed && updateFormData({ rfaType: type as any })}
                             className={`p-6 border-2 rounded-lg text-center cursor-pointer transition-all duration-200 ${formData.rfaType === type ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200' : isAllowed ? 'border-gray-200 hover:border-gray-400' : 'border-gray-100 bg-gray-50 opacity-60 cursor-not-allowed'}`}>
                             <div className="text-4xl mb-3">{config.icon}</div>
                             <h4 className="font-semibold text-gray-800">{config.title}</h4>
                             <p className="text-sm text-gray-500 mt-1">{config.description}</p>
-                            {!isAllowed && selectedSite && !permissionLoading && <p className="text-xs text-red-500 mt-2">(ไม่มีสิทธิ์)</p>}
                         </div>
                         )
                     })}
@@ -437,10 +403,19 @@ export default function CreateRFAForm({
         <section className={`bg-white p-6 rounded-lg border border-gray-200 ${!formData.rfaType && !presetRfaType ? 'opacity-40 pointer-events-none' : ''}`}>
             <h3 className="flex items-center text-lg font-semibold text-gray-900 border-b pb-4 mb-6">
                 <Info size={20} className="mr-3 text-blue-600"/>
-                รายละเอียด
+                ข้อมูลเอกสาร
             </h3>
             <div className="space-y-6 max-w-3xl">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">โครงการ <span className="text-red-500">*</span></label>
+                        <select value={selectedSite} onChange={(e) => handleSiteChange(e.target.value)} className="w-full p-3 border rounded-lg bg-gray-50">
+                            <option value="">-- เลือกโครงการ --</option>
+                            {sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
+                        </select>
+                        {errors.site && <p className="text-red-600 text-sm mt-1">{errors.site}</p>}
+                    </div>
+                    
                     {isManualFlow ? (
                         <div>
                             <label htmlFor="category-manual-input" className="block text-sm font-medium text-gray-700 mb-2">หมวดงาน <span className="text-red-500">*</span></label>

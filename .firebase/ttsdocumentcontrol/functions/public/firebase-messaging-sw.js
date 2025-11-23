@@ -24,7 +24,7 @@ messaging.onBackgroundMessage((payload) => {
   const notificationTitle = payload.data.title; 
   const notificationOptions = {
     body: payload.data.body, // ดึงจาก data
-    icon: '/favicon.ico',
+    icon: '/favicon.i co',
     data: payload.data // ส่ง object data ต่อไปให้ event click
   };
 

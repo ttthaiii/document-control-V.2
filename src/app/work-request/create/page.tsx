@@ -1,4 +1,3 @@
-// src/app/work-request/create/page.tsx
 'use client';
 
 import { AuthGuard } from '@/lib/components/shared/AuthGuard';
@@ -6,11 +5,10 @@ import Layout from '@/components/layout/Layout';
 import CreateWorkRequestForm from '@/components/work-request/CreateWorkRequestForm';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth/useAuth';
-import { ROLES } from '@/lib/config/workflow'; // Import ROLES มาใช้
+import { ROLES } from '@/lib/config/workflow';
 import { Suspense } from 'react';
 
 function WorkRequestCreateContent() {
-  // ... (โค้ดข้างในเหมือนเดิม) ...
   const router = useRouter();
   const { user: appUser } = useAuth();
 
@@ -54,16 +52,10 @@ function WorkRequestCreateContent() {
 
 export default function WorkRequestCreatePage() {
   return (
-    // ✅ แก้ไข AuthGuard: ใส่ Role ทั้งหมดที่มีสิทธิ์ "สร้าง" ตามระบบใหม่ (PE, OE, Admin)
-    // หมายเหตุ: เราใส่เผื่อไว้ก่อนได้ แล้วไปเช็คละเอียดใน Form อีกที
-    <AuthGuard requiredRoles={[
-      ROLES.ADMIN, 
-      ROLES.PE, 
-      ROLES.OE,
-      // แถม Role อื่นเผื่อไว้ ถ้าอนาคตคุณเปลี่ยนใจอนุญาต
-      ROLES.SITE_ADMIN, 
-      ROLES.BIM 
-    ]}>
+    // --- 👇 นี่คือจุดที่แก้ไข ---
+    // เพิ่ม ROLES.BIM เข้าไปใน AuthGuard
+    <AuthGuard requiredRoles={[ROLES.SITE_ADMIN, ROLES.ADMIN, ROLES.BIM]}>
+    // --- 👆 สิ้นสุดการแก้ไข ---
       <Suspense fallback={<div className="text-center p-8">Loading Form...</div>}>
         <WorkRequestCreateContent />
       </Suspense>
