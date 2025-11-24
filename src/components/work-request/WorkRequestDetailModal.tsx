@@ -1,15 +1,18 @@
-// src/components/work-request/WorkRequestDetailModal.tsx (ฉบับสมบูรณ์)
+// src/components/work-request/WorkRequestDetailModal.tsx
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/lib/auth/useAuth';
 import { WorkRequest, WorkRequestWorkflowStep, TaskData } from '@/types/work-request';
-import { WorkRequestStatus } from '@/lib/config/workflow'; // Import Type จาก workflow
+import { WorkRequestStatus } from '@/lib/config/workflow';
 import Spinner from '@/components/shared/Spinner';
 import { RFAFile } from '@/types/rfa';
-import { X, Paperclip, Send, Upload, FileText, Check, AlertTriangle, Download, CornerUpLeft, History, Edit, ThumbsUp, ThumbsDown } from 'lucide-react';
+// 1. เพิ่ม Eye เข้าไปใน import จาก lucide-react
+import { X, Paperclip, Send, Upload, FileText, Check, AlertTriangle, Download, CornerUpLeft, History, Edit, ThumbsUp, ThumbsDown, Eye } from 'lucide-react';
 import { ROLES, REVIEWER_ROLES, WR_STATUSES, WR_APPROVER_ROLES, STATUS_LABELS, STATUS_COLORS } from '@/lib/config/workflow';
 import { useNotification } from '@/lib/context/NotificationContext';
+// 2. Import PDFPreviewModal
+import PDFPreviewModal from '@/components/rfa/PDFPreviewModal';
 
 
 const formatFileSize = (bytes: number): string => {
@@ -37,9 +40,9 @@ const formatDate = (date: any, includeTime = true) => {
     return d.toLocaleString('th-TH', options);
 };
 
-const getStatusStyles = (status: WorkRequestStatus | string) => { // รับ string ได้เผื่อกรณีสถานะเก่า
+const getStatusStyles = (status: WorkRequestStatus | string) => {
     const label = STATUS_LABELS[status] || status;
-    const color = STATUS_COLORS[status] || '#6c757d'; // Default Gray
+    const color = STATUS_COLORS[status] || '#6c757d';
     return { text: label, color: color };
 };
 
@@ -101,13 +104,14 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
     const [isTaskVerified, setIsTaskVerified] = useState(false);
     const [verificationError, setVerificationError] = useState<string | null>(null);
     const [verifiedTaskId, setVerifiedTaskId] = useState<string | null>(null);
-
     const [rejectComment, setRejectComment] = useState('');
+
+    // 3. เพิ่ม state สำหรับไฟล์ที่ต้องการ Preview
+    const [previewFile, setPreviewFile] = useState<RFAFile | null>(null);
 
     const canSubmitWork = user?.role === ROLES.BIM && document?.status === WR_STATUSES.IN_PROGRESS;
     const canSiteReview = user && REVIEWER_ROLES.includes(user.role) && document?.status === WR_STATUSES.PENDING_ACCEPTANCE;
     const isRevisionFlow = user?.role === ROLES.BIM && document?.status === WR_STATUSES.REVISION_REQUESTED;
-    // --- 👇 [เพิ่ม] ตรวจสอบสิทธิ์สำหรับ PD/PM ---
     const canPmApprove = user && WR_APPROVER_ROLES.includes(user.role) && document?.status === WR_STATUSES.DRAFT;
 
     const newRevisionNumber = useMemo(() => (document?.revisionNumber || 0) + 1, [document]);
@@ -331,7 +335,6 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
     const handlePmAction = async (action: 'APPROVE_DRAFT' | 'REJECT_DRAFT') => {
         if (!document || !firebaseUser) return;
 
-        // ตรวจสอบ Comment ถ้าเป็นการ Reject
         if (action === 'REJECT_DRAFT' && !rejectComment.trim()) {
             showNotification('warning', 'กรุณากรอกเหตุผล', 'ต้องระบุเหตุผลในการไม่อนุมัติ');
             return;
@@ -345,13 +348,13 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                 headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     action,
-                    payload: { comments: rejectComment } // ส่ง rejectComment ไปเป็น comment
+                    payload: { comments: rejectComment }
                 }),
             });
             const result = await response.json();
             if (result.success) {
                 showNotification('success', 'ดำเนินการสำเร็จ', `สถานะถูกเปลี่ยนเป็น: ${getStatusStyles(result.newStatus).text}`);
-                onUpdate(); // Refresh list
+                onUpdate();
                 onClose();
             } else {
                 throw new Error(result.error || 'เกิดข้อผิดพลาดในการดำเนินการ');
@@ -409,26 +412,50 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                         <div>
                             <h4 className="text-md font-semibold mb-2 flex items-center text-slate-800"><Paperclip size={16} className="mr-2"/> ไฟล์แนบ</h4>
                             <ul className="space-y-2">
-                                {document.files.length > 0 ? document.files.map((file, index) => (
-                                    <li key={index}>
-                                        <a href={file.fileUrl} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-2 bg-slate-100 border border-slate-200 rounded-md hover:bg-slate-200 transition-colors group">
-                                            <div className="flex items-center min-w-0">
-                                                <FileText className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
-                                                <div className="flex flex-col min-w-0">
-                                                    <span className="text-sm font-medium text-blue-600 group-hover:underline truncate">{file.fileName}</span>
-                                                    <span className="text-xs text-gray-500">{formatFileSize(file.fileSize || file.size)}</span>
-                                                </div>
-                                            </div>
-                                            <Download className="w-5 h-5 text-gray-400 group-hover:text-gray-600 ml-4 flex-shrink-0" />
-                                        </a>
-                                    </li>
-                                )) : <p className="text-sm text-gray-500 italic">ไม่มีไฟล์แนบ</p>}
+                                {/* 4. ปรับปรุงส่วน Render รายการไฟล์ ให้รองรับ PDF Preview */}
+                                {document.files.length > 0 ? document.files.map((file, index) => {
+                                    const isPdf = file.fileName.toLowerCase().endsWith('.pdf') || file.contentType === 'application/pdf';
+                                    return (
+                                        <li key={index}>
+                                            {isPdf ? (
+                                                // ถ้าเป็น PDF ให้กดแล้วเปิด Modal (setPreviewFile)
+                                                <button 
+                                                    onClick={() => setPreviewFile(file)}
+                                                    className="w-full flex items-center justify-between p-2 bg-slate-100 border border-slate-200 rounded-md hover:bg-slate-200 transition-colors group text-left"
+                                                >
+                                                    <div className="flex items-center min-w-0">
+                                                        <FileText className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
+                                                        <div className="flex flex-col min-w-0">
+                                                            <span className="text-sm font-medium text-blue-600 group-hover:underline truncate">{file.fileName}</span>
+                                                            <span className="text-xs text-gray-500">{formatFileSize(file.fileSize || file.size)}</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center text-gray-400 group-hover:text-blue-600">
+                                                        <Eye size={16} className="mr-2" /> 
+                                                        <span className="text-xs mr-2 hidden sm:inline">ดูตัวอย่าง</span>
+                                                    </div>
+                                                </button>
+                                            ) : (
+                                                // ถ้าไม่ใช่ PDF ให้เป็นลิงก์ดาวน์โหลดเหมือนเดิม
+                                                <a href={file.fileUrl} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-2 bg-slate-100 border border-slate-200 rounded-md hover:bg-slate-200 transition-colors group">
+                                                    <div className="flex items-center min-w-0">
+                                                        <FileText className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
+                                                        <div className="flex flex-col min-w-0">
+                                                            <span className="text-sm font-medium text-blue-600 group-hover:underline truncate">{file.fileName}</span>
+                                                            <span className="text-xs text-gray-500">{formatFileSize(file.fileSize || file.size)}</span>
+                                                        </div>
+                                                    </div>
+                                                    <Download className="w-5 h-5 text-gray-400 group-hover:text-gray-600 ml-4 flex-shrink-0" />
+                                                </a>
+                                            )}
+                                        </li>
+                                    );
+                                }) : <p className="text-sm text-gray-500 italic">ไม่มีไฟล์แนบ</p>}
                             </ul>
                         </div>
                     </div>
                     
                     <div className="p-4 border-t bg-slate-50">
-                        {/* --- Panel สำหรับ PD/PM อนุมัติ DRAFT --- */}
                         {canPmApprove && (
                              <div className="space-y-4">
                                 <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (สำหรับ PM/PD)</h3>
@@ -463,7 +490,6 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                             </div>
                         )}
 
-                        {/* --- Panel สำหรับ Site ตรวจรับงาน --- */}
                         {canSiteReview && (
                             <div className="space-y-4">
                                 <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (สำหรับ Site)</h3>
@@ -580,6 +606,13 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                 </div>
             </div>
             {showHistory && <WorkflowHistoryModal workflow={document.workflow || []} onClose={() => setShowHistory(false)} />}
+            
+            {/* 5. เพิ่ม Component Modal สำหรับแสดง PDF */}
+            <PDFPreviewModal
+                isOpen={!!previewFile}
+                file={previewFile}
+                onClose={() => setPreviewFile(null)}
+            />
         </>
     );
 }
