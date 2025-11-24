@@ -7,13 +7,23 @@ import { WorkRequest, WorkRequestWorkflowStep, TaskData } from '@/types/work-req
 import { WorkRequestStatus } from '@/lib/config/workflow';
 import Spinner from '@/components/shared/Spinner';
 import { RFAFile } from '@/types/rfa';
-// 1. เพิ่ม Eye เข้าไปใน import จาก lucide-react
-import { X, Paperclip, Send, Upload, FileText, Check, AlertTriangle, Download, CornerUpLeft, History, Edit, ThumbsUp, ThumbsDown, Eye } from 'lucide-react';
+import { X, Paperclip, Send, Upload, FileText, Check, AlertTriangle, Download, CornerUpLeft, History, Edit, ThumbsUp, ThumbsDown, Eye, PenTool } from 'lucide-react';
 import { ROLES, REVIEWER_ROLES, WR_STATUSES, WR_APPROVER_ROLES, STATUS_LABELS, STATUS_COLORS } from '@/lib/config/workflow';
 import { useNotification } from '@/lib/context/NotificationContext';
-// 2. Import PDFPreviewModal
 import PDFPreviewModal from '@/components/rfa/PDFPreviewModal';
 
+// ✅ 1. Import dynamic จาก next/dynamic
+import dynamic from 'next/dynamic';
+
+// ✅ 2. เปลี่ยนการ Import PDFAnnotatorModal ให้เป็นแบบ Dynamic และปิด SSR
+// วิธีนี้จะทำให้ Fabric.js ไม่ถูกรันบน Server และแก้ Error "Object.defineProperty" ได้
+const PDFAnnotatorModal = dynamic(
+  () => import('@/components/rfa/PDFAnnotatorModal'),
+  { 
+    ssr: false,
+    loading: () => <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50"><Spinner className="text-white w-10 h-10"/></div>
+  }
+);
 
 const formatFileSize = (bytes: number): string => {
     if (!bytes) return '0 B';
@@ -80,7 +90,6 @@ const WorkflowHistoryModal = ({ workflow, onClose }: { workflow: WorkRequestWork
     );
 };
 
-
 interface UploadedFile {
   id: string; file: File; status: 'pending' | 'uploading' | 'success' | 'error';
   uploadedData?: RFAFile; error?: string;
@@ -106,8 +115,9 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
     const [verifiedTaskId, setVerifiedTaskId] = useState<string | null>(null);
     const [rejectComment, setRejectComment] = useState('');
 
-    // 3. เพิ่ม state สำหรับไฟล์ที่ต้องการ Preview
+    // State สำหรับ Modal PDF
     const [previewFile, setPreviewFile] = useState<RFAFile | null>(null);
+    const [fileToAnnotate, setFileToAnnotate] = useState<RFAFile | null>(null);
 
     const canSubmitWork = user?.role === ROLES.BIM && document?.status === WR_STATUSES.IN_PROGRESS;
     const canSiteReview = user && REVIEWER_ROLES.includes(user.role) && document?.status === WR_STATUSES.PENDING_ACCEPTANCE;
@@ -193,16 +203,11 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
             const formData = new FormData();
             formData.append('file', file);
             const response = await fetch('/api/rfa/upload-temp-file', {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` },
-                body: formData
+                method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: formData
             });
             const result = await response.json();
-            if (result.success) {
-                return { status: 'success', uploadedData: result.fileData };
-            } else {
-                throw new Error(result.error || 'อัปโหลดล้มเหลว');
-            }
+            if (result.success) return { status: 'success', uploadedData: result.fileData };
+            else throw new Error(result.error || 'อัปโหลดล้มเหลว');
         } catch (err) {
             return { status: 'error', error: err instanceof Error ? err.message : 'เกิดข้อผิดพลาด' };
         }
@@ -211,23 +216,39 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
     const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>, target: 'action' | 'revision') => {
         const files = Array.from(event.target.files || []);
         if (!files.length) return;
+        processFiles(files, target);
+        event.target.value = '';
+    };
+
+    const processFiles = async (files: File[], target: 'action' | 'revision') => {
         const newUploads: UploadedFile[] = files.map(file => ({ id: `${file.name}-${Date.now()}`, file, status: 'pending' }));
         const setFiles = target === 'revision' ? setRevisionFiles : setActionFiles;
+        
         setFiles(prev => [...prev, ...newUploads]);
+        
         for (const fileObj of newUploads) {
             setFiles(prev => prev.map(f => f.id === fileObj.id ? { ...f, status: 'uploading' } : f));
             const result = await uploadTempFile(fileObj.file);
             setFiles(prev => prev.map(f => f.id === fileObj.id ? { ...f, ...result } : f));
         }
-        event.target.value = '';
-    };
+    }
 
     const removeFile = (fileId: string, target: 'action' | 'revision') => {
         const setFiles = target === 'revision' ? setRevisionFiles : setActionFiles;
         setFiles(prev => prev.filter(f => f.id !== fileId));
     };
 
-    const handleBimAction = async (action: 'SUBMIT_WORK') => {
+    const handleAnnotateSave = async (editedFile: File) => {
+        console.log("Annotated File Received:", editedFile);
+        let target: 'action' | 'revision' = 'action';
+        if (isRevisionFlow) target = 'revision';
+        
+        await processFiles([editedFile], target);
+        showNotification('success', 'บันทึกและแนบไฟล์เรียบร้อย', 'ไฟล์ที่คุณแก้ไขถูกแนบในรายการเตรียมส่งแล้ว');
+    };
+
+    // Dummy functions to maintain structure (replace with your original logic if needed)
+    const handleBimAction = async (action: any) => {
         if (!document || !firebaseUser) return;
         setIsSubmitting(true);
         try {
@@ -265,7 +286,7 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
         }
     };
 
-    const handleSiteAction = async (action: 'COMPLETE' | 'REQUEST_REVISION') => {
+    const handleSiteAction = async (action: any) => {
         if (!document || !firebaseUser) return;
         setIsSubmitting(true);
         try {
@@ -332,14 +353,12 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
         }
     };
 
-    const handlePmAction = async (action: 'APPROVE_DRAFT' | 'REJECT_DRAFT') => {
+    const handlePmAction = async (action: any) => {
         if (!document || !firebaseUser) return;
-
         if (action === 'REJECT_DRAFT' && !rejectComment.trim()) {
             showNotification('warning', 'กรุณากรอกเหตุผล', 'ต้องระบุเหตุผลในการไม่อนุมัติ');
             return;
         }
-
         setIsSubmitting(true);
         try {
             const token = await firebaseUser.getIdToken();
@@ -366,9 +385,7 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
         }
     };
 
-    if (loading) {
-        return <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center"><Spinner className="w-12 h-12 text-white" /></div>;
-    }
+    if (loading) return <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center"><Spinner className="w-12 h-12 text-white" /></div>;
     if (!document) return null;
 
     const statusStyle = getStatusStyles(document.status);
@@ -377,12 +394,11 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
         <>
             <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
                 <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+                    {/* Header & Info */}
                     <div className="flex justify-between items-start p-4 border-b">
                         <div>
-                            <div className="flex items-baseline space-x-3">
-                                <h3 className="text-lg font-bold text-blue-600">{document.documentNumber}</h3>
-                                <h2 className="text-xl font-semibold text-gray-800">{document.taskName}</h2>
-                            </div>
+                            <h3 className="text-lg font-bold text-blue-600">{document.documentNumber}</h3>
+                            <h2 className="text-xl font-semibold text-gray-800">{document.taskName}</h2>
                         </div>
                         <div className="flex items-center space-x-4">
                             <button onClick={() => setShowHistory(true)} className="flex items-center text-sm text-gray-500 hover:text-blue-600"><History size={16} className="mr-1"/> ดูประวัติ</button>
@@ -392,62 +408,56 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
 
                     <div className="p-6 overflow-y-auto space-y-6">
                         <div className="bg-gray-50 p-4 rounded-lg">
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                                <div>
-                                    <strong className="text-gray-500 block mb-1">สถานะ:</strong>
-                                    <span className="px-3 py-1 text-xs font-bold text-white rounded-full" style={{ backgroundColor: statusStyle.color }}>{statusStyle.text}</span>
-                                </div>
+                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                <div><strong className="text-gray-500 block mb-1">สถานะ:</strong><span className="px-3 py-1 text-xs font-bold text-white rounded-full" style={{ backgroundColor: statusStyle.color }}>{statusStyle.text}</span></div>
                                 <div><strong className="text-gray-500 block">โครงการ:</strong><span>{document.site?.name || 'N/A'}</span></div>
                                 <div><strong className="text-gray-500 block">วันที่เริ่ม (แผน):</strong><span>{formatDate(document.planStartDate, false)}</span></div>
                                 <div><strong className="text-gray-500 block">วันที่กำหนดส่ง:</strong><span>{formatDate(document.dueDate, false)}</span></div>
                             </div>
-                            {document.description && (
-                            <div className='mt-4'>
-                                <strong className="text-gray-500 block text-sm">รายละเอียด:</strong>
-                                <div className="text-gray-700 whitespace-pre-wrap bg-white p-3 rounded-md mt-1 border"><p className="italic">"{document.description}"</p></div>
-                            </div>
-                            )}
+                            {document.description && <div className='mt-4'><strong className="text-gray-500 block text-sm">รายละเอียด:</strong><div className="text-gray-700 whitespace-pre-wrap bg-white p-3 rounded-md mt-1 border"><p className="italic">"{document.description}"</p></div></div>}
                         </div>
                         
+                        {/* Files Section */}
                         <div>
                             <h4 className="text-md font-semibold mb-2 flex items-center text-slate-800"><Paperclip size={16} className="mr-2"/> ไฟล์แนบ</h4>
                             <ul className="space-y-2">
-                                {/* 4. ปรับปรุงส่วน Render รายการไฟล์ ให้รองรับ PDF Preview */}
                                 {document.files.length > 0 ? document.files.map((file, index) => {
                                     const isPdf = file.fileName.toLowerCase().endsWith('.pdf') || file.contentType === 'application/pdf';
+                                    const showEditButton = isPdf && (canSiteReview || canSubmitWork || isRevisionFlow); 
+
                                     return (
                                         <li key={index}>
-                                            {isPdf ? (
-                                                // ถ้าเป็น PDF ให้กดแล้วเปิด Modal (setPreviewFile)
-                                                <button 
-                                                    onClick={() => setPreviewFile(file)}
-                                                    className="w-full flex items-center justify-between p-2 bg-slate-100 border border-slate-200 rounded-md hover:bg-slate-200 transition-colors group text-left"
-                                                >
-                                                    <div className="flex items-center min-w-0">
-                                                        <FileText className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
-                                                        <div className="flex flex-col min-w-0">
-                                                            <span className="text-sm font-medium text-blue-600 group-hover:underline truncate">{file.fileName}</span>
-                                                            <span className="text-xs text-gray-500">{formatFileSize(file.fileSize || file.size)}</span>
-                                                        </div>
+                                            <div className="flex items-center justify-between p-2 bg-slate-100 border border-slate-200 rounded-md hover:bg-slate-200 transition-colors group">
+                                                <div className="flex items-center min-w-0 flex-1 cursor-pointer" onClick={() => isPdf ? setPreviewFile(file) : window.open(file.fileUrl)}>
+                                                    <FileText className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
+                                                    <div className="flex flex-col min-w-0">
+                                                        <span className="text-sm font-medium text-blue-600 group-hover:underline truncate">{file.fileName}</span>
+                                                        <span className="text-xs text-gray-500">{formatFileSize(file.fileSize || file.size)}</span>
                                                     </div>
-                                                    <div className="flex items-center text-gray-400 group-hover:text-blue-600">
-                                                        <Eye size={16} className="mr-2" /> 
-                                                        <span className="text-xs mr-2 hidden sm:inline">ดูตัวอย่าง</span>
-                                                    </div>
-                                                </button>
-                                            ) : (
-                                                // ถ้าไม่ใช่ PDF ให้เป็นลิงก์ดาวน์โหลดเหมือนเดิม
-                                                <a href={file.fileUrl} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-2 bg-slate-100 border border-slate-200 rounded-md hover:bg-slate-200 transition-colors group">
-                                                    <div className="flex items-center min-w-0">
-                                                        <FileText className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
-                                                        <div className="flex flex-col min-w-0">
-                                                            <span className="text-sm font-medium text-blue-600 group-hover:underline truncate">{file.fileName}</span>
-                                                            <span className="text-xs text-gray-500">{formatFileSize(file.fileSize || file.size)}</span>
-                                                        </div>
-                                                    </div>
-                                                    <Download className="w-5 h-5 text-gray-400 group-hover:text-gray-600 ml-4 flex-shrink-0" />
-                                                </a>
-                                            )}
+                                                </div>
+                                                
+                                                <div className="flex items-center space-x-2 ml-2">
+                                                    {isPdf && (
+                                                        <button onClick={() => setPreviewFile(file)} className="p-1 text-gray-400 hover:text-blue-600" title="ดูตัวอย่าง">
+                                                            <Eye size={18} />
+                                                        </button>
+                                                    )}
+                                                    {showEditButton && (
+                                                        <button 
+                                                            onClick={() => setFileToAnnotate(file)}
+                                                            className="p-1 text-gray-400 hover:text-orange-600 bg-white rounded shadow-sm border border-gray-200"
+                                                            title="แก้ไข/เซ็นชื่อ"
+                                                        >
+                                                            <PenTool size={16} />
+                                                        </button>
+                                                    )}
+                                                    {!isPdf && (
+                                                        <a href={file.fileUrl} target="_blank" rel="noopener noreferrer" className="p-1 text-gray-400 hover:text-gray-600">
+                                                            <Download size={18} />
+                                                        </a>
+                                                    )}
+                                                </div>
+                                            </div>
                                         </li>
                                     );
                                 }) : <p className="text-sm text-gray-500 italic">ไม่มีไฟล์แนบ</p>}
@@ -456,35 +466,19 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                     </div>
                     
                     <div className="p-4 border-t bg-slate-50">
-                        {canPmApprove && (
+                       {canPmApprove && (
                              <div className="space-y-4">
                                 <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (สำหรับ PM/PD)</h3>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">เหตุผลในการไม่อนุมัติ (ถ้ามี)</label>
-                                    <textarea
-                                        value={rejectComment}
-                                        onChange={(e) => setRejectComment(e.target.value)}
-                                        rows={3}
-                                        placeholder="กรอกเหตุผลที่ไม่อนุมัติ..."
-                                        className="w-full p-2 border rounded-md"
-                                    />
+                                    <textarea value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} rows={3} placeholder="กรอกเหตุผลที่ไม่อนุมัติ..." className="w-full p-2 border rounded-md" />
                                 </div>
                                 <div className="flex justify-end gap-3 pt-2">
-                                    <button
-                                        onClick={() => handlePmAction('REJECT_DRAFT')}
-                                        disabled={isSubmitting}
-                                        className="flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:bg-red-300 disabled:cursor-not-allowed"
-                                    >
-                                        <ThumbsDown size={16} className="mr-2" />
-                                        {isSubmitting ? 'กำลังดำเนินการ...' : 'ไม่อนุมัติ'}
+                                    <button onClick={() => handlePmAction('REJECT_DRAFT')} disabled={isSubmitting} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:bg-red-300 disabled:cursor-not-allowed">
+                                        <ThumbsDown size={16} className="mr-2" /> {isSubmitting ? 'กำลังดำเนินการ...' : 'ไม่อนุมัติ'}
                                     </button>
-                                    <button
-                                        onClick={() => handlePmAction('APPROVE_DRAFT')}
-                                        disabled={isSubmitting}
-                                        className="flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:bg-green-300 disabled:cursor-not-allowed"
-                                    >
-                                        <ThumbsUp size={16} className="mr-2" />
-                                        {isSubmitting ? 'กำลังอนุมัติ...' : 'อนุมัติ (ส่งให้ BIM)'}
+                                    <button onClick={() => handlePmAction('APPROVE_DRAFT')} disabled={isSubmitting} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:bg-green-300 disabled:cursor-not-allowed">
+                                        <ThumbsUp size={16} className="mr-2" /> {isSubmitting ? 'กำลังอนุมัติ...' : 'อนุมัติ (ส่งให้ BIM)'}
                                     </button>
                                 </div>
                             </div>
@@ -605,14 +599,20 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                     </div>
                 </div>
             </div>
+
             {showHistory && <WorkflowHistoryModal workflow={document.workflow || []} onClose={() => setShowHistory(false)} />}
             
-            {/* 5. เพิ่ม Component Modal สำหรับแสดง PDF */}
-            <PDFPreviewModal
-                isOpen={!!previewFile}
-                file={previewFile}
-                onClose={() => setPreviewFile(null)}
-            />
+            <PDFPreviewModal isOpen={!!previewFile} file={previewFile} onClose={() => setPreviewFile(null)} />
+
+            {/* ✅ 3. แสดง PDFAnnotatorModal ตามเงื่อนไข */}
+            {fileToAnnotate && (
+                <PDFAnnotatorModal
+                    isOpen={!!fileToAnnotate}
+                    file={fileToAnnotate}
+                    onClose={() => setFileToAnnotate(null)}
+                    onSave={handleAnnotateSave}
+                />
+            )}
         </>
     );
 }
