@@ -1,9 +1,8 @@
-// src/app/api/work-request/create_revision/route.ts (Corrected)
+// src/app/api/work-request/create_revision/route.ts
 import { NextResponse, NextRequest } from "next/server";
-import { getAdminDb, getBimTrackingDb, getAdminAuth } from "@/lib/firebase/admin";
+import { getAdminDb, getBimTrackingDb, getAdminAuth, getAdminBucket } from "@/lib/firebase/admin"; // ✅ เพิ่ม getAdminBucket
 import { FieldValue } from 'firebase-admin/firestore';
 import { WR_STATUSES } from '@/lib/config/workflow';
-import * as admin from "firebase-admin";
 
 export const dynamic = 'force-dynamic';
 
@@ -29,11 +28,9 @@ export async function POST(req: NextRequest) {
     try {
         const { originalDocId, uploadedFiles, verifiedTaskId, comments } = await req.json();
 
-        // --- Get Firebase Service Instances ---
         const adminDb = getAdminDb();
         const bimTrackingDb = getBimTrackingDb();
-        const adminAuth = getAdminAuth();
-        // Note: adminBucket is not used in the new logic, but if needed, you would get it via a getter.
+        const adminBucket = getAdminBucket(); // ✅ เรียกใช้ Bucket
 
         const userDoc = await adminDb.collection('users').doc(uid).get();
         if (!userDoc.exists) {
@@ -42,52 +39,67 @@ export async function POST(req: NextRequest) {
         const userData = userDoc.data()!;
 
         if (!originalDocId || !uploadedFiles || uploadedFiles.length === 0 || !verifiedTaskId) {
-            return NextResponse.json({ success: false, error: "Missing required fields for revision" }, { status: 400 });
+            return NextResponse.json({ success: false, error: "Missing required fields" }, { status: 400 });
         }
         
         const originalWrRef = adminDb.collection("workRequests").doc(originalDocId);
         
         const newRevisionDoc = await adminDb.runTransaction(async (transaction) => {
             const originalDoc = await transaction.get(originalWrRef);
-            if (!originalDoc.exists) {
-                throw new Error("Original document not found");
-            }
+            if (!originalDoc.exists) throw new Error("Original document not found");
 
             const originalData = originalDoc.data()!;
             
             // ดึงข้อมูล Site
             const siteDoc = await adminDb.collection('sites').doc(originalData.siteId).get();
-            if (!siteDoc.exists) {
-                throw new Error(`Site with ID ${originalData.siteId} not found.`);
-            }
+            if (!siteDoc.exists) throw new Error(`Site not found.`);
             const siteData = siteDoc.data()!;
             
-            // ตรวจสอบ Task ใน BIM Tracking
+            // ตรวจสอบ Task
             const taskDoc = await bimTrackingDb.collection('tasks').doc(verifiedTaskId).get();
-            if (!taskDoc.exists) {
-                throw new Error(`Verified Task ID ${verifiedTaskId} not found in BIM Tracking.`);
-            }
+            if (!taskDoc.exists) throw new Error(`Verified Task ID not found.`);
 
-            const taskDetails = taskDoc.data();
-            
-            // 👇 แก้ตรงนี้ - ใช้วิธีเดียวกับ RFA
             const newTaskData = {
-                ...originalData.taskData, // copy ข้อมูลเดิมมาก่อน
-                taskUid: verifiedTaskId,  // อัปเดตเฉพาะ taskUid เป็น Task ใหม่
-                taskName: taskDetails?.taskName || originalData.taskName, // อัปเดต taskName ถ้ามี
-                projectName: siteData.name, // อัปเดต projectName
+                ...originalData.taskData,
+                taskUid: verifiedTaskId,
+                taskName: taskDoc.data()?.taskName || originalData.taskName,
+                projectName: siteData.name,
             };
-            // 👆
 
             const newRevisionNumber = (originalData.revisionNumber || 0) + 1;
             const docNumPrefix = originalData.documentNumber.split('-REV')[0];
             const newDocumentNumber = `${docNumPrefix}-REV${String(newRevisionNumber).padStart(2, '0')}`;
 
-            const finalFilesData = uploadedFiles.map((file: any) => ({
-                ...file,
-                uploadedAt: new Date().toISOString(),
-                uploadedBy: uid,
-            }));
+            // 🔥🔥🔥 [เริ่มส่วนแก้ไข] ย้ายไฟล์จาก Temp -> Permanent 🔥🔥🔥
+            const finalFilesData = [];
+            const cdnUrlBase = "https://ttsdoc-cdn.ttthaiii30.workers.dev";
+
+            for (const file of uploadedFiles) {
+                if (file.filePath && file.filePath.startsWith('temp/')) {
+                    const destinationPath = `sites/${originalData.siteId}/work-requests/${newDocumentNumber}/${Date.now()}_${file.fileName}`;
+                    try {
+                        // ⚠️ หมายเหตุ: การ move ไฟล์ใน Transaction อาจจะทำไม่ได้โดยตรง หรือไม่แนะนำ 
+                        // แต่ในเคสนี้เราทำนอก transaction block ยากเพราะต้องรอเลข DocumentNumber
+                        // ดังนั้นเราจะ move จริงๆ ตรงนี้ (ถ้า transaction fail ไฟล์อาจจะถูกย้ายไปแล้ว แต่ก็ยังดีกว่าไฟล์หาย)
+                        await adminBucket.file(file.filePath).move(destinationPath);
+                        
+                        finalFilesData.push({
+                            ...file,
+                            fileUrl: `${cdnUrlBase}/${destinationPath}`,
+                            filePath: destinationPath,
+                            uploadedAt: new Date().toISOString(),
+                            uploadedBy: uid,
+                        });
+                    } catch (e) {
+                        console.error("File move failed", e);
+                        // ถ้าพลาดจริงๆ อาจจะต้องเก็บ path เดิม หรือ throw error
+                        throw new Error("Failed to process file upload.");
+                    }
+                } else {
+                    finalFilesData.push(file);
+                }
+            }
+            // 🔥🔥🔥 [สิ้นสุดส่วนแก้ไข] 🔥🔥🔥
 
             const newWrRef = adminDb.collection("workRequests").doc();
             const newStatus = WR_STATUSES.PENDING_ACCEPTANCE;
@@ -95,14 +107,14 @@ export async function POST(req: NextRequest) {
             const newDocData = {
                 ...originalData,
                 documentNumber: newDocumentNumber,
-                taskData: newTaskData, // ใช้ taskData ที่อัปเดต taskUid แล้ว
+                taskData: newTaskData,
                 revisionNumber: newRevisionNumber,
                 status: newStatus,
                 isLatest: true,
                 parentWorkRequestId: originalData.parentWorkRequestId || originalDoc.id,
                 createdAt: FieldValue.serverTimestamp(),
                 updatedAt: FieldValue.serverTimestamp(),
-                files: finalFilesData,
+                files: finalFilesData, // ✅ ใช้ไฟล์ที่ย้ายแล้ว
                 workflow: [
                     ...originalData.workflow,
                     {
@@ -113,7 +125,7 @@ export async function POST(req: NextRequest) {
                         role: userData.role,
                         timestamp: new Date().toISOString(),
                         comments: comments || `สร้างและส่ง Revision ${newRevisionNumber}`,
-                        files: finalFilesData
+                        files: finalFilesData // ✅ ใช้ไฟล์ที่ย้ายแล้ว
                     }
                 ],
             };
@@ -126,13 +138,13 @@ export async function POST(req: NextRequest) {
 
         return NextResponse.json({ 
             success: true, 
-            message: "New revision created and submitted successfully.",
+            message: "New revision created",
             newDocumentId: newRevisionDoc.id,
             newDocumentNumber: newRevisionDoc.documentNumber
         }, { status: 201 });
 
     } catch (err: any) {
-        console.error("Create Work Request Revision Error:", err);
-        return NextResponse.json({ success: false, error: "Internal Server Error", details: err.message }, { status: 500 });
+        console.error("Revision Error:", err);
+        return NextResponse.json({ success: false, error: err.message }, { status: 500 });
     }
 }

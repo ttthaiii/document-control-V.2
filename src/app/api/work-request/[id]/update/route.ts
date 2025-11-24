@@ -1,12 +1,9 @@
-// src/app/api/work-request/[id]/update/route.ts (แก้ไขแล้ว)
+// src/app/api/work-request/[id]/update/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb, adminAuth } from '@/lib/firebase/admin';
+import { adminDb, adminAuth, adminBucket } from '@/lib/firebase/admin'; // ✅ เพิ่ม adminBucket
 import { FieldValue } from 'firebase-admin/firestore';
-// --- 👇 [แก้ไข] Import เพิ่มเติม ---
 import { WR_STATUSES, WR_APPROVER_ROLES, REVIEWER_ROLES, ROLES } from '@/lib/config/workflow';
-import { WorkRequestStatus } from '@/types/work-request'; // Import Type ด้วย
-// --- 👆 สิ้นสุดการแก้ไข ---
-
+import { WorkRequestStatus } from '@/types/work-request';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,50 +36,40 @@ export async function POST(
     }
     const docData = docSnap.data()!;
 
-    let newStatus: WorkRequestStatus | null = null; // <-- ใช้ Type WorkRequestStatus
+    let newStatus: WorkRequestStatus | null = null;
     const updates: { [key: string]: any } = {};
     let canPerformAction = false;
 
+    // --- ตรวจสอบ Action (Code เดิมของคุณ) ---
     switch (action) {
-
-      // --- 👇 [เพิ่ม] Action ใหม่สำหรับ PD/PM ---
       case 'APPROVE_DRAFT':
         if (WR_APPROVER_ROLES.includes(userData.role) && docData.status === WR_STATUSES.DRAFT) {
           canPerformAction = true;
-          newStatus = WR_STATUSES.PENDING_BIM; // เปลี่ยนเป็นรอ BIM รับงาน
+          newStatus = WR_STATUSES.PENDING_BIM;
         }
         break;
-
       case 'REJECT_DRAFT':
         if (WR_APPROVER_ROLES.includes(userData.role) && docData.status === WR_STATUSES.DRAFT) {
-          // ตรวจสอบว่ามี Comment มาด้วยหรือไม่
           if (!payload || !payload.comments || payload.comments.trim() === '') {
              return NextResponse.json({ success: false, error: 'Comment is required when rejecting.' }, { status: 400 });
           }
           canPerformAction = true;
-          newStatus = WR_STATUSES.REJECTED_BY_PM; // เปลี่ยนเป็น Reject by PM
+          newStatus = WR_STATUSES.REJECTED_BY_PM;
         }
         break;
-      // --- 👆 สิ้นสุดการเพิ่ม ---
-
-      // --- Actions เดิม (ทำงานหลังสถานะ DRAFT) ---
       case 'SUBMIT_WORK':
         if (userData.role === ROLES.BIM && docData.status === WR_STATUSES.IN_PROGRESS) {
             canPerformAction = true;
             newStatus = WR_STATUSES.PENDING_ACCEPTANCE;
         }
         break;
-
       case 'REQUEST_REVISION':
-        // แก้ไข: ใช้ REVIEWER_ROLES จาก workflow.ts
         if (REVIEWER_ROLES.includes(userData.role) && docData.status === WR_STATUSES.PENDING_ACCEPTANCE) {
           canPerformAction = true;
           newStatus = WR_STATUSES.REVISION_REQUESTED;
         }
         break;
-
       case 'COMPLETE':
-        // แก้ไข: ใช้ REVIEWER_ROLES จาก workflow.ts
         if (REVIEWER_ROLES.includes(userData.role) && docData.status === WR_STATUSES.PENDING_ACCEPTANCE) {
           canPerformAction = true;
           newStatus = WR_STATUSES.COMPLETED;
@@ -91,9 +78,44 @@ export async function POST(
     }
 
     if (!canPerformAction || !newStatus) {
-      console.warn(`Action "${action}" denied for user ${userId} (Role: ${userData.role}) on doc ${docId} (Status: ${docData.status})`);
-      return NextResponse.json({ success: false, error: 'Permission denied or invalid action for current status.' }, { status: 403 });
+      return NextResponse.json({ success: false, error: 'Permission denied or invalid action.' }, { status: 403 });
     }
+
+    // 🔥🔥🔥 [เริ่มส่วนแก้ไข] จัดการย้ายไฟล์จาก Temp -> Permanent 🔥🔥🔥
+    let finalFiles: any[] = [];
+    
+    // ตรวจสอบว่ามีไฟล์แนบมาใน payload หรือไม่ (สำหรับ action SUBMIT_WORK หรืออื่นๆ)
+    if (payload?.files && Array.isArray(payload.files) && payload.files.length > 0) {
+      const cdnUrlBase = "https://ttsdoc-cdn.ttthaiii30.workers.dev";
+      
+      for (const tempFile of payload.files) {
+        // ถ้านามสกุลไฟล์หรือ path บ่งบอกว่าเป็นไฟล์ใหม่ใน temp
+        if (tempFile.filePath && tempFile.filePath.startsWith('temp/')) {
+           const destinationPath = `sites/${docData.siteId}/work-requests/${docData.documentNumber}/${Date.now()}_${tempFile.fileName}`;
+           
+           try {
+             // สั่งย้ายไฟล์ใน Google Storage
+             await adminBucket.file(tempFile.filePath).move(destinationPath);
+             
+             // อัปเดตข้อมูลไฟล์ให้ชี้ไปที่ Path ใหม่
+             finalFiles.push({
+               ...tempFile,
+               fileUrl: `${cdnUrlBase}/${destinationPath}`,
+               filePath: destinationPath,
+               uploadedAt: new Date().toISOString(),
+               uploadedBy: userId,
+             });
+           } catch (moveError) {
+             console.error(`Failed to move file ${tempFile.filePath}:`, moveError);
+             // กรณี Error อาจจะเลือกข้าม หรือ throw error ก็ได้
+           }
+        } else {
+          // ถ้าเป็นไฟล์เก่าที่ path ถูกต้องอยู่แล้ว ให้ใส่กลับเข้าไปเหมือนเดิม
+          finalFiles.push(tempFile);
+        }
+      }
+    }
+    // 🔥🔥🔥 [สิ้นสุดส่วนแก้ไข] 🔥🔥🔥
 
     const workflowStep = {
       action,
@@ -102,17 +124,18 @@ export async function POST(
       userName: userData.email,
       role: userData.role,
       timestamp: new Date().toISOString(),
-      comments: payload?.comments || '', // ใช้ Optional chainingเผื่อ payload ไม่มี
-      files: payload?.files || [],     // ใช้ Optional chainingเผื่อ payload ไม่มี
+      comments: payload?.comments || '',
+      files: finalFiles, // ✅ ใช้ไฟล์ที่ย้ายแล้ว (finalFiles) แทน payload.files
     };
 
     updates.status = newStatus;
     updates.workflow = FieldValue.arrayUnion(workflowStep);
     updates.updatedAt = FieldValue.serverTimestamp();
 
-    // อัปเดตไฟล์หลัก เฉพาะตอน Submit Work (Logic เดิม)
-    if (action === 'SUBMIT_WORK' && payload?.files && Array.isArray(payload.files) && payload.files.length > 0) {
-        updates.files = FieldValue.arrayUnion(...payload.files);
+    // อัปเดตไฟล์หลัก เฉพาะตอน Submit Work
+    if (action === 'SUBMIT_WORK' && finalFiles.length > 0) {
+        // ✅ ใช้ finalFiles ที่ย้ายแล้ว
+        updates.files = FieldValue.arrayUnion(...finalFiles);
     }
 
     await docRef.update(updates);

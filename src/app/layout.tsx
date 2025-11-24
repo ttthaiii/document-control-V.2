@@ -4,6 +4,18 @@ import { AuthProvider } from '@/lib/auth/useAuth'
 import { LoadingProvider } from '@/lib/context/LoadingContext'
 import { NotificationProvider } from '@/lib/context/NotificationContext'
 
+if (typeof Promise.withResolvers === 'undefined' && typeof window !== 'undefined') {
+  // @ts-expect-error Polyfill logic
+  Promise.withResolvers = function () {
+    let resolve, reject;
+    const promise = new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
+}
+
 const inter = Inter({ subsets: ['latin'] })
 
 // ✅ 1. เพิ่ม manifest และ icons ใน metadata
