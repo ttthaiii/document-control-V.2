@@ -1,7 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
-// 1. Import Messaging และ isSupported
 import { getMessaging, isSupported } from 'firebase/messaging';
 
 const firebaseConfig = {
@@ -13,41 +12,38 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-// Initialize App (ใช้ getApp เพื่อความชัวร์ว่าไม่ init ซ้ำ)
 export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
-// 2. Export messaging แบบปลอดภัย (เช็คว่ารันบน Browser หรือไม่)
-let messaging: any = null;
-
-if (typeof window !== 'undefined') {
-  // เช็คว่า Browser รองรับ Service Worker และ Push API หรือไม่
-  isSupported().then((supported) => {
-    if (supported) {
-      messaging = getMessaging(app);
+// ✅ แก้ไข: สร้างฟังก์ชันเพื่อดึง Messaging instance แทนการ export ตัวแปรโดยตรง
+// วิธีนี้จะป้องกันค่า null เวลาเครื่องยังโหลดไม่เสร็จ
+export const getMessagingInstance = async () => {
+  try {
+    if (typeof window !== 'undefined') {
+      const supported = await isSupported();
+      if (supported) {
+        return getMessaging(app);
+      }
     }
-  });
-}
-
+  } catch (err) {
+    console.error('Error checking messaging support:', err);
+  }
+  return null;
+};
+/*
 // Enable Offline Persistence
 try {
   if (typeof window !== 'undefined') {
-    enableIndexedDbPersistence(db)
-      .then(() => {
-        console.log("✅ Firestore offline persistence enabled.");
-      })
-      .catch((err) => {
-        if (err.code == 'failed-precondition') {
-          console.warn("Firestore persistence failed: Multiple tabs open.");
-        } else if (err.code == 'unimplemented') {
-          console.warn("Firestore persistence is not supported in this browser.");
+    enableIndexedDbPersistence(db).catch((err) => {
+        if (err.code === 'failed-precondition') {
+            console.warn('Multiple tabs open, persistence can only be enabled in one tab at a a time.');
+        } else if (err.code === 'unimplemented') {
+            console.warn('The current browser does not support all of the features required to enable persistence');
         }
-      });
+    });
   }
 } catch (error) {
     console.error("An error occurred while enabling Firestore persistence:", error);
 }
-
-// Export ตัว messaging ออกไปให้ไฟล์อื่นใช้
-export { messaging };
+*/

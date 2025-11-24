@@ -3,53 +3,63 @@ importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-comp
 
 // 1. Config เดียวกับในไฟล์ .env ของคุณ (แต่ต้อง Hardcode ลงในนี้เพราะ Service Worker อ่าน .env ไม่ได้)
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY_FROM_ENV", // ⚠️ ก๊อปปี้จาก .env มาใส่ตรงนี้
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.firebasestorage.app",
-  messagingSenderId: "YOUR_SENDER_ID", // ⚠️ สำคัญมาก
-  appId: "YOUR_APP_ID",
+  apiKey: "AIzaSyAsayb-DEOBE0zi0qh-dPBfihClgXrX1sY", // ⚠️ ก๊อปปี้จาก .env มาใส่ตรงนี้
+  authDomain: "ttsdocumentcontrol.firebaseapp.com",
+  projectId: "ttsdocumentcontrol",
+  storageBucket: "ttsdocumentcontrol.firebasestorage.app",
+  messagingSenderId: "48440915675", // ⚠️ สำคัญมาก
+  appId: "1:48440915675:web:f11611895bfb52d4d27efe",
 };
 
-// 2. Initialize Firebase ใน Background
 firebase.initializeApp(firebaseConfig);
-
-// 3. รับข้อความแจ้งเตือน (Background Message Handler)
 const messaging = firebase.messaging();
 
 messaging.onBackgroundMessage((payload) => {
   console.log('[firebase-messaging-sw.js] Received background message ', payload);
-  /*
-  // ✅ แก้การดึงค่า: ดึงจาก payload.data แทน
-  const notificationTitle = payload.data.title; 
+  
+  // 1. ดึงค่าจาก data โดยเฉพาะ (เพราะเราเอา notification ออกแล้ว)
+  const notificationTitle = payload.data?.title || 'แจ้งเตือนใหม่';
+  const notificationBody = payload.data?.body || '';
+  const notificationUrl = payload.data?.url || '/dashboard';
+
+  // 2. Config การแสดงผล
   const notificationOptions = {
-    body: payload.data.body, // ดึงจาก data
-    icon: '/favicon.i co',
-    data: payload.data // ส่ง object data ต่อไปให้ event click
+    body: notificationBody,
+    icon: '/icons/icon-192x192.png', // ⚠️ ตรวจสอบว่ามีไฟล์นี้จริงใน folder public/icons/
+    badge: '/icons/icon-192x192.png', // Android ชอบให้มี badge (รูปเล็กๆ สีขาว)
+    data: {
+        url: notificationUrl // ส่ง url ไปใช้ตอน click
+    },
+    // เพิ่ม tag เพื่อไม่ให้ noti ซ้อนกันเยอะเกินไป (Optional)
+    // tag: 'rfa-notification', 
+    renotify: true,
+    interaction: true // บังคับให้ browser แสดงจนกว่า user จะกด (ช่วยแก้ปัญหา noti หายไว)
   };
 
-  self.registration.showNotification(notificationTitle, notificationOptions);
-*/
-  });
+  return self.registration.showNotification(notificationTitle, notificationOptions);
+});
 
-// 4. จัดการเมื่อ User กดที่ Notification
 self.addEventListener('notificationclick', function(event) {
   console.log('Notification Clicked', event);
-  event.notification.close(); // ปิด popup
+  event.notification.close();
 
-  // สั่งให้เปิด Browser ไปยัง URL ที่แนบมา
-  const urlToOpen = event.notification.data?.url || '/dashboard'; // ถ้าไม่มี url ให้ไปหน้า Dashboard
+  // ดึง URL จาก data ที่เรายัดไว้ข้างบน
+  const urlToOpen = event.notification.data?.url || '/dashboard';
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-      // ถ้าเปิด Tab ไว้อยู่แล้ว ให้ Focus ไปที่ Tab นั้น
+      // ถ้ามีหน้าต่างเปิดอยู่ ให้ focus
       for (let i = 0; i < windowClients.length; i++) {
         const client = windowClients[i];
-        if (client.url === urlToOpen && 'focus' in client) {
-          return client.focus();
+        if (client.url.includes(urlToOpen) && 'focus' in client) {
+          return client.focus().then(focusedClient => {
+              // ถ้าต้องการ refresh ข้อมูลด้วย อาจจะ postMessage ไปบอก Client ได้
+              // focusedClient.navigate(urlToOpen); 
+              return focusedClient;
+          });
         }
       }
-      // ถ้ายังไม่เปิด ให้เปิด Tab ใหม่
+      // ถ้าไม่มี ให้เปิดหน้าใหม่
       if (clients.openWindow) {
         return clients.openWindow(urlToOpen);
       }
