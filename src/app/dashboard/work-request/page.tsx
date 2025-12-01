@@ -9,7 +9,7 @@ import WorkRequestListTable from '@/components/work-request/WorkRequestListTable
 import WorkRequestDetailModal from '@/components/work-request/WorkRequestDetailModal';
 import CreateWorkRequestForm from '@/components/work-request/CreateWorkRequestForm';
 import { WorkRequest, WorkRequestStatus } from '@/types/work-request';
-import { Plus, RefreshCw, ThumbsUp, ThumbsDown, AlertTriangle, X } from 'lucide-react';
+import { Plus, RefreshCw, ThumbsUp, ThumbsDown, AlertTriangle, X, PenTool } from 'lucide-react';
 import { ROLES, WR_APPROVER_ROLES, WR_CREATOR_ROLES, WR_STATUSES, Role } from '@/lib/config/workflow';
 import { db } from '@/lib/firebase/client';
 // ✅ เพิ่ม documentId ใน import
@@ -65,7 +65,7 @@ const RejectReasonModal = ({
                         onChange={(e) => { setReason(e.target.value); setError(''); }}
                         rows={4}
                         placeholder="กรุณาระบุเหตุผล..."
-                        className={`w-full p-2 border rounded-md ${error ? 'border-red-500' : 'border-gray-300'}`}
+                        className={`w-full p-2 border rounded-md ${error ? 'border-red-500' : 'border-gray-300'} bg-white text-gray-900`}
                         disabled={isSubmitting}
                     />
                     {error && <p className="text-red-500 text-sm">{error}</p>}
@@ -331,8 +331,9 @@ function WorkRequestDashboardContent() {
             <div>
                 <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                        <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">
-                            ✍️ Work Requests
+                        <h1 className="text-2xl lg:text-3xl font-bold text-gray-900 flex items-center gap-3">
+                            <PenTool className="text-orange-600" size={32} />
+                            Work Requests
                         </h1>
                         <p className="text-gray-600 mt-1">รายการคำร้องของานทั้งหมด (Real-time)</p>
                     </div>

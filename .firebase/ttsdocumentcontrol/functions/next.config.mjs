@@ -2,29 +2,58 @@
 import withPWAInit from "@ducanh2912/next-pwa";
 var withPWA = withPWAInit({
   dest: "public",
-  // ✅✅✅ เพิ่ม 2 บรรทัดนี้ครับ ✅✅✅
   register: false,
-  // 👈 สำคัญที่สุด! ปิดการลงทะเบียนอัตโนมัติ เพื่อให้ useAuth.tsx ทำงานแทน
   skipWaiting: true,
-  // 👈 ให้ SW ตัวใหม่ทำงานทันทีที่มีการอัปเดต (ไม่ต้องรอปิดแอป)
-  // ✅✅✅ ----------------------- ✅✅✅
   cacheOnFrontEndNav: true,
   aggressiveFrontEndNavCaching: true,
   reloadOnOnline: true,
   swcMinify: true,
-  disable: false,
+  disable: process.env.NODE_ENV === "development",
   workboxOptions: {
     disableDevLogs: true
   },
-  // บรรทัดนี้ปล่อยไว้ได้ครับ แม้เราจะไม่ได้ใช้ sw.js หลัก แต่มันไม่มีผลเสีย
   importScripts: ["/firebase-messaging-sw.js"]
 });
 var nextConfig = {
+  // ✅ เพิ่ม fabric ด้วย
+  transpilePackages: ["react-pdf", "pdfjs-dist", "fabric"],
   experimental: {
     missingSuspenseWithCSRBailout: false
   },
   eslint: {
     ignoreDuringBuilds: true
+  },
+  swcMinify: false,
+  webpack: (config, { dev, isServer }) => {
+    if (!isServer) {
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        canvas: false,
+        encoding: false
+      };
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        canvas: false,
+        encoding: false,
+        fs: false,
+        path: false,
+        stream: false,
+        crypto: false
+      };
+    }
+    config.module.rules.push({
+      test: /\.node$/,
+      use: "node-loader"
+    });
+    config.ignoreWarnings = [
+      { module: /node_modules\/fabric/ },
+      { module: /node_modules\/pdfjs-dist/ },
+      { module: /node_modules\/pdf-lib/ }
+    ];
+    if (dev) {
+      config.devtool = "source-map";
+    }
+    return config;
   }
 };
 var next_config_default = withPWA(nextConfig);

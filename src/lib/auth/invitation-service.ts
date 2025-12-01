@@ -33,7 +33,9 @@ export class InvitationService {
         createdByAdmin: true,
       });
 
-      const invitationUrl = `${process.env.NEXT_PUBLIC_APP_URL}/accept-invitation?token=${token}`;
+      const domain = 'https://ttsdocumentcontrol.web.app'; 
+      
+      const invitationUrl = `${domain}/accept-invitation?token=${token}`;
       
       return {
         success: true,

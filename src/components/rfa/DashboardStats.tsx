@@ -1,9 +1,9 @@
-// src/components/rfa/DashboardStats.tsx (แก้ไขใหม่ทั้งหมด)
+// src/components/rfa/DashboardStats.tsx
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { STATUSES, STATUS_LABELS, STATUS_COLORS } from '@/lib/config/workflow';
+import { STATUS_LABELS } from '@/lib/config/workflow'; 
 import { RFADocument } from '@/types/rfa';
 
 interface Category {
@@ -23,51 +23,52 @@ interface DashboardStatsProps {
   categories: Category[];
 }
 
-// --- Helper Components (ไม่มีการเปลี่ยนแปลง) ---
 const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
       const data = payload[0];
       return (
-        <div className="p-3 bg-white/90 backdrop-blur-sm shadow-lg rounded-lg border border-gray-200">
+        <div className="p-3 bg-white/90 backdrop-blur-sm shadow-lg rounded-lg border border-gray-200 z-50">
           <div className="flex items-center">
             <div style={{ width: 12, height: 12, backgroundColor: data.payload.color, marginRight: 8, borderRadius: '50%' }}></div>
-            <p className="text-sm text-gray-700">{`${data.name}: ${data.value}`}</p>
+            <p className="text-sm text-gray-700 font-medium">{`${data.name}: ${data.value}`}</p>
           </div>
         </div>
       );
     }
     return null;
 };
-const CATEGORY_COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF', '#FF6363', '#BC5090'];
-const getColorForString = (str: string): string => {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      hash = str.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    const index = Math.abs(hash % CATEGORY_COLORS.length);
-    return CATEGORY_COLORS[index];
+
+const CATEGORY_COLORS = [
+  '#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF', 
+  '#FF6363', '#BC5090', '#36A2EB', '#FFCE56', '#4BC0C0', 
+  '#9966FF', '#FF9F40', '#8AC926', '#1982C4', '#6A4C93', 
+  '#F15BB5', '#FEE440', '#00B4D8', '#90BE6D', '#F94144'
+];
+
+// ✅ ปรับชุดสี: แยก REJECTED ออกมาให้ชัดเจน
+const RESPONSIBLE_COLORS: { [key: string]: string } = {
+    'SITE': '#3B82F6',      // Blue (Site Review)
+    'CM': '#8B5CF6',        // Violet (CM Approval)
+    'BIM': '#F59E0B',       // Amber/Orange (Fixing)
+    'APPROVED': '#10B981',  // Emerald (Done)
+    'REJECTED': '#EF4444',  // Red (Rejected) <-- เพิ่มสีแดงสำหรับไม่อนุมัติ
 };
 
-
 const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFilter, activeFilters, categories }) => {
-  const [isMobile, setIsMobile] = useState(false);
+  const [isSmallScreen, setIsSmallScreen] = useState(false);
 
   useEffect(() => {
-    const checkIsMobile = () => setIsMobile(window.innerWidth < 768);
-    checkIsMobile();
-    window.addEventListener('resize', checkIsMobile);
-    return () => window.removeEventListener('resize', checkIsMobile);
+    const checkScreenSize = () => setIsSmallScreen(window.innerWidth < 1280);
+    checkScreenSize();
+    window.addEventListener('resize', checkScreenSize);
+    return () => window.removeEventListener('resize', checkScreenSize);
   }, []);
 
-  // --- 👇 [แก้ไข] Logic การนับข้อมูลสถานะใหม่ทั้งหมด ---
   const statsByStatus = useMemo(() => {
     const statusCounts: { [key: string]: number } = {};
     const categoryCounts: { [key: string]: number } = {};
-    
     for (const doc of allDocuments) {
-      // นับทุกสถานะแยกกัน
       statusCounts[doc.status] = (statusCounts[doc.status] || 0) + 1;
-      
       const categoryId = doc.category?.id || 'N/A';
       if (categoryId !== 'N/A') {
           categoryCounts[categoryId] = (categoryCounts[categoryId] || 0) + 1;
@@ -76,47 +77,49 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
     return { statusCounts, categoryCounts };
   }, [allDocuments]);
 
-  // --- 👇 [แก้ไข] Logic การสร้างข้อมูลสำหรับ Chart สถานะใหม่ทั้งหมด ---
   const responsiblePartyData = useMemo(() => {
     if (!statsByStatus) return [];
     
-    // แปลงข้อมูลที่นับได้ ให้เป็นรูปแบบที่ Chart ใช้งานได้
+    // ✅ Mapping ใหม่: แยก REJECTED ไปหากลุ่มสีแดง
+    const groupMapping: { [key: string]: string } = {
+        'PENDING_REVIEW': 'SITE',
+        'PENDING_FINAL_APPROVAL': 'SITE',
+        'PENDING_CM_APPROVAL': 'CM',
+        'REVISION_REQUIRED': 'BIM',
+        'APPROVED_REVISION_REQUIRED': 'BIM',
+        'APPROVED': 'APPROVED',
+        'APPROVED_WITH_COMMENTS': 'APPROVED',
+        'REJECTED': 'REJECTED' // <-- แยกกลุ่มออกมา
+    };
+
     return Object.entries(statsByStatus.statusCounts)
       .map(([statusKey, value]) => {
-        // ดึงชื่อและสีมาจาก workflow.ts
         const label = STATUS_LABELS[statusKey];
-        const color = STATUS_COLORS[statusKey];
-        
-        if (!label || !color) return null; // ไม่แสดงสถานะที่ไม่มีการตั้งค่า
+        const group = groupMapping[statusKey] || 'SITE';
+        const color = RESPONSIBLE_COLORS[group] || '#999';
 
-        return {
-          name: label,
-          value: value,
-          statusKey: statusKey, // Key ที่จะใช้ filter คือ key ของสถานะจริงๆ
-          color: color,
-        };
+        if (!label) return null;
+        return { name: label, value: value, statusKey: statusKey, color: color };
       })
       .filter((item): item is NonNullable<typeof item> => item !== null && item.value > 0);
   }, [statsByStatus]);
 
-
-  // --- Logic ส่วน Category ไม่มีการเปลี่ยนแปลง ---
   const categoryData = useMemo(() => {
     if (!statsByStatus) return [];
-    return Object.entries(statsByStatus.categoryCounts)
-      .map(([categoryId, value]) => {
+    const entries = Object.entries(statsByStatus.categoryCounts).sort((a, b) => b[1] - a[1]); 
+
+    return entries.map(([categoryId, value], index) => {
         const categoryDetails = categories.find(c => c.id === categoryId);
         return {
           id: categoryId,
           name: categoryDetails?.categoryCode || categoryId,
           value: value as number,
-          color: getColorForString(categoryDetails?.categoryCode || categoryId)
+          color: CATEGORY_COLORS[index % CATEGORY_COLORS.length] 
         };
       })
       .filter(item => item.value > 0);
   }, [statsByStatus, categories]);
 
-  // --- Logic ส่วนที่เหลือไม่มีการเปลี่ยนแปลง ---
   const { displayData: displayResponsibleData, total: displayTotalResponsible } = useMemo(() => {
     const total = responsiblePartyData.reduce((sum, item) => sum + item.value, 0);
     return { displayData: responsiblePartyData, total };
@@ -127,7 +130,7 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
     return { displayData: categoryData, total };
   }, [categoryData]);
 
-  if (allDocuments.length === 0) { return <div className="text-center p-8 text-gray-500">ไม่มีข้อมูลสำหรับแสดงผล</div>; }
+  if (allDocuments.length === 0) { return <div className="text-center p-8 text-gray-500 bg-white rounded-lg shadow border border-gray-100">ไม่มีข้อมูลเอกสาร</div>; }
 
   const handleResponsibleClick = (data: any) => {
       const statusKey = data.payload?.statusKey || data.statusKey;
@@ -141,31 +144,33 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
     onChartFilter('categoryId', activeFilters.categoryId === categoryId ? 'ALL' : categoryId);
   };
   
-  const pieCx = isMobile ? '50%' : '40%';
-  const textLeftPosition = isMobile ? '50%' : '30%';
-  const textTopPosition = isMobile ? '45%' : '50%';
-  
+  const innerRadius = isSmallScreen ? 80 : 100; 
+  const outerRadius = isSmallScreen ? 110 : 135; 
+
   return (
     <div className="relative grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+      {/* Chart 1: Responsible Party */}
       <div>
-          <div className="bg-white p-6 rounded-lg shadow">
+          <div className="bg-white p-6 rounded-lg shadow h-full border border-gray-100">
             <h3 className="text-lg font-semibold text-gray-800 mb-4 text-center">สถานะตามผู้รับผิดชอบ</h3>
-            <div className="relative w-full h-[300px]">
+            <div className="relative w-full h-[380px]">
               <ResponsiveContainer>
                 <PieChart>
                   <Pie
                     data={displayResponsibleData}
                     isAnimationActive={false}
-                    cx={pieCx} cy="50%"
-                    innerRadius={isMobile ? 80 : 115} outerRadius={isMobile ? 110 : 150}
+                    cx="50%" cy="50%" 
+                    innerRadius={innerRadius} outerRadius={outerRadius}
                     dataKey="value" nameKey="name"
                     onClick={handleResponsibleClick}
                     className="cursor-pointer"
+                    paddingAngle={2}
                   >
                     {displayResponsibleData.map((entry) => (
                       <Cell 
                         key={`cell-${entry.name}`} 
                         fill={entry.color} 
+                        stroke="none"
                         style={{ opacity: activeFilters.status === 'ALL' || activeFilters.status === entry.statusKey ? 1 : 0.3 }}
                       />
                     ))}
@@ -174,45 +179,47 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
                   <Legend 
                     iconType="circle"
                     onClick={handleResponsibleClick}
-                    layout={isMobile ? 'horizontal' : 'vertical'}
-                    verticalAlign={isMobile ? 'bottom' : 'middle'}
-                    align={isMobile ? 'center' : 'right'}
-                    wrapperStyle={isMobile ? { paddingTop: '20px' } : {}}
-                    width={isMobile ? undefined : 150}
+                    layout="horizontal"
+                    verticalAlign="bottom"
+                    align="center"
+                    wrapperStyle={{ paddingTop: '20px', fontSize: '13px' }}
                     className="cursor-pointer"
                   />
                 </PieChart>
               </ResponsiveContainer>
               <div 
-                className="absolute -translate-y-1/2 -translate-x-1/2 flex flex-col items-center justify-center pointer-events-none"
-                style={{ top: textTopPosition, left: textLeftPosition }}
+                className="absolute flex flex-col items-center justify-center pointer-events-none"
+                style={{ top: '50%', left: '50%', transform: 'translate(-50%, -60%)' }}
               >
-                <span className="text-base text-gray-500">จำนวนเอกสาร</span>
-                <span className="text-4xl font-bold text-gray-800 mt-1">{displayTotalResponsible}</span>
+                <span className="text-xs text-gray-400 font-medium uppercase tracking-wider">TOTAL</span>
+                <span className="text-3xl font-bold text-gray-800">{displayTotalResponsible}</span>
               </div>
             </div>
           </div>
       </div>
       
+      {/* Chart 2: Category */}
       <div>
-          <div className="bg-white p-6 rounded-lg shadow">
+          <div className="bg-white p-6 rounded-lg shadow h-full border border-gray-100">
             <h3 className="text-lg font-semibold text-gray-800 mb-4 text-center">สถานะตามหมวดหมู่</h3>
-            <div className="relative w-full h-[300px]">
+            <div className="relative w-full h-[380px]">
               <ResponsiveContainer>
                 <PieChart>
                   <Pie
                     data={displayCategoryData}
                     isAnimationActive={false}
-                    cx={pieCx} cy="50%"
-                    innerRadius={isMobile ? 80 : 115} outerRadius={isMobile ? 110 : 150}
+                    cx="50%" cy="50%"
+                    innerRadius={innerRadius} outerRadius={outerRadius}
                     dataKey="value" nameKey="name"
                     onClick={handleCategoryClick}
                     className="cursor-pointer"
+                    paddingAngle={2}
                   >
                     {displayCategoryData.map((entry) => (
                       <Cell 
                         key={`cell-${entry.name}`}
                         fill={entry.color}
+                        stroke="none"
                         style={{ opacity: activeFilters.categoryId === 'ALL' || activeFilters.categoryId === entry.id ? 1 : 0.3 }}
                       />
                     ))}
@@ -221,21 +228,20 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
                   <Legend 
                     iconType="circle"
                     onClick={handleCategoryClick}
-                    layout={isMobile ? 'horizontal' : 'vertical'}
-                    verticalAlign={isMobile ? 'bottom' : 'middle'}
-                    align={isMobile ? 'center' : 'right'}
-                    wrapperStyle={isMobile ? { paddingTop: '20px' } : {}}
-                    width={isMobile ? undefined : 150}
+                    layout="horizontal"
+                    verticalAlign="bottom"
+                    align="center"
+                    wrapperStyle={{ paddingTop: '20px', fontSize: '13px' }}
                     className="cursor-pointer"
                   />
                 </PieChart>
               </ResponsiveContainer>
               <div 
-                className="absolute -translate-y-1/2 -translate-x-1/2 flex flex-col items-center justify-center pointer-events-none"
-                style={{ top: textTopPosition, left: textLeftPosition }}
+                className="absolute flex flex-col items-center justify-center pointer-events-none"
+                style={{ top: '50%', left: '50%', transform: 'translate(-50%, -60%)' }}
               >
-                <span className="text-base text-gray-500">จำนวนเอกสาร</span>
-                <span className="text-4xl font-bold text-gray-800 mt-1">{displayTotalCategory}</span>
+                <span className="text-xs text-gray-400 font-medium uppercase tracking-wider">TOTAL</span>
+                <span className="text-3xl font-bold text-gray-800">{displayTotalCategory}</span>
               </div>
             </div>
           </div>

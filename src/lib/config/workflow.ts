@@ -89,18 +89,27 @@ export const STATUS_LABELS: { [key: string]: string } = {
 };
 
 export const STATUS_COLORS: { [key: string]: string } = {
-  [STATUSES.PENDING_REVIEW]: '#0088FE',
-  [STATUSES.PENDING_CM_APPROVAL]: '#00C49F',
-  [STATUSES.REVISION_REQUIRED]: '#FFBB28',
-  [STATUSES.APPROVED]: '#28A745',
-  [STATUSES.REJECTED]: '#DC3545',
-  [STATUSES.APPROVED_WITH_COMMENTS]: '#2f3e3aff',
-  [STATUSES.APPROVED_REVISION_REQUIRED]: '#FD7E14',
-  [WR_STATUSES.DRAFT]: '#6c757d',
-  [WR_STATUSES.REJECTED_BY_PM]: '#DC3545',
-  [WR_STATUSES.PENDING_BIM]: '#0088FE',
-  [WR_STATUSES.IN_PROGRESS]: '#FFBB28',
-  [WR_STATUSES.PENDING_ACCEPTANCE]: '#AF19FF',
-  [WR_STATUSES.REVISION_REQUESTED]: '#FD7E14',
-  [WR_STATUSES.COMPLETED]: '#28A745',
+  [STATUSES.PENDING_REVIEW]: '#3B82F6', // Blue-500 (รอตรวจสอบ - สีฟ้า)
+  
+  // 🟢 แก้ไข: เปลี่ยนจาก Teal (#00C49F) เป็น Violet (#8B5CF6) เพื่อไม่ให้กลืนกับสีเขียว
+  [STATUSES.PENDING_CM_APPROVAL]: '#8B5CF6', // Violet-500 (รออนุมัติ - สีม่วง)
+  
+  [STATUSES.REVISION_REQUIRED]: '#F59E0B', // Amber-500 (แก้ไข - สีเหลืองส้ม)
+  [STATUSES.APPROVED]: '#22C55E', // Green-500 (อนุมัติ - สีเขียวสด)
+  [STATUSES.REJECTED]: '#EF4444', // Red-500 (ไม่อนุมัติ - สีแดง)
+  
+  // สีเขียวเข้ม สำหรับอนุมัติแบบมีคอมเมนต์
+  [STATUSES.APPROVED_WITH_COMMENTS]: '#15803d', // Green-700
+  
+  [STATUSES.APPROVED_REVISION_REQUIRED]: '#F97316', // Orange-500
+  [STATUSES.PENDING_FINAL_APPROVAL]: '#6366F1', // Indigo-500
+  
+  // Work Request Colors (คงเดิมหรือปรับให้เข้าชุดกัน)
+  [WR_STATUSES.DRAFT]: '#6B7280',
+  [WR_STATUSES.REJECTED_BY_PM]: '#EF4444',
+  [WR_STATUSES.PENDING_BIM]: '#3B82F6',
+  [WR_STATUSES.IN_PROGRESS]: '#F59E0B',
+  [WR_STATUSES.PENDING_ACCEPTANCE]: '#A855F7',
+  [WR_STATUSES.REVISION_REQUESTED]: '#F97316',
+  [WR_STATUSES.COMPLETED]: '#22C55E',
 };

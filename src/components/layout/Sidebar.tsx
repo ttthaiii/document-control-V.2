@@ -7,7 +7,8 @@ import { useAuth } from '@/lib/auth/useAuth'
 import { useLoading } from '@/lib/context/LoadingContext'
 import { 
   FileText, BarChart3, ChevronDown, 
-  ChevronRight, LogOut, X, Users, Wrench, UserCog
+  ChevronRight, LogOut, X, Users, Wrench, UserCog,HardHat, ClipboardList, BrickWall,
+  BrickWallIcon
 } from 'lucide-react'
 import { Role } from '@/lib/config/workflow'
 import { db } from '@/lib/firebase/client'
@@ -197,19 +198,19 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
                 <div className="ml-6 space-y-1 border-l-2 border-orange-200 pl-4">
                   {canViewShop && (
                     <Link href="/dashboard/rfa?type=RFA-SHOP" onClick={showLoader} className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors duration-200 ${(pathname === '/dashboard/rfa' && searchParams.get('type') === 'RFA-SHOP') ? 'bg-blue-100 text-blue-900 font-medium' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'}`}>
-                        <div className="w-2 h-2 bg-blue-500 rounded-full" /><span>🏗️ Shop Drawing</span>
+                        <div className="w-2 h-2 bg-blue-500 rounded-full" /><HardHat size={18} className="text-blue-600" /><span>Shop Drawing</span>
                     </Link>
                   )}
 
                   {canViewGen && (
                     <Link href="/dashboard/rfa?type=RFA-GEN" onClick={showLoader} className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors duration-200 ${(pathname === '/dashboard/rfa' && searchParams.get('type') === 'RFA-GEN') ? 'bg-green-100 text-green-900 font-medium' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'}`}>
-                        <div className="w-2 h-2 bg-green-500 rounded-full" /><span>📋 General</span>
+                        <div className="w-2 h-2 bg-green-500 rounded-full" /><ClipboardList size={18} className="text-green-600" /><span>General</span>
                     </Link>
                   )}
 
                   {canViewMat && (
                     <Link href="/dashboard/rfa?type=RFA-MAT" onClick={showLoader} className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors duration-200 ${(pathname === '/dashboard/rfa' && searchParams.get('type') === 'RFA-MAT') ? 'bg-orange-100 text-orange-900 font-medium' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'}`}>
-                        <div className="w-2 h-2 bg-orange-500 rounded-full" /><span>🧱 Material</span>
+                        <div className="w-2 h-2 bg-orange-500 rounded-full" /><BrickWallIcon size={18} className="text-orange-600" /><span>Material</span>
                     </Link>
                   )}
                 </div>

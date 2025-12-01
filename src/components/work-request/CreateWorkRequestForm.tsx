@@ -27,6 +27,8 @@ interface UploadedFile {
   error?: string;
 }
 
+const inputClassName = "w-full h-11 px-3 border rounded-lg bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all";
+
 export default function CreateWorkRequestForm({ onClose, userProp }: { onClose: () => void; userProp?: AppUser; }) {
   const { firebaseUser } = useAuth();
   const { showNotification } = useNotification();
@@ -196,7 +198,7 @@ export default function CreateWorkRequestForm({ onClose, userProp }: { onClose: 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">โครงการ <span className="text-red-500">*</span></label>
-                <select value={selectedSiteId} onChange={(e) => setSelectedSiteId(e.target.value)} className="w-full p-3 border rounded-lg" disabled={loadingSites}>
+                <select value={selectedSiteId} onChange={(e) => setSelectedSiteId(e.target.value)} className={inputClassName} disabled={loadingSites}>
                     <option value="">{loadingSites ? 'กำลังโหลด...' : '-- เลือกโครงการ --'}</option>
                     {sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
                 </select>
@@ -204,7 +206,7 @@ export default function CreateWorkRequestForm({ onClose, userProp }: { onClose: 
             </div>
             <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">วันที่กำหนดส่ง (Due Date) <span className="text-red-500">*</span></label>
-                <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full p-3 border rounded-lg" />
+                <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className={inputClassName} />
                 {errors.dueDate && <p className="text-red-600 text-sm mt-1">{errors.dueDate}</p>}
             </div>
         </div>
@@ -215,14 +217,14 @@ export default function CreateWorkRequestForm({ onClose, userProp }: { onClose: 
             <label className="block text-sm font-medium text-gray-700 mb-1">
               หัวข้องาน <span className="text-red-500">*</span>
             </label>
-            <input type="text" value={taskName} onChange={(e) => setTaskName(e.target.value)} placeholder="เช่น ขอแก้ไขโมเดลโครงสร้างอาคาร A" className="w-full p-3 border rounded-lg" />
+            <input type="text" value={taskName} onChange={(e) => setTaskName(e.target.value)} placeholder="เช่น ขอแก้ไขโมเดลโครงสร้างอาคาร A" className={inputClassName} />
             {errors.taskName && <p className="text-red-600 text-sm mt-1">{errors.taskName}</p>}
         </div>
         {/* --- 👆 [สิ้นสุดการแก้ไข] --- */}
 
         <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">รายละเอียด <span className="text-gray-400 font-normal">(Optional)</span></label>
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} placeholder="อธิบายรายละเอียดเพิ่มเติม (ถ้ามี)..." className="w-full p-3 border rounded-lg" />
+            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} placeholder="อธิบายรายละเอียดเพิ่มเติม (ถ้ามี)..." className="w-full p-3 border rounded-lg bg-white text-gray-900" />
         </div>
         <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">แนบไฟล์ (ถ้ามี)</label>
