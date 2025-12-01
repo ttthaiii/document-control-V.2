@@ -227,12 +227,12 @@ export function InviteUserForm() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">รหัสพนักงาน <span className="text-red-500">*</span></label>
-                    <input type="text" {...register('employeeId', { required: 'จำเป็น' })} className="w-full px-3 py-2 border rounded-md" placeholder="EMP-001" />
+                    <input type="text" {...register('employeeId', { required: 'จำเป็น' })} className="w-full px-3 py-2 border rounded-md bg-white text-gray-900" placeholder="EMP-001" />
                     {errors.employeeId && <span className="text-xs text-red-500">กรุณากรอกข้อมูล</span>}
                 </div>
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อ-นามสกุล <span className="text-red-500">*</span></label>
-                    <input type="text" {...register('name', { required: 'จำเป็น' })} className="w-full px-3 py-2 border rounded-md" placeholder="สมชาย ใจดี" />
+                    <input type="text" {...register('name', { required: 'จำเป็น' })} className="w-full px-3 py-2 border rounded-md bg-white text-gray-900" placeholder="สมชาย ใจดี" />
                     {errors.name && <span className="text-xs text-red-500">กรุณากรอกข้อมูล</span>}
                 </div>
             </div>
@@ -240,12 +240,12 @@ export function InviteUserForm() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">อีเมล <span className="text-red-500">*</span></label>
-                    <input type="email" {...register('email', { required: 'จำเป็น' })} className="w-full px-3 py-2 border rounded-md" placeholder="user@example.com" />
+                    <input type="email" {...register('email', { required: 'จำเป็น' })} className="w-full px-3 py-2 border rounded-md bg-white text-gray-900" placeholder="user@example.com" />
                     {errors.email && <span className="text-xs text-red-500">กรุณากรอกข้อมูล</span>}
                 </div>
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">ตำแหน่ง <span className="text-red-500">*</span></label>
-                    <select {...register('role', { required: 'จำเป็น' })} className="w-full p-2 border rounded-md">
+                    <select {...register('role', { required: 'จำเป็น' })} className="w-full p-2 border rounded-md bg-white text-gray-900">
                         <option value="">-- เลือก --</option>
                         {Object.values(ROLES).map((role) => (<option key={role} value={role}>{role}</option>))}
                     </select>

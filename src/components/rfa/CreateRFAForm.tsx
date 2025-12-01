@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { FileText, Upload, X, Check, AlertTriangle, Info, Paperclip,Loader2 } from 'lucide-react'
+import { FileText, Upload, X, Check, AlertTriangle, Info, Paperclip,Loader2,HardHat, ClipboardList, Boxes } from 'lucide-react'
 import { useGoogleSheets } from '@/lib/hooks/useGoogleSheets'
 import { useAuth } from '@/lib/auth/useAuth'
 import Spinner from '@/components/shared/Spinner'
@@ -23,13 +23,38 @@ interface TaskData { taskCategory: string; taskName: string; projectName: string
 interface Site { id: string; name: string; sheetId?: string; sheetName?: string; }
 interface User { id: string; email: string; role: Role; sites: string[]; }
 const INITIAL_FORM_DATA: RFAFormData = { rfaType: '', categoryId: '', documentNumber: '', title: '', description: '', revisionNumber: '00', uploadedFiles: [], selectedProject: '', selectedCategory: '', selectedTask: null }
-type RFAConfig = { title: string; subtitle: string; icon: string; description: string; workflow: string; allowedRoles: Role[]; color: string; };
+type RFAConfig = { title: string; subtitle: string; icon: React.ReactNode; description: string; workflow: string; allowedRoles: Role[]; color: string; };
 const RFA_TYPE_CONFIG: Record<'RFA-SHOP' | 'RFA-GEN' | 'RFA-MAT', RFAConfig> = {
-  'RFA-SHOP': { title: 'RFA-SHOP', subtitle: 'Shop Drawing Approval', icon: '🏗️', description: 'สำหรับการขออนุมัติ Shop Drawing', workflow: 'ผู้สร้าง → Site Admin → CM', allowedRoles: [ROLES.BIM, ROLES.ME, ROLES.SN, ROLES.SITE_ADMIN, ROLES.ADMIN], color: 'blue' },
-  'RFA-GEN': { title: 'RFA-GEN', subtitle: 'General Submission', icon: '📋', description: 'สำหรับการส่งเอกสารทั่วไป', workflow: 'ผู้สร้าง → CM', allowedRoles: [ROLES.BIM, ROLES.SITE_ADMIN, ROLES.ADMIN, ROLES.ME, ROLES.SN], color: 'green' },
-  'RFA-MAT': { title: 'RFA-MAT', subtitle: 'Material Approval', icon: '🧱', description: 'สำหรับการขออนุมัติวัสดุ', workflow: 'Site Admin → CM', allowedRoles: [ROLES.SITE_ADMIN, ROLES.ADMIN], color: 'orange' }
+  'RFA-SHOP': { 
+    title: 'RFA-SHOP', 
+    subtitle: 'Shop Drawing Approval', 
+    icon: <HardHat size={40} className="text-blue-600" />, // แทน 🏗️
+    description: 'สำหรับการขออนุมัติ Shop Drawing', 
+    workflow: 'ผู้สร้าง → Site Admin → CM', 
+    allowedRoles: [ROLES.BIM, ROLES.ME, ROLES.SN, ROLES.SITE_ADMIN, ROLES.ADMIN], 
+    color: 'blue' 
+  },
+  'RFA-GEN': { 
+    title: 'RFA-GEN', 
+    subtitle: 'General Submission', 
+    icon: <ClipboardList size={40} className="text-green-600" />, // แทน 📋
+    description: 'สำหรับการส่งเอกสารทั่วไป', 
+    workflow: 'ผู้สร้าง → CM', 
+    allowedRoles: [ROLES.BIM, ROLES.SITE_ADMIN, ROLES.ADMIN, ROLES.ME, ROLES.SN], 
+    color: 'green' 
+  },
+  'RFA-MAT': { 
+    title: 'RFA-MAT', 
+    subtitle: 'Material Approval', 
+    icon: <Boxes size={40} className="text-orange-600" />, // แทน 🧱
+    description: 'สำหรับการขออนุมัติวัสดุ', 
+    workflow: 'Site Admin → CM', 
+    allowedRoles: [ROLES.SITE_ADMIN, ROLES.ADMIN], 
+    color: 'orange' 
+  }
 };
 
+const inputClassName = "w-full h-11 px-3 border rounded-lg bg-white text-gray-900 font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all";
 
 export default function CreateRFAForm({ 
   onClose, 
@@ -387,12 +412,17 @@ export default function CreateRFAForm({
                     {Object.entries(RFA_TYPE_CONFIG).map(([type, config]) => {
                         const isAllowed = userProp ? config.allowedRoles.includes(userProp.role) : false;
                         return (
-                        <div key={type} onClick={() => isAllowed && updateFormData({ rfaType: type as any })}
-                            className={`p-6 border-2 rounded-lg text-center cursor-pointer transition-all duration-200 ${formData.rfaType === type ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200' : isAllowed ? 'border-gray-200 hover:border-gray-400' : 'border-gray-100 bg-gray-50 opacity-60 cursor-not-allowed'}`}>
-                            <div className="text-4xl mb-3">{config.icon}</div>
-                            <h4 className="font-semibold text-gray-800">{config.title}</h4>
-                            <p className="text-sm text-gray-500 mt-1">{config.description}</p>
-                        </div>
+                          <div key={type} onClick={() => isAllowed && updateFormData({ rfaType: type as any })}
+                              className={`p-6 border-2 rounded-lg text-center cursor-pointer transition-all duration-200 ...`}>
+
+                              {/* 🟢 แก้ไขบรรทัดนี้: ลบ className text-4xl ออก แล้วใส่ div ครอบเพื่อจัดกึ่งกลาง */}
+                              <div className="mb-3 flex justify-center">
+                                  {config.icon}
+                              </div>
+
+                              <h4 className="font-semibold text-gray-800">{config.title}</h4>
+                              <p className="text-sm text-gray-500 mt-1">{config.description}</p>
+                          </div>
                         )
                     })}
                 </div>
@@ -408,8 +438,12 @@ export default function CreateRFAForm({
             <div className="space-y-6 max-w-3xl">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">โครงการ <span className="text-red-500">*</span></label>
-                        <select value={selectedSite} onChange={(e) => handleSiteChange(e.target.value)} className="w-full p-3 border rounded-lg bg-gray-50">
+                        <label className="block text-sm font-medium text-gray-800 mb-2">โครงการ <span className="text-red-500">*</span></label>
+                        <select 
+                            value={selectedSite} 
+                            onChange={(e) => handleSiteChange(e.target.value)} 
+                            className={inputClassName} // ✅ ใช้ class ใหม่
+                        >
                             <option value="">-- เลือกโครงการ --</option>
                             {sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
                         </select>
@@ -418,15 +452,29 @@ export default function CreateRFAForm({
                     
                     {isManualFlow ? (
                         <div>
-                            <label htmlFor="category-manual-input" className="block text-sm font-medium text-gray-700 mb-2">หมวดงาน <span className="text-red-500">*</span></label>
-                            <input id="category-manual-input" type="text" list="category-list" value={formData.categoryId} onChange={(e) => updateFormData({ categoryId: e.target.value })} placeholder="พิมพ์หรือเลือกหมวดงาน" className="w-full p-3 border rounded-lg" disabled={!selectedSite} />
+                            <label htmlFor="category-manual-input" className="block text-sm font-medium text-gray-800 mb-2">หมวดงาน <span className="text-red-500">*</span></label>
+                            <input 
+                                id="category-manual-input" 
+                                type="text" 
+                                list="category-list" 
+                                value={formData.categoryId} 
+                                onChange={(e) => updateFormData({ categoryId: e.target.value })} 
+                                placeholder="พิมพ์หรือเลือกหมวดงาน" 
+                                className={inputClassName} // ✅ ใช้ class ใหม่
+                                disabled={!selectedSite} 
+                            />
                             <datalist id="category-list">{siteCategories.map(cat => (<option key={cat.id} value={cat.categoryCode} />))}</datalist>
                             {errors.categoryId && <p className="text-red-600 text-sm mt-1">{errors.categoryId}</p>}
                         </div>
                     ) : (
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">หมวดงาน {sheetsLoading && <Spinner className="w-4 h-4 ml-2" />} <span className="text-red-500">*</span></label>
-                            <select value={formData.selectedCategory} onChange={(e) => handleCategoryChange(e.target.value)} className="w-full p-3 border rounded-lg disabled:bg-gray-100 bg-gray-50" disabled={!selectedSite || sheetsLoading}>
+                            <label className="block text-sm font-medium text-gray-800 mb-2 flex items-center">หมวดงาน {sheetsLoading && <Spinner className="w-4 h-4 ml-2" />} <span className="text-red-500">*</span></label>
+                            <select 
+                                value={formData.selectedCategory} 
+                                onChange={(e) => handleCategoryChange(e.target.value)} 
+                                className={inputClassName} // ✅ ใช้ class ใหม่
+                                disabled={!selectedSite || sheetsLoading}
+                            >
                                 <option value="">{sheetsLoading ? 'กำลังโหลด...' : '-- เลือกหมวดงาน --'}</option>
                                 {sheetCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
                             </select>
@@ -437,8 +485,15 @@ export default function CreateRFAForm({
 
                 {!isManualFlow && (
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">ค้นหางาน <span className="text-red-500">*</span></label>
-                        <input type="text" placeholder="ค้นหาชื่องานจาก BIM Tracking..." value={taskSearchQuery} onChange={(e) => setTaskSearchQuery(e.target.value)} className="w-full p-3 border rounded-lg" disabled={!formData.selectedCategory || sheetsLoading} />
+                        <label className="block text-sm font-medium text-gray-800 mb-2">ค้นหางาน <span className="text-red-500">*</span></label>
+                        <input 
+                            type="text" 
+                            placeholder="ค้นหาชื่องานจาก BIM Tracking..." 
+                            value={taskSearchQuery} 
+                            onChange={(e) => setTaskSearchQuery(e.target.value)} 
+                            className={inputClassName} // ✅ ใช้ class ใหม่
+                            disabled={!formData.selectedCategory || sheetsLoading} 
+                        />
                         <div className="mt-2 max-h-48 overflow-y-auto border rounded-lg bg-white">
                             {filteredTasks.map(task => (<div key={task.taskUid || task.taskName} onClick={() => handleTaskSelect(task)} className={`p-3 text-sm cursor-pointer hover:bg-gray-100 ${formData.selectedTask?.taskName === task.taskName ? 'bg-blue-50 font-semibold' : ''}`}>{task.taskName}</div>))}
                         </div>
@@ -447,7 +502,7 @@ export default function CreateRFAForm({
                 )}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div className="sm:col-span-2">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">เลขที่เอกสาร</label>
+                        <label className="block text-sm font-medium text-gray-800 mb-2">เลขที่เอกสาร</label>
                         <div className="relative">
                             <input 
                               type="text" 
@@ -456,7 +511,7 @@ export default function CreateRFAForm({
                                 updateFormData({ documentNumber: e.target.value });
                                 setIsDocNumAvailable(null);
                               }}
-                              className={`w-full p-3 border rounded-lg pr-10 ${isDocNumAvailable === false ? 'border-red-500' : ''}`} 
+                              className={`${inputClassName} pr-10 ${isDocNumAvailable === false ? 'border-red-500' : ''}`}
                             />
                             <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
                               {isCheckingDocNum && <Loader2 className="h-5 w-5 text-gray-400 animate-spin" />}
@@ -470,19 +525,19 @@ export default function CreateRFAForm({
                         )}
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Rev. No.</label>
-                        <input type="text" value={formData.revisionNumber} onChange={(e) => updateFormData({ revisionNumber: e.target.value })} className="w-full p-3 border rounded-lg" />
+                        <label className="block text-sm font-medium text-gray-800 mb-2">Rev. No.</label>
+                        <input type="text" value={formData.revisionNumber} onChange={(e) => updateFormData({ revisionNumber: e.target.value })} className={inputClassName} />
                         {errors.revisionNumber && <p className="text-red-600 text-sm mt-1">{errors.revisionNumber}</p>}
                     </div>
                 </div>
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">หัวข้อเอกสาร <span className="text-red-500">*</span></label>
-                    <input type="text" value={formData.title} onChange={(e) => updateFormData({ title: e.target.value })} className="w-full p-3 border rounded-lg" />
+                    <label className="block text-sm font-medium text-gray-800 mb-2">หัวข้อเอกสาร <span className="text-red-500">*</span></label>
+                    <input type="text" value={formData.title} onChange={(e) => updateFormData({ title: e.target.value })} className={inputClassName} />
                     {errors.title && <p className="text-red-600 text-sm mt-1">{errors.title}</p>}
                 </div>
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">รายละเอียด</label>
-                    <textarea value={formData.description} onChange={(e) => updateFormData({ description: e.target.value })} rows={3} className="w-full p-3 border rounded-lg" />
+                    <label className="block text-sm font-medium text-gray-800 mb-2">รายละเอียด</label>
+                    <textarea value={formData.description} onChange={(e) => updateFormData({ description: e.target.value })} rows={3} className="w-full p-3 border rounded-lg bg-white text-gray-900" />
                 </div>
             </div>
         </section>
@@ -553,18 +608,20 @@ export default function CreateRFAForm({
                     <button onClick={() => setIsConfirmationModalOpen(false)} className="text-gray-400 hover:text-gray-600"> <X size={24} /> </button>
                 </div>
                 <div className="p-6 overflow-y-auto space-y-4 text-sm">
-                    <h4 className="text-base font-semibold text-gray-700">กรุณาตรวจสอบข้อมูลก่อนสร้างเอกสาร</h4>
+                    <h4 className="text-base font-semibold text-gray-800">กรุณาตรวจสอบข้อมูลก่อนสร้างเอกสาร</h4>
                     <div className="p-4 bg-gray-50 rounded-lg border space-y-2">
-                        <p><strong className="font-medium text-gray-500 w-28 inline-block">ประเภท:</strong> {formData.rfaType}</p>
-                        <p><strong className="font-medium text-gray-500 w-28 inline-block">โครงการ:</strong> {sites.find(s => s.id === selectedSite)?.name}</p>
-                        <p><strong className="font-medium text-gray-500 w-28 inline-block">หมวดงาน:</strong> {isManualFlow ? formData.categoryId : formData.selectedTask?.taskCategory}</p>
-                        <p><strong className="font-medium text-gray-500 w-28 inline-block">เลขที่เอกสาร:</strong> {formData.documentNumber || "(ไม่ได้ระบุ)"}</p>
-                        <p><strong className="font-medium text-gray-500 w-28 inline-block">Rev.:</strong> {formData.revisionNumber}</p>
-                        <p className="border-t pt-2 mt-2"><strong className="font-medium text-gray-500 block">หัวข้อ:</strong> {formData.title}</p>
+                        {/* 👇 เปลี่ยน text-gray-500 เป็น text-gray-700 ทั้งหมดในนี้ */}
+                        <p><strong className="font-medium text-gray-700 w-28 inline-block">ประเภท:</strong> {formData.rfaType}</p>
+                        <p><strong className="font-medium text-gray-700 w-28 inline-block">โครงการ:</strong> {sites.find(s => s.id === selectedSite)?.name}</p>
+                        <p><strong className="font-medium text-gray-700 w-28 inline-block">หมวดงาน:</strong> {isManualFlow ? formData.categoryId : formData.selectedTask?.taskCategory}</p>
+                        <p><strong className="font-medium text-gray-700 w-28 inline-block">เลขที่เอกสาร:</strong> {formData.documentNumber || "(ไม่ได้ระบุ)"}</p>
+                        <p><strong className="font-medium text-gray-700 w-28 inline-block">Rev.:</strong> {formData.revisionNumber}</p>
+                        <p className="border-t pt-2 mt-2"><strong className="font-medium text-gray-700 block">หัวข้อ:</strong> {formData.title}</p>
                     </div>
-                     <div>
-                        <h4 className="font-medium text-gray-500">ไฟล์แนบ ({formData.uploadedFiles.filter(f => f.status === 'success').length} ไฟล์):</h4>
-                        <ul className="list-disc list-inside mt-1 space-y-1 text-gray-800">
+                    <div>
+                        {/* 👇 เปลี่ยน text-gray-500 เป็น text-gray-700 */}
+                        <h4 className="font-medium text-gray-700">ไฟล์แนบ ({formData.uploadedFiles.filter(f => f.status === 'success').length} ไฟล์):</h4>
+                        <ul className="list-disc list-inside mt-1 space-y-1 text-gray-900"> {/* 👈 เปลี่ยน text-gray-800 เป็น 900 ให้เข้มสุด */}
                             {formData.uploadedFiles.filter(f => f.status === 'success').map(f => (<li key={f.id} className="truncate">{f.file.name}</li>))}
                         </ul>
                     </div>

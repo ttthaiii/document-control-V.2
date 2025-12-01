@@ -3,28 +3,20 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/lib/auth/useAuth';
-import { WorkRequest, WorkRequestWorkflowStep, TaskData } from '@/types/work-request';
+import { WorkRequest, WorkRequestWorkflowStep } from '@/types/work-request';
 import { WorkRequestStatus } from '@/lib/config/workflow';
 import Spinner from '@/components/shared/Spinner';
 import { RFAFile } from '@/types/rfa';
-import { X, Paperclip, Send, Upload, FileText, Check, AlertTriangle, Download, CornerUpLeft, History, Edit, ThumbsUp, ThumbsDown, Eye, PenTool } from 'lucide-react';
+import { 
+  X, Paperclip, Send, Upload, FileText, Check, AlertTriangle, 
+  Download, CornerUpLeft, History, Edit, Edit2, ThumbsUp, ThumbsDown, 
+  Eye, Trash2 
+} from 'lucide-react'; // ✅ ใช้ Edit2 แทน Pencil, เพิ่ม Trash2
 import { ROLES, REVIEWER_ROLES, WR_STATUSES, WR_APPROVER_ROLES, STATUS_LABELS, STATUS_COLORS } from '@/lib/config/workflow';
 import { useNotification } from '@/lib/context/NotificationContext';
 import PDFPreviewModal from '@/components/rfa/PDFPreviewModal';
 
-// ✅ 1. Import dynamic จาก next/dynamic
-import dynamic from 'next/dynamic';
-
-// ✅ 2. เปลี่ยนการ Import PDFAnnotatorModal ให้เป็นแบบ Dynamic และปิด SSR
-// วิธีนี้จะทำให้ Fabric.js ไม่ถูกรันบน Server และแก้ Error "Object.defineProperty" ได้
-const PDFAnnotatorModal = dynamic(
-  () => import('@/components/rfa/PDFAnnotatorModal'),
-  { 
-    ssr: false,
-    loading: () => <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50"><Spinner className="text-white w-10 h-10"/></div>
-  }
-);
-
+// --- Helper Functions ---
 const formatFileSize = (bytes: number): string => {
     if (!bytes) return '0 B';
     const k = 1024;
@@ -90,14 +82,21 @@ const WorkflowHistoryModal = ({ workflow, onClose }: { workflow: WorkRequestWork
     );
 };
 
+// --- Interfaces ---
 interface UploadedFile {
-  id: string; file: File; status: 'pending' | 'uploading' | 'success' | 'error';
-  uploadedData?: RFAFile; error?: string;
+  id: string; 
+  file: File; 
+  status: 'pending' | 'uploading' | 'success' | 'error';
+  uploadedData?: RFAFile; 
+  error?: string;
+  customName?: string; 
 }
+
 interface WorkRequestDetailModalProps {
   documentId: string | null; onClose: () => void; onUpdate: () => void;
 }
 
+// --- Main Component ---
 export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }: WorkRequestDetailModalProps) {
     const { user, firebaseUser } = useAuth();
     const { showNotification } = useNotification();
@@ -115,9 +114,12 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
     const [verifiedTaskId, setVerifiedTaskId] = useState<string | null>(null);
     const [rejectComment, setRejectComment] = useState('');
 
-    // State สำหรับ Modal PDF
-    const [previewFile, setPreviewFile] = useState<RFAFile | null>(null);
-    const [fileToAnnotate, setFileToAnnotate] = useState<RFAFile | null>(null);
+    // State สำหรับ PDF Viewer (single mode)
+    const [pdfFile, setPdfFile] = useState<RFAFile | null>(null);
+    
+    // State สำหรับการแก้ไขชื่อไฟล์
+    const [editingFileId, setEditingFileId] = useState<string | null>(null);
+    const [tempFileName, setTempFileName] = useState('');
 
     const canSubmitWork = user?.role === ROLES.BIM && document?.status === WR_STATUSES.IN_PROGRESS;
     const canSiteReview = user && REVIEWER_ROLES.includes(user.role) && document?.status === WR_STATUSES.PENDING_ACCEPTANCE;
@@ -129,6 +131,12 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
         if (!document) return '';
         return `${document.documentNumber.split('-REV')[0]}-REV${String(newRevisionNumber).padStart(2, '0')}`;
     }, [document, newRevisionNumber]);
+
+    const currentStepFiles = useMemo(() => {
+        if (!document || !document.workflow) return [];
+        const currentStep = document.workflow.find(step => step.status === document.status);
+        return currentStep?.files || [];
+    }, [document]);
 
     useEffect(() => {
         const fetchDocument = async () => {
@@ -220,6 +228,50 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
         event.target.value = '';
     };
 
+    const startRenaming = (fileObj: UploadedFile) => {
+        setEditingFileId(fileObj.id);
+        const currentName = fileObj.customName || fileObj.uploadedData?.fileName || fileObj.file.name;
+        setTempFileName(currentName);
+    };
+
+    const saveRename = (fileId: string, target: 'action' | 'revision') => {
+        const setFiles = target === 'revision' ? setRevisionFiles : setActionFiles;
+        setFiles(prev => prev.map(f => {
+            if (f.id === fileId) {
+                const updatedData = f.uploadedData ? { ...f.uploadedData, fileName: tempFileName } : undefined;
+                return { ...f, customName: tempFileName, uploadedData: updatedData };
+            }
+            return f;
+        }));
+        setEditingFileId(null);
+    };
+
+    const cancelRename = () => {
+        setEditingFileId(null);
+        setTempFileName('');
+    };
+
+    const handleLocalPreview = (fileObj: UploadedFile) => {
+        const objectUrl = URL.createObjectURL(fileObj.file);
+        const isPdf = fileObj.file.type === 'application/pdf' || fileObj.file.name.toLowerCase().endsWith('.pdf');
+
+        if (isPdf) {
+            const mockFile: RFAFile = {
+                fileName: fileObj.customName || fileObj.uploadedData?.fileName || fileObj.file.name,
+                fileUrl: objectUrl,
+                filePath: '',
+                size: fileObj.file.size,
+                fileSize: fileObj.file.size,
+                contentType: fileObj.file.type,
+                uploadedAt: new Date().toISOString(),
+                uploadedBy: user?.id || ''
+            };
+            setPdfFile(mockFile);
+        } else {
+            window.open(objectUrl, '_blank');
+        }
+    };
+
     const processFiles = async (files: File[], target: 'action' | 'revision') => {
         const newUploads: UploadedFile[] = files.map(file => ({ id: `${file.name}-${Date.now()}`, file, status: 'pending' }));
         const setFiles = target === 'revision' ? setRevisionFiles : setActionFiles;
@@ -245,9 +297,9 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
         
         await processFiles([editedFile], target);
         showNotification('success', 'บันทึกและแนบไฟล์เรียบร้อย', 'ไฟล์ที่คุณแก้ไขถูกแนบในรายการเตรียมส่งแล้ว');
+        setPdfFile(null);
     };
 
-    // Dummy functions to maintain structure (replace with your original logic if needed)
     const handleBimAction = async (action: any) => {
         if (!document || !firebaseUser) return;
         setIsSubmitting(true);
@@ -291,12 +343,17 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
         setIsSubmitting(true);
         try {
             const token = await firebaseUser.getIdToken();
+            const successfulFiles = actionFiles.filter(f => f.status === 'success');
+            
             const response = await fetch(`/api/work-request/${document.id}/update`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     action,
-                    payload: { comments: actionComment }
+                    payload: { 
+                        comments: actionComment,
+                        files: successfulFiles.map(f => f.uploadedData)
+                    }
                 }),
             });
             const result = await response.json();
@@ -390,6 +447,88 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
 
     const statusStyle = getStatusStyles(document.status);
 
+    const renderEditableFileList = (files: UploadedFile[], target: 'action' | 'revision') => (
+        <div className="mt-2 space-y-2">
+            {files.map((fileObj) => (
+                <div key={fileObj.id} className="flex items-center text-sm p-2 bg-gray-100 rounded border border-gray-200 group">
+                    <FileText className="w-4 h-4 mr-3 text-gray-500 flex-shrink-0" />
+                    
+                    {/* --- โหมดแก้ไขชื่อ (Editing Mode) --- */}
+                    {editingFileId === fileObj.id ? (
+                        <div className="flex-1 flex items-center gap-2 min-w-0 bg-white p-1 rounded border border-blue-300 ring-2 ring-blue-100">
+                            <input 
+                                type="text" 
+                                value={tempFileName}
+                                onChange={(e) => setTempFileName(e.target.value)}
+                                className="flex-1 p-1 text-sm outline-none bg-white text-gray-900"
+                                autoFocus
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') { e.preventDefault(); saveRename(fileObj.id, target); }
+                                    if (e.key === 'Escape') cancelRename();
+                                }}
+                            />
+                            <div className="flex items-center border-l pl-1 space-x-1">
+                                <button 
+                                    onClick={() => saveRename(fileObj.id, target)} 
+                                    className="p-1 hover:bg-green-100 text-green-600 rounded transition-colors" 
+                                    title="บันทึกชื่อ"
+                                >
+                                    <Check size={16}/>
+                                </button>
+                                <button 
+                                    onClick={cancelRename} 
+                                    className="p-1 hover:bg-red-100 text-red-500 rounded transition-colors" 
+                                    title="ยกเลิก"
+                                >
+                                    <X size={16}/>
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        /* --- โหมดแสดงผลปกติ (View Mode) --- */
+                        <div className="flex-1 min-w-0 flex items-center gap-2">
+                            <span 
+                                onClick={() => handleLocalPreview(fileObj)}
+                                className="truncate cursor-pointer text-blue-600 hover:underline font-medium" 
+                                title="คลิกเพื่อดูตัวอย่าง"
+                            >
+                                {fileObj.customName || fileObj.uploadedData?.fileName || fileObj.file.name}
+                            </span>
+                            
+                            <button 
+                                onClick={() => startRenaming(fileObj)}
+                                className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-blue-600 rounded transition-all"
+                                title="เปลี่ยนชื่อไฟล์"
+                            >
+                                <Edit2 size={14} />
+                            </button>
+                        </div>
+                    )}
+
+                    {/* 🔥 ส่วนสถานะและปุ่มลบไฟล์ */}
+                    {editingFileId !== fileObj.id && (
+                        <div className="flex items-center ml-3 space-x-3">
+                            <div className="flex items-center">
+                                {fileObj.status === 'uploading' && <Spinner className="w-4 h-4 text-blue-500" />}
+                                {fileObj.status === 'success' && <Check className="w-4 h-4 text-green-500" />}
+                                {fileObj.status === 'error' && <span title={fileObj.error}><AlertTriangle className="w-4 h-4 text-red-500" /></span>}
+                            </div>
+                            
+                            <button 
+                                type="button" 
+                                onClick={() => removeFile(fileObj.id, target)} 
+                                className="text-gray-400 hover:text-red-600 transition-colors p-1 hover:bg-red-50 rounded"
+                                title="ลบไฟล์"
+                            >
+                                <Trash2 size={16} />
+                            </button>
+                        </div>
+                    )}
+                </div>
+            ))}
+        </div>
+    );
+
     return (
         <>
             <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
@@ -407,28 +546,28 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                     </div>
 
                     <div className="p-6 overflow-y-auto space-y-6">
-                        <div className="bg-gray-50 p-4 rounded-lg">
-                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                                <div><strong className="text-gray-500 block mb-1">สถานะ:</strong><span className="px-3 py-1 text-xs font-bold text-white rounded-full" style={{ backgroundColor: statusStyle.color }}>{statusStyle.text}</span></div>
-                                <div><strong className="text-gray-500 block">โครงการ:</strong><span>{document.site?.name || 'N/A'}</span></div>
-                                <div><strong className="text-gray-500 block">วันที่เริ่ม (แผน):</strong><span>{formatDate(document.planStartDate, false)}</span></div>
-                                <div><strong className="text-gray-500 block">วันที่กำหนดส่ง:</strong><span>{formatDate(document.dueDate, false)}</span></div>
+                        <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                {/* 👇 ไล่เปลี่ยน strong ทั้งหมดเป็น text-gray-700 */}
+                                <div><strong className="text-gray-700 font-semibold block mb-1">สถานะ:</strong><span className="px-3 py-1 text-xs font-bold text-white rounded-full shadow-sm" style={{ backgroundColor: statusStyle.color }}>{statusStyle.text}</span></div>
+                                <div><strong className="text-gray-700 font-semibold block">โครงการ:</strong><span className="text-gray-900">{document.site?.name || 'N/A'}</span></div>
+                                <div><strong className="text-gray-700 font-semibold block">วันที่เริ่ม (แผน):</strong><span className="text-gray-900">{formatDate(document.planStartDate, false)}</span></div>
+                                <div><strong className="text-gray-700 font-semibold block">วันที่กำหนดส่ง:</strong><span className="text-gray-900">{formatDate(document.dueDate, false)}</span></div>
                             </div>
-                            {document.description && <div className='mt-4'><strong className="text-gray-500 block text-sm">รายละเอียด:</strong><div className="text-gray-700 whitespace-pre-wrap bg-white p-3 rounded-md mt-1 border"><p className="italic">"{document.description}"</p></div></div>}
+                            {document.description && <div className='mt-4'><strong className="text-gray-700 font-semibold block text-sm">รายละเอียด:</strong><div className="text-gray-900 whitespace-pre-wrap bg-white p-3 rounded-md mt-1 border border-gray-300 shadow-sm"><p>"{document.description}"</p></div></div>}
                         </div>
                         
-                        {/* Files Section */}
+                        {/* Files Section (View Only - Latest Step) */}
                         <div>
                             <h4 className="text-md font-semibold mb-2 flex items-center text-slate-800"><Paperclip size={16} className="mr-2"/> ไฟล์แนบ</h4>
                             <ul className="space-y-2">
-                                {document.files.length > 0 ? document.files.map((file, index) => {
+                                {currentStepFiles.length > 0 ? currentStepFiles.map((file, index) => {
                                     const isPdf = file.fileName.toLowerCase().endsWith('.pdf') || file.contentType === 'application/pdf';
-                                    const showEditButton = isPdf && (canSiteReview || canSubmitWork || isRevisionFlow); 
-
+                                    
                                     return (
                                         <li key={index}>
                                             <div className="flex items-center justify-between p-2 bg-slate-100 border border-slate-200 rounded-md hover:bg-slate-200 transition-colors group">
-                                                <div className="flex items-center min-w-0 flex-1 cursor-pointer" onClick={() => isPdf ? setPreviewFile(file) : window.open(file.fileUrl)}>
+                                                <div className="flex items-center min-w-0 flex-1 cursor-pointer" onClick={() => isPdf ? setPdfFile(file) : window.open(file.fileUrl)}>
                                                     <FileText className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
                                                     <div className="flex flex-col min-w-0">
                                                         <span className="text-sm font-medium text-blue-600 group-hover:underline truncate">{file.fileName}</span>
@@ -438,17 +577,12 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                                                 
                                                 <div className="flex items-center space-x-2 ml-2">
                                                     {isPdf && (
-                                                        <button onClick={() => setPreviewFile(file)} className="p-1 text-gray-400 hover:text-blue-600" title="ดูตัวอย่าง">
-                                                            <Eye size={18} />
-                                                        </button>
-                                                    )}
-                                                    {showEditButton && (
                                                         <button 
-                                                            onClick={() => setFileToAnnotate(file)}
-                                                            className="p-1 text-gray-400 hover:text-orange-600 bg-white rounded shadow-sm border border-gray-200"
-                                                            title="แก้ไข/เซ็นชื่อ"
+                                                            onClick={() => setPdfFile(file)} 
+                                                            className="p-1 text-gray-400 hover:text-blue-600" 
+                                                            title="ดู/แก้ไข PDF"
                                                         >
-                                                            <PenTool size={16} />
+                                                            <Eye size={18} />
                                                         </button>
                                                     )}
                                                     {!isPdf && (
@@ -471,7 +605,7 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                                 <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (สำหรับ PM/PD)</h3>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">เหตุผลในการไม่อนุมัติ (ถ้ามี)</label>
-                                    <textarea value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} rows={3} placeholder="กรอกเหตุผลที่ไม่อนุมัติ..." className="w-full p-2 border rounded-md" />
+                                    <textarea value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} rows={3} placeholder="กรอกเหตุผลที่ไม่อนุมัติ..." className="w-full p-2 border rounded-md bg-white text-gray-900" />
                                 </div>
                                 <div className="flex justify-end gap-3 pt-2">
                                     <button onClick={() => handlePmAction('REJECT_DRAFT')} disabled={isSubmitting} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:bg-red-300 disabled:cursor-not-allowed">
@@ -487,9 +621,23 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                         {canSiteReview && (
                             <div className="space-y-4">
                                 <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (สำหรับ Site)</h3>
+                                
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">แนบไฟล์เพิ่มเติม (ถ้ามี)</label>
+                                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
+                                        <input type="file" multiple onChange={(e) => handleFileUpload(e, 'action')} id="site-file-upload" className="hidden"/>
+                                        <label htmlFor="site-file-upload" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
+                                            <Upload size={16} className="mr-2"/> คลิกเพื่อเลือกไฟล์
+                                        </label>
+                                    </div>
+                                    
+                                    {/* ✅ ใช้ Render Function ใหม่ */}
+                                    {actionFiles.length > 0 && renderEditableFileList(actionFiles, 'action')}
+                                </div>
+                                
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">หมายเหตุ / คอมเมนต์ (ถ้ามี)</label>
-                                    <textarea value={actionComment} onChange={(e) => setActionComment(e.target.value)} rows={3} placeholder="หากต้องการให้แก้ไข กรุณาใส่รายละเอียด..." className="w-full p-2 border rounded-md" />
+                                    <textarea value={actionComment} onChange={(e) => setActionComment(e.target.value)} rows={3} placeholder="หากต้องการให้แก้ไข กรุณาใส่รายละเอียด..." className="w-full p-2 border rounded-md bg-white text-gray-900" />
                                 </div>
                                 <div className="flex justify-end gap-3 pt-2">
                                     <button onClick={() => handleSiteAction('REQUEST_REVISION')} disabled={isSubmitting} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-orange-600 rounded-lg hover:bg-orange-700 disabled:bg-orange-300"><CornerUpLeft size={16} className="mr-2" />{isSubmitting ? 'กำลังส่ง...' : 'ส่งกลับให้แก้ไข'}</button>
@@ -507,32 +655,21 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                                         <input type="file" multiple onChange={(e) => handleFileUpload(e, 'action')} id="submit-file-upload" className="hidden"/>
                                         <label htmlFor="submit-file-upload" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center"><Upload size={16} className="mr-2"/> คลิกเพื่อเลือกไฟล์</label>
                                     </div>
-                                    {actionFiles.length > 0 && (
-                                        <div className="mt-2 space-y-2">
-                                            {actionFiles.map((fileObj) => (
-                                            <div key={fileObj.id} className="flex items-center text-sm p-2 bg-gray-100 rounded">
-                                                <FileText className="w-4 h-4 mr-3 text-gray-500" />
-                                                <span className="flex-1 truncate">{fileObj.file.name}</span>
-                                                <div className="flex items-center ml-3">
-                                                    {fileObj.status === 'uploading' && <Spinner className="w-4 h-4" />}
-                                                    {fileObj.status === 'success' && <Check className="w-4 h-4 text-green-500" />}
-                                                    {fileObj.status === 'error' && ( <span title={fileObj.error}><AlertTriangle className="w-4 h-4 text-red-500" /></span> )}
-                                                    <button type="button" onClick={() => removeFile(fileObj.id, 'action')} className="ml-3 text-gray-500 hover:text-red-600"><X size={16} /></button>
-                                                </div>
-                                            </div>
-                                            ))}
-                                        </div>
-                                    )}
+                                    
+                                    {/* ✅ ใช้ Render Function ใหม่ */}
+                                    {actionFiles.length > 0 && renderEditableFileList(actionFiles, 'action')}
+
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">หมายเหตุ / คอมเมนต์ (ถ้ามี)</label>
-                                    <textarea value={actionComment} onChange={(e) => setActionComment(e.target.value)} rows={3} placeholder="อธิบายรายละเอียดการทำงาน..." className="w-full p-2 border rounded-md" />
+                                    <textarea value={actionComment} onChange={(e) => setActionComment(e.target.value)} rows={3} placeholder="อธิบายรายละเอียดการทำงาน..." className="w-full p-2 border rounded-md bg-white text-gray-900" />
                                 </div>
                                 <div className="flex justify-end pt-2">
                                     <button onClick={() => handleBimAction('SUBMIT_WORK')} disabled={actionFiles.filter(f => f.status === 'success').length === 0 || isSubmitting} className="flex items-center px-6 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:bg-green-300">{isSubmitting ? <Spinner className="w-5 h-5 mr-2" /> : <Send size={16} className="mr-2" />}{isSubmitting ? 'กำลังส่งงาน...' : 'ส่งงานให้ Site ตรวจรับ'}</button>
                                 </div>
                             </div>
                         )}
+
                         {isRevisionFlow && (
                             <div className="space-y-4">
                                 <h3 className="text-lg font-bold text-slate-800">สร้างเอกสารฉบับแก้ไข (Create Revision)</h3>
@@ -543,56 +680,56 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                                 </div>
 
                                 {(isVerifyingTask || verificationError) && (
-                                    <div className="p-3 rounded-md text-sm font-medium flex items-center border bg-white">
+                                    <div className="mb-4 p-3 rounded-md text-sm font-medium flex items-center border bg-white">
                                         {isVerifyingTask && (
-                                            <><Spinner className="w-4 h-4 mr-3 text-gray-500" /> <span className="text-gray-600">กำลังตรวจสอบ Task ในระบบ BIM Tracking...</span></>
+                                            <>
+                                                <Spinner className="w-4 h-4 mr-3 text-gray-500" />
+                                                <span className="text-gray-600">กำลังตรวจสอบ Task ในระบบ BIM Tracking...</span>
+                                            </>
                                         )}
                                         {verificationError && (
-                                            <><AlertTriangle className="w-4 h-4 mr-3 text-red-500" /> <span className="text-red-600 font-semibold">{verificationError}</span></>
+                                            <span className="text-red-600 font-semibold">{verificationError}</span>
                                         )}
                                     </div>
                                 )}
                                 
                                 {isTaskVerified && (
-                                    <>
+                                    <div className="space-y-4">
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">แนบไฟล์ที่แก้ไขแล้ว <span className="text-red-500">*</span></label>
-                                            <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">แนบไฟล์ที่แก้ไขแล้ว <span className="text-red-700">*</span></label>
+                                            <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
                                                 <input type="file" multiple onChange={(e) => handleFileUpload(e, 'revision')} id="revision-file-upload" className="hidden"/>
-                                                <label htmlFor="revision-file-upload" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center"><Upload size={16} className="mr-2"/> คลิกเพื่อเลือกไฟล์</label>
+                                                <label htmlFor="revision-file-upload" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
+                                                    <Upload size={16} className="mr-2"/>
+                                                    คลิกเพื่อเลือกไฟล์
+                                                </label>
                                             </div>
-                                            {revisionFiles.length > 0 && (
-                                                <div className="mt-2 space-y-2">
-                                                    {revisionFiles.map((fileObj) => (
-                                                    <div key={fileObj.id} className="flex items-center text-sm p-2 bg-gray-100 rounded">
-                                                        <FileText className="w-4 h-4 mr-3 text-gray-500" />
-                                                        <span className="flex-1 truncate">{fileObj.file.name}</span>
-                                                        <div className="flex items-center ml-3">
-                                                            {fileObj.status === 'uploading' && <Spinner className="w-4 h-4" />}
-                                                            {fileObj.status === 'success' && <Check className="w-4 h-4 text-green-500" />}
-                                                            {fileObj.status === 'error' && ( <span title={fileObj.error}><AlertTriangle className="w-4 h-4 text-red-500" /></span> )}
-                                                            <button type="button" onClick={() => removeFile(fileObj.id, 'revision')} className="ml-3 text-gray-500 hover:text-red-600"><X size={16} /></button>
-                                                        </div>
-                                                    </div>
-                                                    ))}
-                                                </div>
-                                            )}
+                                            
+                                            {/* ✅ ใช้ Render Function ใหม่ */}
+                                            {revisionFiles.length > 0 && renderEditableFileList(revisionFiles, 'revision')}
+
                                         </div>
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">หมายเหตุ / คอมเมนต์ (ถ้ามี)</label>
-                                            <textarea value={revisionComment} onChange={(e) => setRevisionComment(e.target.value)} rows={3} placeholder="อธิบายรายละเอียดการแก้ไข..." className="w-full p-2 border rounded-md" />
+                                            <label className="text-sm font-medium text-gray-700 mb-1 block">หมายเหตุการแก้ไข (Optional)</label>
+                                            <textarea
+                                                value={revisionComment}
+                                                onChange={(e) => setRevisionComment(e.target.value)}
+                                                placeholder="เช่น แก้ไขตาม Comment จาก CM..."
+                                                className="w-full p-2 border rounded-md text-sm bg-white text-gray-900"
+                                                rows={2}
+                                            />
                                         </div>
-                                        <div className="flex justify-end pt-2">
-                                            <button 
-                                                onClick={handleCreateRevision} 
-                                                disabled={revisionFiles.filter(f => f.status === 'success').length === 0 || isSubmitting || !isTaskVerified} 
-                                                className="flex items-center px-6 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-blue-300"
+                                        <div className="flex justify-end">
+                                            <button
+                                                onClick={handleCreateRevision}
+                                                disabled={isSubmitting || revisionFiles.filter(f => f.status === 'success').length === 0 || !isTaskVerified}
+                                                className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
                                             >
-                                                {isSubmitting ? <Spinner className="w-5 h-5 mr-2" /> : <Edit size={16} className="mr-2" />}
-                                                {isSubmitting ? 'กำลังส่ง...' : 'ส่งเอกสารฉบับแก้ไข'}
+                                                {isSubmitting ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />}
+                                                ส่งเอกสารฉบับแก้ไข
                                             </button>
                                         </div>
-                                    </>
+                                    </div>
                                 )}
                             </div>
                         )}
@@ -602,17 +739,13 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
 
             {showHistory && <WorkflowHistoryModal workflow={document.workflow || []} onClose={() => setShowHistory(false)} />}
             
-            <PDFPreviewModal isOpen={!!previewFile} file={previewFile} onClose={() => setPreviewFile(null)} />
-
-            {/* ✅ 3. แสดง PDFAnnotatorModal ตามเงื่อนไข */}
-            {fileToAnnotate && (
-                <PDFAnnotatorModal
-                    isOpen={!!fileToAnnotate}
-                    file={fileToAnnotate}
-                    onClose={() => setFileToAnnotate(null)}
-                    onSave={handleAnnotateSave}
-                />
-            )}
+            <PDFPreviewModal 
+                isOpen={!!pdfFile} 
+                file={pdfFile} 
+                allowEdit={canSiteReview || canSubmitWork || isRevisionFlow} 
+                onClose={() => setPdfFile(null)}
+                onSave={handleAnnotateSave}
+            />
         </>
     );
 }

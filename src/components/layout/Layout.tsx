@@ -3,7 +3,7 @@
 import React, { useState } from 'react'
 import { useAuth } from '@/lib/auth/useAuth'
 import Sidebar from './Sidebar'
-import { Menu, Bell, Building2 } from 'lucide-react'
+import { Menu, Bell, Building2,HardHat, Hand } from 'lucide-react'
 import { useLoading } from '@/lib/context/LoadingContext'
 import { GlobalSpinner } from '@/lib/context/LoadingContext'
 
@@ -33,7 +33,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               <Menu size={20} />
             </button>
             <h1 className="text-xl font-semibold text-gray-900">
-              🏗️ ttsdoc v2
+              <div className="flex items-center gap-2">
+                <HardHat className="text-orange-600" />
+                <span>TTS Document control</span>
+              </div>              
             </h1>
           </div>
           <div className="flex items-center space-x-4">
@@ -48,8 +51,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             </button>
 
             {user && (
-              <span className="hidden sm:block text-sm text-gray-600">
-                👋 สวัสดี, {user.email.split('@')[0]}
+              <span className="hidden sm:flex items-center gap-2 text-sm text-gray-600">
+                <Hand className="text-yellow-500" size={16} />
+                สวัสดี, {user.email.split('@')[0]}
               </span>
             )}
             <div className="hidden md:flex items-center space-x-2 text-gray-600">

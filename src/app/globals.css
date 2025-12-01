@@ -14,6 +14,15 @@
   }
 }
 
+html, body {
+  height: 100%; /* บังคับความสูง */
+  overscroll-behavior-y: none; /* 🟢 แก้ข้อ 1: ปิดการดึงขอบจอแล้วเด้ง (ทั้งสีส้มและ pull-to-refresh ของ browser) */
+  -webkit-font-smoothing: antialiased; /* 🟢 แก้ข้อ 2: ทำให้ตัวหนังสือคมเข้มขึ้นบน iOS/Mac */
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-font-smoothing: auto; /* ใช้ค่า default แทน */
+  -moz-osx-font-smoothing: auto;
+}
+
 body {
   color: var(--foreground);
   background: var(--background);

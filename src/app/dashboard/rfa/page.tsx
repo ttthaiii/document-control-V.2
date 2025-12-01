@@ -9,8 +9,8 @@ import RFAListTable from '@/components/rfa/RFAListTable'
 import DashboardStats from '@/components/rfa/DashboardStats'
 import CreateRFAForm from '@/components/rfa/CreateRFAForm'
 import { RFADocument, Site as SiteType, Category } from '@/types/rfa'
-import { STATUSES, STATUS_LABELS, Role } from '@/lib/config/workflow'
-import { Plus, RefreshCw } from 'lucide-react'
+import { STATUSES, STATUS_LABELS, Role, STATUS_COLORS } from '@/lib/config/workflow'
+import { Plus, RefreshCw,ClipboardList } from 'lucide-react'
 import SmartRFAModal from '@/components/rfa/SmartRFAModal'
 import FilterBar from '@/components/rfa/FilterBar' 
 import { db } from '@/lib/firebase/client'
@@ -178,9 +178,43 @@ function RFAContent() {
     }
     const availableResponsibleParties = useMemo(() => { return [{ value: 'ALL', label: 'ทุกคน' }]; }, []); 
     const availableStatuses = useMemo(() => Object.values(STATUSES), []);
-    const getStatusColor = (status: string) => 'text-gray-600 bg-gray-50'; 
-    const getRFATypeColor = (type: string) => 'bg-gray-100 text-gray-800'; 
+    const getStatusColor = (status: string) => {
+        switch (status) {
+            case STATUSES.PENDING_REVIEW: // รอตรวจสอบ
+                return 'bg-blue-100 text-blue-800';
+            
+            case STATUSES.PENDING_CM_APPROVAL: // รออนุมัติ CM
+                return 'bg-violet-100 text-violet-800'; // ปรับเป็นโทนม่วงให้ตรงกับ Workflow ใหม่
+            
+            case STATUSES.REVISION_REQUIRED: // แก้ไข
+            case STATUSES.APPROVED_REVISION_REQUIRED:
+                return 'bg-amber-100 text-amber-800';
+            
+            case STATUSES.APPROVED: // อนุมัติ
+                return 'bg-green-100 text-green-800';
+            
+            case STATUSES.APPROVED_WITH_COMMENTS: // อนุมัติ (มีคอมเมนต์)
+                return 'bg-emerald-100 text-emerald-800';
+            
+            case STATUSES.REJECTED: // ไม่อนุมัติ
+                return 'bg-red-100 text-red-800';
+            
+            case STATUSES.PENDING_FINAL_APPROVAL: // รอ Final
+                return 'bg-indigo-100 text-indigo-800';
+            
+            default:
+                return 'bg-gray-100 text-gray-800';
+        }
+    };
 
+    const getRFATypeColor = (type: string) => {
+        switch (type) {
+            case 'RFA-SHOP': return 'bg-blue-50 text-blue-700 border border-blue-100';
+            case 'RFA-GEN': return 'bg-green-50 text-green-700 border border-green-100';
+            case 'RFA-MAT': return 'bg-orange-50 text-orange-700 border border-orange-100';
+            default: return 'bg-gray-50 text-gray-700 border border-gray-200';
+        }
+    };
     // ✅ ย้าย useMemo ขึ้นมาไว้ก่อน if (!user) return null
     const filteredDocuments = useMemo(() => {
         const sitesMap = new Map(sites.map(s => [s.id, s.name]));
@@ -227,8 +261,9 @@ function RFAContent() {
             
             <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                        <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">
-                            📋 RFA Documents
+                        <h1 className="text-2xl lg:text-3xl font-bold text-gray-900 flex items-center gap-3">
+                            <ClipboardList className="text-blue-600" size={32} />
+                            RFA Documents
                             {filters.rfaType && filters.rfaType !== 'ALL' && (
                             <span className="text-orange-600"> - {RFA_TYPE_DISPLAY_NAMES[filters.rfaType]}</span>
                             )}

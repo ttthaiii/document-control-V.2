@@ -1,4 +1,4 @@
-// src/components/rfa/RFADetailModal.tsx
+// src/components/rfa/RFADetailModal.tsx (แก้ไขแล้ว)
 'use client'
 
 import React, { useState, useMemo, useEffect } from 'react'
@@ -26,7 +26,6 @@ const formatFileSize = (bytes: number): string => {
 // --- Component: Workflow History Modal ---
 const WorkflowHistoryModal = ({ workflow, onClose, userRole }: { workflow: RFAWorkflowStep[], onClose: () => void, userRole?: string }) => {
     const filteredWorkflow = useMemo(() => {
-        // Filter สถานะบางอย่างออกสำหรับ Approver เพื่อไม่ให้รกเกินไป (ตาม Logic เดิม)
         if (userRole && APPROVER_ROLES.includes(userRole as Role)) {
             const statusesToHide = [STATUSES.PENDING_REVIEW, STATUSES.REVISION_REQUIRED];
             return workflow.filter(item => !statusesToHide.includes(item.status));
@@ -173,7 +172,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     fetchFullDocument();
   }, [initialDoc, firebaseUser]);
 
-  // 2. Memoized Values
+  // 2. Memoized Values (Hooks)
   const latestFiles = useMemo(() => {
     if (!document) return [];
     if (!document.workflow || document.workflow.length === 0) return document.files || [];
@@ -191,6 +190,28 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
 
   const isCreator = document?.createdBy === user?.id;
   const isRevisionFlow = document?.status === STATUSES.REJECTED && isCreator && document?.isLatest;
+
+  // --- 🆕 แก้ไข: ย้าย Logic สิทธิ์การแก้ไข PDF ขึ้นมาตรงนี้ (ก่อน Loading Check) ---
+  const canEditPDF = useMemo(() => {
+      if (!document || !user) return false; // Handle null cases inside useMemo
+
+      const { status } = document;
+      const permissions = document.permissions || {} as RFAPermissions;
+      const userRole = user.role;
+
+      const isSiteReviewing = REVIEWER_ROLES.includes(userRole as Role) && status === STATUSES.PENDING_REVIEW;
+      const isApproving = permissions.canApprove; 
+      const isResubmissionFlow = status === STATUSES.REVISION_REQUIRED && document.createdBy === user.id;
+      const isDocRevisionFlow = status === STATUSES.REJECTED && document.createdBy === user.id && document.isLatest;
+
+      if (status === STATUSES.APPROVED || status === STATUSES.APPROVED_WITH_COMMENTS) return false;
+      if (isSiteReviewing) return true;
+      if (isApproving) return true;
+      if (isResubmissionFlow) return true;
+      if (isDocRevisionFlow) return true;
+
+      return false;
+  }, [document, user]);
 
   // 3. Task Verification Logic (for Revision)
   useEffect(() => {
@@ -246,7 +267,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     }
   }, [isRevisionFlow, document, firebaseUser]);
 
-  // 4. Loading State
+  // 4. Loading State (Returns) - ต้องอยู่หลังจาก Hooks ทั้งหมด
   if (isLoading) {
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
@@ -257,15 +278,19 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
 
   if (!document) return null;
   
-  // 5. Permission Logic (Hybrid: Override > Role)
-  // ✅ ใช้ permissions ที่ API ส่งมา (ซึ่งผ่านการเช็ค Override แล้ว)
+  // 5. Variable Assignments
   const permissions = document.permissions || {} as RFAPermissions;
-  
   const isResubmissionFlow = document.status === STATUSES.REVISION_REQUIRED && isCreator;
   const newRevisionNumber = (document.revisionNumber || 0) + 1;
   const newDocumentNumber = `${document.documentNumber.split('-REV')[0]}-REV${String(newRevisionNumber).padStart(2, '0')}`;
   const displayDetailOrComment = latestCommentItem?.comments || document.description;
   const displayLabel = latestCommentItem ? `ความคิดเห็นล่าสุด` : 'รายละเอียดเพิ่มเติม';
+
+  const { role: userRole } = user || {};
+  const { status } = document;
+  
+  const isSiteReviewing = REVIEWER_ROLES.includes(userRole as Role) && status === STATUSES.PENDING_REVIEW;
+  const isApproving = permissions.canApprove; 
 
   // 6. File Handling Functions
   const uploadTempFile = async (file: File): Promise<Partial<UploadedFile>> => {
@@ -304,6 +329,36 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
         setFiles(prev => prev.map(f => f.id === fileObj.id ? { ...f, ...result } : f));
     });
     event.target.value = '';
+  };
+
+  const handleAnnotateSave = async (editedFile: File) => {
+    let target: 'action' | 'revision' | 'resubmission' = 'action';
+    if (isResubmissionFlow) target = 'resubmission';
+    else if (isRevisionFlow) target = 'revision';
+    
+    const setFiles = target === 'revision' ? setRevisionFiles : setNewFiles;
+    
+    const newFileObj: UploadedFile = { 
+        id: `edited-${Date.now()}`, 
+        file: editedFile, 
+        status: 'uploading', 
+        progress: 0 
+    };
+
+    setFiles(prev => [...prev, newFileObj]);
+
+    try {
+        const result = await uploadTempFile(editedFile);
+        if (result.status === 'success' && result.uploadedData) {
+             setFiles(prev => prev.map(f => f.id === newFileObj.id ? { ...f, ...result } : f));
+             showNotification('success', 'บันทึกไฟล์สำเร็จ', 'ไฟล์ที่แก้ไขถูกแนบเรียบร้อยแล้ว');
+        } else {
+             throw new Error('Upload failed');
+        }
+    } catch (error) {
+        setFiles(prev => prev.map(f => f.id === newFileObj.id ? { ...f, status: 'error', error: 'Upload Failed' } : f));
+        showNotification('error', 'บันทึกไฟล์ล้มเหลว', 'ไม่สามารถอัปโหลดไฟล์ที่แก้ไขได้');
+    }
   };
   
   const removeFile = async (index: number, target: 'action' | 'revision' | 'resubmission') => {
@@ -411,17 +466,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     await handleAction('SUBMIT_REVISION');
   };
   
-  // 8. UI Condition Logic
-  const { role: userRole } = user || {};
-  const { status } = document;
-  
-  // Site Admin Review (ยังคงใช้ Logic เดิม เพราะไม่ได้เน้น Override ที่จุดนี้)
-  const isSiteReviewing = REVIEWER_ROLES.includes(userRole as Role) && status === STATUSES.PENDING_REVIEW;
-  
-  // ✅ Approval Logic (ใช้ permissions.canApprove จาก API)
-  // ทำให้ User ที่ได้รับ Override (เช่น TestFM) มองเห็นปุ่มอนุมัติได้
-  const isApproving = permissions.canApprove; 
-
   const overlayClasses = showOverlay ? 'bg-black bg-opacity-50' : ''  
   const isActionDisabled = isSubmitting || newFiles.filter(f => f.status === 'success').length === 0;
   const needsDocNumber = isSiteReviewing && !document.documentNumber;
@@ -454,31 +498,36 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
 
           {/* Main Content */}
           <div className="p-6 overflow-y-auto space-y-6">
-            <div className="bg-gray-50 p-4 rounded-lg">
+            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200"> {/* เพิ่ม border ให้กล่อง */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                   <div>
-                      <strong className="text-gray-500 block mb-1">สถานะ:</strong>
+                      {/* 👇 เปลี่ยนจาก text-gray-500 เป็น text-gray-700 font-semibold */}
+                      <strong className="text-gray-700 font-semibold block mb-1">สถานะ:</strong>
                       <span 
-                        className="px-3 py-1 text-xs font-bold text-white rounded-full"
+                        className="px-3 py-1 text-xs font-bold text-white rounded-full shadow-sm" // เพิ่ม shadow-sm
                         style={{ backgroundColor: STATUS_COLORS[document.status] || '#6c757d' }}
                       >
                         {STATUS_LABELS[document.status] || document.status}
                       </span>
                   </div>
                     <div>
-                        <strong className="text-gray-500 block">หมวดงาน:</strong>
-                        <span>{document.category.categoryCode}</span>
+                        {/* 👇 เปลี่ยนจาก text-gray-500 เป็น text-gray-700 font-semibold */}
+                        <strong className="text-gray-700 font-semibold block">หมวดงาน:</strong>
+                        <span className="text-gray-900 font-medium">{document.category.categoryCode}</span> {/* เพิ่ม class ให้ค่า */}
                     </div>
                     <div>
-                        <strong className="text-gray-500 block">โครงการ:</strong>
-                        <span>{document.site?.name || 'N/A'}</span>
+                        {/* 👇 เปลี่ยนจาก text-gray-500 เป็น text-gray-700 font-semibold */}
+                        <strong className="text-gray-700 font-semibold block">โครงการ:</strong>
+                        <span className="text-gray-900 font-medium">{document.site?.name || 'N/A'}</span>
                     </div>
                 </div>
                 {(displayDetailOrComment && displayDetailOrComment.trim() !== '') && (
                 <div className='mt-4'>
-                    <strong className="text-gray-500 block text-sm">{displayLabel}:</strong>
-                    <div className="text-gray-700 whitespace-pre-wrap bg-white p-3 rounded-md mt-1 border">
-                      <p className="italic">"{displayDetailOrComment}"</p>
+                    {/* 👇 เปลี่ยน Label */}
+                    <strong className="text-gray-700 font-semibold block text-sm">{displayLabel}:</strong>
+                    {/* 👇 ปรับสีกล่องข้อความให้อ่านง่ายขึ้น */}
+                    <div className="text-gray-900 whitespace-pre-wrap bg-white p-3 rounded-md mt-1 border border-gray-300 shadow-sm">
+                      <p className="">"{displayDetailOrComment}"</p>
                     </div>
                 </div>
                 )}
@@ -555,7 +604,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                       value={newDocumentNumberInput} 
                       onChange={(e) => setNewDocumentNumberInput(e.target.value)}
                       placeholder="กรอกเลขที่เอกสารที่นี่..."
-                      className="w-full p-2 border rounded-md text-sm border-yellow-300 focus:ring-yellow-500 focus:border-yellow-500"
+                      className="w-full p-2 border rounded-md text-sm border-yellow-300 focus:ring-yellow-500 focus:border-yellow-500 bg-white text-gray-900"
                     />
                      <p className="text-xs text-yellow-700 mt-1">เอกสารนี้ยังไม่มีเลขที่เอกสาร คุณต้องกำหนดก่อนส่งต่อไปยัง CM</p>
                   </div>
@@ -587,7 +636,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 </div>
                 <div>
                   <label className="text-sm font-medium text-gray-700 mb-1 block">แสดงความคิดเห็น (Optional)</label>
-                  <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น..." className="w-full p-2 border rounded-md text-sm" rows={2}/>
+                  <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น..." className="w-full p-2 border rounded-md text-sm bg-white text-gray-900" rows={2}/>
                 </div>                
                 <div className="flex flex-wrap justify-end gap-3">
                     <button 
@@ -636,7 +685,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                  </div>
                  <div>
                    <label className="text-sm font-medium text-gray-700 mb-1 block">หมายเหตุการแก้ไข</label>
-                   <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เช่น แก้ไขตาม Comment จาก CM..." className="w-full p-2 border rounded-md text-sm" rows={2}/>
+                   <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เช่น แก้ไขตาม Comment จาก CM..." className="w-full p-2 border rounded-md text-sm bg-white text-gray-900" rows={2}/>
                  </div>                 
                  <div className="flex justify-end">
                    <button
@@ -716,7 +765,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                                 value={revisionComment}
                                 onChange={(e) => setRevisionComment(e.target.value)}
                                 placeholder="เช่น แก้ไขตาม Comment จาก CM..."
-                                className="w-full p-2 border rounded-md text-sm"
+                                className="w-full p-2 border rounded-md text-sm bg-white text-gray-900"
                                 rows={2}
                             />
                         </div>
@@ -763,7 +812,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                  </div>
                  <div>
                    <label className="text-sm font-medium text-gray-700 mb-1 block">แสดงความคิดเห็น (Optional)</label>
-                   <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..." className="w-full p-2 border rounded-md text-sm" rows={2}/>
+                   <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..." className="w-full p-2 border rounded-md text-sm bg-white text-gray-900" rows={2}/>
                  </div>                 
                  <div className="flex flex-wrap justify-end gap-3">
                     <button onClick={() => handleAction('REJECT')} disabled={isSubmitting} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed">
@@ -796,6 +845,8 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
               isOpen={!!previewFile}
               file={previewFile}
               onClose={() => setPreviewFile(null)}
+              allowEdit={canEditPDF}
+              onSave={handleAnnotateSave}
           />
     </>
   )

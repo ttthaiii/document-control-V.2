@@ -136,7 +136,7 @@ export function AcceptInvitationForm({ token }: AcceptInvitationFormProps) {
               required: 'กรุณาใส่รหัสผ่าน',
               minLength: { value: 6, message: 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร' }
             })}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-gray-900"
             placeholder="ใส่รหัสผ่านของคุณ"
           />
           {errors.password && (
@@ -154,7 +154,7 @@ export function AcceptInvitationForm({ token }: AcceptInvitationFormProps) {
               required: 'กรุณายืนยันรหัสผ่าน',
               validate: value => value === password || 'รหัสผ่านไม่ตรงกัน'
             })}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-gray-900"
             placeholder="ใส่รหัสผ่านอีกครั้ง"
           />
           {errors.confirmPassword && (

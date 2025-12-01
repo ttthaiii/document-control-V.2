@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation'; // 👈 1. Import 
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '@/lib/firebase/client';
 import { useForm } from 'react-hook-form';
+import { HardHat } from 'lucide-react';
 
 interface LoginFormData {
   email: string;
@@ -56,9 +57,10 @@ export function LoginForm() {
 
   return (
     <div className="max-w-md mx-auto bg-white p-8 rounded-lg shadow-lg">
-      <h2 className="text-3xl font-bold text-center text-gray-800 mb-2">
-        🏗️ ttsdoc v2
-      </h2>
+    <h2 className="text-3xl font-bold text-center text-gray-800 mb-2 flex items-center justify-center gap-3">
+        <HardHat className="text-orange-600" size={40} />
+        TTS Document Control
+    </h2>
       <p className="text-center text-gray-600 mb-6">เข้าสู่ระบบจัดการเอกสารงานก่อสร้าง</p>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -69,7 +71,7 @@ export function LoginForm() {
           <input
             type="email"
             {...register('email', { required: 'กรุณาใส่อีเมล' })}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-gray-900"
             placeholder="your.email@company.com"
           />
           {errors.email && (
@@ -84,7 +86,8 @@ export function LoginForm() {
           <input
             type="password"
             {...register('password', { required: 'กรุณาใส่รหัสผ่าน' })}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            // 🟢 แก้ไขบรรทัดนี้
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-gray-900"
             placeholder="••••••••"
           />
           {errors.password && (

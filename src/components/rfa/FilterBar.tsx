@@ -27,6 +27,8 @@ interface FilterBarProps {
   availableResponsibleParties: { value: string; label: string }[];
 }
 
+const inputStyle = "w-full mt-1 h-10 px-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none";
+
 const FilterBar: React.FC<FilterBarProps> = ({
   filters,
   handleFilterChange,
@@ -48,7 +50,8 @@ const FilterBar: React.FC<FilterBarProps> = ({
             id="site-filter"
             value={filters.siteId}
             onChange={(e) => handleFilterChange('siteId', e.target.value)}
-            className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg"
+            // 🟢 แก้ไข: เติม bg-white text-gray-900
+            className={inputStyle}
           >
             <option value="ALL">ทุกโครงการ</option>
             {sites.map(site => (
@@ -70,7 +73,8 @@ const FilterBar: React.FC<FilterBarProps> = ({
               placeholder="เลขที่, ชื่อเอกสาร..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg"
+              // 🟢 แก้ไข: เติม bg-white text-gray-900
+              className="w-full h-10 pl-10 pr-4 border border-gray-300 rounded-lg bg-white text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-blue-500 outline-none"
             />
           </div>
         </div>
@@ -82,7 +86,8 @@ const FilterBar: React.FC<FilterBarProps> = ({
             id="status-filter"
             value={filters.status}
             onChange={(e) => handleFilterChange('status', e.target.value)}
-            className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg"
+            // 🟢 แก้ไข: เติม bg-white text-gray-900
+            className={inputStyle} // ✅ ใช้ class ใหม่
           >
             <option value="ALL">ทุกสถานะ</option>
             {availableStatuses.map(statusKey => (
@@ -100,7 +105,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
             id="responsible-party-filter"
             value={filters.responsibleParty}
             onChange={(e) => handleFilterChange('responsibleParty', e.target.value)}
-            className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg"
+            className={inputStyle} 
           >
             {availableResponsibleParties.map(party => (
               <option key={party.value} value={party.value}>{party.label}</option>
@@ -113,7 +118,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
           <label htmlFor="category-filter" className="text-sm font-medium text-gray-700">หมวดงาน</label>
           <select 
             id="category-filter" 
-            className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg"
+            className={inputStyle}
             value={filters.categoryId}
             onChange={(e) => handleFilterChange('categoryId', e.target.value)}
           >
@@ -140,7 +145,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
         
         {/* Reset Button */}
         <div className="md:col-span-1">
-          <button onClick={resetFilters} className="w-full px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300">
+          <button onClick={resetFilters} className="w-full h-10 px-4 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 font-medium"> {/* ✅ ใส่ h-10 */}
             รีเซ็ต
           </button>
         </div>
