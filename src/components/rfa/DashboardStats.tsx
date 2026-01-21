@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { STATUS_LABELS } from '@/lib/config/workflow'; 
+import { STATUS_LABELS, STATUSES } from '@/lib/config/workflow'; 
 import { RFADocument } from '@/types/rfa';
 
 interface Category {
@@ -39,19 +39,45 @@ const CustomTooltip = ({ active, payload }: any) => {
 };
 
 const CATEGORY_COLORS = [
-  '#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF', 
-  '#FF6363', '#BC5090', '#36A2EB', '#FFCE56', '#4BC0C0', 
-  '#9966FF', '#FF9F40', '#8AC926', '#1982C4', '#6A4C93', 
-  '#F15BB5', '#FEE440', '#00B4D8', '#90BE6D', '#F94144'
+  '#5D4037', // Dark Coffee (น้ำตาลเข้มกาแฟ)
+  '#7CB342', // Grass Green (เขียวหญ้า)
+  '#EF6C00', // Persimmon (ส้มลูกพลับ)
+  '#455A64', // Blue Grey (เทาอมฟ้าเข้ม)
+  '#C0CA33', // Muted Lime (เขียวมะนาวตุ่น)
+  '#8D6E63', // Taupe (น้ำตาลเทา)
+  '#00897B', // Teal (เขียวหัวเป็ด)
+  '#FBC02D', // Mustard (เหลืองมัสตาร์ด)
+  '#6D4C41', // Cocoa (น้ำตาลโกโก้)
+  '#2E7D32', // Forest Green (เขียวป่า)
+  '#D84315', // Burnt Sienna (ส้มอิฐไหม้)
+  '#546E7A', // Slate (เทาหินชนวน)
+  '#9E9D24', // Olive (เขียวมะกอก)
+  '#3E2723', // Espresso (น้ำตาลเข้มเกือบดำ)
+  '#FFB74D', // Apricot (ส้มอ่อน)
+  '#00695C', // Deep Teal (เขียวทะเลลึก)
+  '#AFB42B', // Olive Yellow (เหลืองอมเขียว)
+  '#795548', // Earth Brown (น้ำตาลดิน)
+  '#90A4AE', // Light Slate (เทาหินอ่อน)
+  '#A1887F', // Sand (สีทรายเข้ม)
 ];
 
-// ✅ ปรับชุดสี: แยก REJECTED ออกมาให้ชัดเจน
-const RESPONSIBLE_COLORS: { [key: string]: string } = {
-    'SITE': '#3B82F6',      // Blue (Site Review)
-    'CM': '#8B5CF6',        // Violet (CM Approval)
-    'BIM': '#F59E0B',       // Amber/Orange (Fixing)
-    'APPROVED': '#10B981',  // Emerald (Done)
-    'REJECTED': '#EF4444',  // Red (Rejected) <-- เพิ่มสีแดงสำหรับไม่อนุมัติ
+// ✅ [แก้ไข 1] กำหนดสีแยกรายสถานะให้ชัดเจน (ไม่ Group รวมกันแล้ว)
+const STATUS_CHART_COLORS: { [key: string]: string } = {
+    // กลุ่มสีเทาอมฟ้า/หิน (รออนุมัติ - สงบ รอคอย)
+    [STATUSES.PENDING_REVIEW]: '#78909C',           // Slate Grey (เทาอมฟ้าตุ่นๆ)
+    [STATUSES.PENDING_CM_APPROVAL]: '#546E7A',      // Deep Slate (เทาเข้มขึ้นมาหน่อย)
+    [STATUSES.PENDING_FINAL_APPROVAL]: '#607D8B',   // Blue Grey (เทากลางๆ)
+    
+    // กลุ่มสีเขียวธรรมชาติ (ผ่าน - สำเร็จ)
+    [STATUSES.APPROVED]: '#558B2F',                 // Moss Green (เขียวมอส/เขียวใบไม้แก่)
+    [STATUSES.APPROVED_WITH_COMMENTS]: '#4DB6AC',   // Muted Teal / Sage (เขียวอมฟ้าปนเทา - ให้ดูต่างจากมอส)
+    
+    // กลุ่มสีดิน/ทราย (แก้ไข - แจ้งเตือน)
+    [STATUSES.REVISION_REQUIRED]: '#C0CA33',        // Muted Lime / Olive Yellow (เหลืองอมเขียวตุ่นๆ)
+    [STATUSES.APPROVED_REVISION_REQUIRED]: '#D87D4A', // Terracotta / Muted Orange (สีส้มอิฐ/ดินเผา - แจ้งเตือนเข้มข้นกว่า)
+    
+    // กลุ่มสีแดงสนิม (ไม่ผ่าน - ปฏิเสธ)
+    [STATUSES.REJECTED]: '#A5574C',                 // Rust Red / Clay (แดงสนิม/ดินแดงเข้ม)
 };
 
 const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFilter, activeFilters, categories }) => {
@@ -80,23 +106,12 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
   const responsiblePartyData = useMemo(() => {
     if (!statsByStatus) return [];
     
-    // ✅ Mapping ใหม่: แยก REJECTED ไปหากลุ่มสีแดง
-    const groupMapping: { [key: string]: string } = {
-        'PENDING_REVIEW': 'SITE',
-        'PENDING_FINAL_APPROVAL': 'SITE',
-        'PENDING_CM_APPROVAL': 'CM',
-        'REVISION_REQUIRED': 'BIM',
-        'APPROVED_REVISION_REQUIRED': 'BIM',
-        'APPROVED': 'APPROVED',
-        'APPROVED_WITH_COMMENTS': 'APPROVED',
-        'REJECTED': 'REJECTED' // <-- แยกกลุ่มออกมา
-    };
-
+    // ✅ [แก้ไข 2] ยกเลิกการใช้ groupMapping แล้วดึงสีจาก STATUS_CHART_COLORS โดยตรง
     return Object.entries(statsByStatus.statusCounts)
       .map(([statusKey, value]) => {
         const label = STATUS_LABELS[statusKey];
-        const group = groupMapping[statusKey] || 'SITE';
-        const color = RESPONSIBLE_COLORS[group] || '#999';
+        // ดึงสีตาม Key ของสถานะเป๊ะๆ ถ้าไม่เจอให้ใช้สีเทา
+        const color = STATUS_CHART_COLORS[statusKey] || '#94a3b8';
 
         if (!label) return null;
         return { name: label, value: value, statusKey: statusKey, color: color };
@@ -149,10 +164,10 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
 
   return (
     <div className="relative grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-      {/* Chart 1: Responsible Party */}
+      {/* Chart 1: Status Distribution */}
       <div>
           <div className="bg-white p-6 rounded-lg shadow h-full border border-gray-100">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4 text-center">สถานะตามผู้รับผิดชอบ</h3>
+            <h3 className="text-lg font-semibold text-gray-800 mb-4 text-center">สถานะเอกสาร</h3>
             <div className="relative w-full h-[380px]">
               <ResponsiveContainer>
                 <PieChart>

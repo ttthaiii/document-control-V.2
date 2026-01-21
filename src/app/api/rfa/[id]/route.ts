@@ -205,7 +205,27 @@ export async function PUT(
         if (!canPerformAction) {
           return NextResponse.json({ success: false, error: 'Permission denied or invalid status.' }, { status: 403 });
         }
-        
+
+        const actionsRequiringFiles = [
+            'SEND_TO_CM', 
+            'REQUEST_REVISION', 
+            'SUBMIT_REVISION',
+            'APPROVE', 
+            'APPROVE_WITH_COMMENTS', 
+            'APPROVE_REVISION_REQUIRED', 
+            'REJECT'
+        ];
+
+        if (actionsRequiringFiles.includes(action)) {
+             // เช็คว่ามีไฟล์แนบมาหรือไม่
+             if (!newFiles || !Array.isArray(newFiles) || newFiles.length === 0) {
+                 return NextResponse.json(
+                     { success: false, error: `Action '${action}' requires at least one file attachment.` }, 
+                     { status: 400 }
+                 );
+             }
+        }
+            
         // --- Logic การเปลี่ยนสถานะ ---
         switch(action) {
             case 'SEND_TO_CM': newStatus = STATUSES.PENDING_CM_APPROVAL; break;

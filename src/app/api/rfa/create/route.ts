@@ -14,6 +14,7 @@ function toSlugId(input: string): string {
   if (!input) return '';
   return input.trim().replace(/[^\p{L}\p{N}]+/gu, "_").replace(/^_+|_+$/g, "").toUpperCase();
 }
+
 async function ensureCategory(siteId: string, categoryIdOrName: string, defaults?: Partial<{ name: string; description: string; createdBy: string; rfaType: string; }>): Promise<{ id: string; created: boolean }> {
     const docId = toSlugId(categoryIdOrName);
     const ref = adminDb.doc(`sites/${siteId}/categories/${docId}`);
@@ -28,6 +29,9 @@ async function ensureCategory(siteId: string, categoryIdOrName: string, defaults
         description: defaults?.description ?? "",
         rfaTypes: defaults?.rfaType ? [defaults.rfaType] : [],
         active: true,
+        // 👇 [สำคัญมาก] ต้องเพิ่มบรรทัดนี้ครับ ไม่งั้น Filter จะมองไม่เห็น
+        siteId: siteId, 
+        // -----------------------------------------------------
         createdAt: FieldValue.serverTimestamp(),
         createdBy: defaults?.createdBy ?? "SYSTEM",
     });
