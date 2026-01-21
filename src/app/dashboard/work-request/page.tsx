@@ -10,13 +10,13 @@ import WorkRequestDetailModal from '@/components/work-request/WorkRequestDetailM
 import CreateWorkRequestForm from '@/components/work-request/CreateWorkRequestForm';
 import { WorkRequest, WorkRequestStatus } from '@/types/work-request';
 import { Plus, RefreshCw, ThumbsUp, ThumbsDown, AlertTriangle, X, PenTool } from 'lucide-react';
-import { ROLES, WR_APPROVER_ROLES, WR_CREATOR_ROLES, WR_STATUSES, Role } from '@/lib/config/workflow';
+import { ROLES, WR_APPROVER_ROLES, WR_CREATOR_ROLES, WR_STATUSES, Role, STATUS_LABELS } from '@/lib/config/workflow';
 import { db } from '@/lib/firebase/client';
-// ✅ เพิ่ม documentId ใน import
 import { collection, query, where, onSnapshot, orderBy, DocumentData, documentId } from 'firebase/firestore';
 import { useNotification } from '@/lib/context/NotificationContext';
 import Spinner from '@/components/shared/Spinner';
 import { PERMISSION_KEYS, PERMISSION_DEFAULTS } from '@/lib/config/permissions';
+import FilterBar from '@/components/rfa/FilterBar';
 
 interface ApiSite {
   id: string;
@@ -24,6 +24,15 @@ interface ApiSite {
   userOverrides?: {
     [userId: string]: Record<string, any>
   };
+}
+
+interface Filters {
+    rfaType: string;
+    status: string;
+    siteId: string;
+    showAllRevisions: boolean;
+    categoryId: string;
+    responsibleParty: string;
 }
 
 const RejectReasonModal = ({
@@ -103,13 +112,34 @@ function WorkRequestDashboardContent() {
     const [showRejectModal, setShowRejectModal] = useState(false);
     const [docIdToRejectSingle, setDocIdToRejectSingle] = useState<string | null>(null);
 
+    // Filter States
+    const [searchTerm, setSearchTerm] = useState('');
+    const [filters, setFilters] = useState<Filters>({
+        rfaType: 'ALL',
+        status: 'ALL',
+        siteId: 'ALL',
+        showAllRevisions: false,
+        categoryId: 'ALL',
+        responsibleParty: 'ALL',
+    });
+
+    // 1. ✅ แก้ไขตัวเลือกผู้รับผิดชอบ ให้ตรงกับ Work Request Flow
+    const availableResponsibleParties = [
+        { value: 'ALL', label: 'ทุกคน' },
+        { value: 'PM', label: 'PM (รออนุมัติ)' },
+        { value: 'BIM', label: 'BIM (รับงาน/แก้ไข)' },
+        { value: 'SITE', label: 'Site (รอตรวจรับ)' },
+        { value: 'COMPLETED', label: 'เสร็จสิ้น' },
+        { value: 'REJECTED', label: 'ไม่อนุมัติ (PM)' }
+    ];
+
+    const availableStatuses = useMemo(() => Object.values(WR_STATUSES), []);
+
     useEffect(() => {
         const fetchSites = async () => {
             if (!firebaseUser) return;
             try {
-                // const token = await firebaseUser.getIdToken(); // ไม่ได้ใช้ token ตรงนี้แล้วเพราะใช้ onSnapshot
                 if (user?.sites && user.sites.length > 0) {
-                    // ใช้ documentId() แทน __name__ เพื่อความปลอดภัยและถูกต้องตาม SDK ใหม่
                     const q = query(collection(db, "sites"), where(documentId(), "in", user.sites));
                     onSnapshot(q, (snapshot) => {
                         const sitesData = snapshot.docs.map(doc => ({
@@ -179,20 +209,6 @@ function WorkRequestDashboardContent() {
         return () => unsubscribe();
     }, [firebaseUser, user]);
 
-    const documentsWithSiteNames = useMemo(() => {
-        if (sites.length === 0) {
-            return allDocuments;
-        }
-        const sitesMap = new Map(sites.map(site => [site.id, site.name]));
-        return allDocuments.map(doc => ({
-            ...doc,
-            site: {
-                id: doc.site.id,
-                name: sitesMap.get(doc.site.id) || 'Unknown Site'
-            }
-        }));
-    }, [allDocuments, sites]);
-
     const canCreateWR = useMemo(() => {
         if (!user) return false;
         const permKey = `WR.${PERMISSION_KEYS.WORK_REQUEST.CREATE}`;
@@ -208,20 +224,76 @@ function WorkRequestDashboardContent() {
         });
     }, [user, sites]);
 
-    const handleDocumentClick = (doc: WorkRequest) => {
-        setSelectedDocId(doc.id);
-    };
-    
-    const handleCloseDetailModal = () => {
-        setSelectedDocId(null);
+    const filteredDocuments = useMemo(() => {
+        const sitesMap = new Map(sites.map(s => [s.id, s.name]));
+        
+        const documentsWithSiteNames = allDocuments.map(doc => ({
+            ...doc,
+            site: {
+                id: doc.site.id,
+                name: sitesMap.get(doc.site.id) || 'Unknown Site'
+            }
+        }));
+        
+        let docsToShow = documentsWithSiteNames;
+
+        if (!filters.showAllRevisions) {
+            docsToShow = docsToShow.filter(doc => doc.isLatest);
+        }
+
+        if (filters.status !== 'ALL') {
+            docsToShow = docsToShow.filter(doc => doc.status === filters.status);
+        }
+
+        if (filters.siteId !== 'ALL') {
+            docsToShow = docsToShow.filter(doc => doc.site.id === filters.siteId);
+        }
+
+        // 2. ✅ เพิ่ม Logic การกรอง Responsible Party ให้ตรงกับ WR Workflow
+        if (filters.responsibleParty !== 'ALL') {
+            const rp = filters.responsibleParty;
+            docsToShow = docsToShow.filter(doc => {
+                switch (rp) {
+                    case 'PM':
+                        return doc.status === WR_STATUSES.DRAFT;
+                    case 'BIM':
+                        // BIM ดูแล: รอรับงาน, กำลังทำ, หรือต้องแก้
+                        return ([WR_STATUSES.PENDING_BIM, WR_STATUSES.IN_PROGRESS, WR_STATUSES.REVISION_REQUESTED] as WorkRequestStatus[]).includes(doc.status);
+                    case 'SITE':
+                        // Site ดูแล: รอตรวจรับ
+                        return doc.status === WR_STATUSES.PENDING_ACCEPTANCE;
+                    case 'COMPLETED':
+                        return doc.status === WR_STATUSES.COMPLETED;
+                    case 'REJECTED':
+                        return doc.status === WR_STATUSES.REJECTED_BY_PM;
+                    default:
+                        return true;
+                }
+            });
+        }
+
+        if (searchTerm.trim()) {
+            const search = searchTerm.toLowerCase();
+            docsToShow = docsToShow.filter(doc => 
+                doc.documentNumber.toLowerCase().includes(search) ||
+                doc.taskName.toLowerCase().includes(search)
+            );
+        }
+
+        return docsToShow;
+    }, [allDocuments, filters, sites, searchTerm]);
+
+    const handleFilterChange = (key: keyof Filters, value: any) => {
+        setFilters(prev => ({ ...prev, [key]: value }));
     };
 
-    const handleCloseCreateModal = () => {
-        setIsCreateModalOpen(false);
+    const resetFilters = () => {
+        setFilters({ rfaType: 'ALL', status: 'ALL', siteId: 'ALL', showAllRevisions: false, categoryId: 'ALL', responsibleParty: 'ALL' });
+        setSearchTerm('');
     };
-    
-    const canCreate = user && WR_CREATOR_ROLES.includes(user.role); // เก็บไว้เผื่อใช้ (แต่ตอนนี้ใช้ canCreateWR แทนใน UI)
-    const isApprover = user && WR_APPROVER_ROLES.includes(user.role); // TODO: อาจต้องปรับให้รองรับ Override ในอนาคต
+
+    const handleDocumentClick = (doc: WorkRequest) => { setSelectedDocId(doc.id); };
+    const handleCloseDetailModal = () => { setSelectedDocId(null); };
 
     const handleBatchAction = useCallback(async (action: 'APPROVE_DRAFT' | 'REJECT_DRAFT', reason?: string) => {
         const idsToUpdate = docIdToRejectSingle ? [docIdToRejectSingle] : selectedDraftIds;
@@ -279,7 +351,6 @@ function WorkRequestDashboardContent() {
         handleBatchAction('REJECT_DRAFT', reason);
     };
 
-    // แยก Logic Single Action ให้ชัดเจน (ไม่ต้องผ่าน handleBatchAction) เพื่อลดความสับสน
     const handleSingleAction = useCallback(async (action: 'APPROVE_DRAFT' | 'REJECT_DRAFT', docId: string, reason?: string) => {
         setIsBatchSubmitting(true);
         try {
@@ -325,6 +396,8 @@ function WorkRequestDashboardContent() {
             handleSingleAction('REJECT_DRAFT', docIdToRejectSingle, reason);
         }
     };
+    
+    const isApprover = user && WR_APPROVER_ROLES.includes(user.role);
 
     return (
         <div className="max-w-screen-2xl mx-auto flex flex-col h-full">
@@ -353,6 +426,20 @@ function WorkRequestDashboardContent() {
                 </div>
             </div>
 
+            <div className='mb-6'>
+                <FilterBar 
+                    filters={filters} 
+                    handleFilterChange={handleFilterChange} 
+                    searchTerm={searchTerm} 
+                    setSearchTerm={setSearchTerm} 
+                    resetFilters={resetFilters}
+                    sites={sites} 
+                    categories={[]} 
+                    availableStatuses={availableStatuses} 
+                    availableResponsibleParties={availableResponsibleParties}
+                />
+            </div>
+
             {isApprover && (
                 <div className="bg-white p-3 rounded-lg shadow border border-gray-200 flex items-center space-x-3">
                     <span className="text-sm font-medium text-gray-700">รายการที่เลือก ({selectedDraftIds.length}):</span>
@@ -376,7 +463,7 @@ function WorkRequestDashboardContent() {
 
             <div className="flex-1 min-h-0">
                 <WorkRequestListTable
-                    documents={documentsWithSiteNames}
+                    documents={filteredDocuments}
                     isLoading={loading}
                     onDocumentClick={handleDocumentClick}
                     selectedIds={selectedDraftIds}
@@ -400,7 +487,7 @@ function WorkRequestDashboardContent() {
                 <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
                     <div className="w-full max-w-4xl bg-white rounded-lg shadow-xl p-6">
                         <CreateWorkRequestForm
-                            onClose={handleCloseCreateModal}
+                            onClose={() => setIsCreateModalOpen(false)}
                             userProp={user || undefined}
                         />
                     </div>

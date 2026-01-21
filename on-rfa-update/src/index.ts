@@ -107,6 +107,11 @@ async function sendRfaLineNotification(event: any) {
     const newData = event.data.after.data();
     const beforeData = event.data.before.data();
 
+    if (newData?.isMigration === true) {
+        logger.log(`🔇 [RFA LINE/${docId}] Skipped notification because 'isMigration' is true.`);
+        return;
+    }
+    
     // Determine if it's a create or status update event
     const isCreate = !event.data.before.exists;
     const isStatusUpdate = !isCreate && beforeData?.status !== newData?.status;

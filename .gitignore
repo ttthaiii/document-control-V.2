@@ -58,3 +58,9 @@ node_modules/
 .line_channel_access_token.txt
 
 migrate/
+
+# Firebase cache
+.firebase/
+
+# Logs
+*.log

@@ -1,25 +1,31 @@
 // src/components/rfa/PDFPreviewModal.tsx
 'use client';
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useLayoutEffect } from 'react';
 import { RFAFile } from '@/types/rfa';
 import { 
   X, Edit3, Undo, Trash2, Menu, Plus, Minus, Save,
   MousePointer2, Hand, Square, Circle, Eraser, Monitor, Type, XCircle,
-  Loader2, ChevronLeft, ChevronRight 
+  Loader2, ChevronLeft, ChevronRight, Download
 } from 'lucide-react';
 
 import * as fabric from 'fabric';
+import { PDFDocument } from 'pdf-lib'; // ต้อง npm install pdf-lib
 
 interface PDFPreviewModalProps {
   isOpen: boolean;
   file: RFAFile | null;
   onClose: () => void;
-  onSave?: (editedFile: File) => void;
+  onSave?: (editedFile: File) => void | Promise<void>;
   allowEdit?: boolean;
 }
 
 const PRESET_COLORS = ['#000000', '#DC2626', '#2563EB', '#16A34A', '#EA580C'];
+
+// [CONFIG] ค่านี้คือเพดานความละเอียดที่ยอมรับได้
+// 8192px คือค่าปลอดภัยสำหรับ iPad/Laptop ส่วนใหญ่ (4K = ~4000px)
+// ถ้าเครื่องแรงปรับเป็น 12000 ได้ แต่ 8192 คือจุดสมดุลที่ดี
+const MAX_RENDER_DIMENSION = 8192; 
 
 export default function PDFPreviewModal({ 
   isOpen, file, onClose, onSave, allowEdit = true
@@ -29,7 +35,12 @@ export default function PDFPreviewModal({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const currentCanvasRef = useRef<fabric.Canvas | null>(null);
   const pdfDocRef = useRef<any>(null);
+  
   const canvasDataRef = useRef<{ [key: number]: any }>({}); 
+  const pageCanvasCacheRef = useRef<{ [page: number]: { canvas: HTMLCanvasElement, scale: number } }>({});
+
+  const pendingScrollRef = useRef<{ left: number, top: number } | null>(null);
+
   const isRenderingRef = useRef(false);
   const activePageRef = useRef(1);
   const renderTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -48,6 +59,7 @@ export default function PDFPreviewModal({
   
   const [visualScale, setVisualScale] = useState(1.0); 
   const [renderedScale, setRenderedScale] = useState(1.0);
+  
   const [baseDimensions, setBaseDimensions] = useState({ width: 0, height: 0 }); 
 
   const [isLoading, setIsLoading] = useState(false);
@@ -61,6 +73,8 @@ export default function PDFPreviewModal({
   const startPinchDistRef = useRef<number>(0);
   const startPinchScaleRef = useRef<number>(1.0);
 
+  const scaleRatio = visualScale / renderedScale;
+
   // Sync State -> Ref
   useEffect(() => { 
       visualScaleRef.current = visualScale; 
@@ -71,64 +85,71 @@ export default function PDFPreviewModal({
     if (!allowEdit || !currentCanvasRef.current) return; 
     const canvas = currentCanvasRef.current;
     const pageToSave = activePageRef.current;
-    const currentZoom = canvas.getZoom(); 
-    const { width, height } = canvas;
-    
-    canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
-    canvas.setWidth(width / currentZoom); 
-    canvas.setHeight(height / currentZoom);
     canvasDataRef.current[pageToSave] = canvas.toJSON();
-    canvas.setZoom(currentZoom); 
-    canvas.setWidth(width); 
-    canvas.setHeight(height);
   }, [allowEdit]);
   
-  // --- Zoom Handler (FIXED: Real Size Change, Not CSS Transform) ---
+  // --- Zoom Handler (Exponential & Dynamic Limit) ---
   const handleZoom = useCallback((newScale: number, clientX?: number, clientY?: number) => {
       saveCurrentPageData();
       
-      const container = scrollContainerRef.current;
-      if (!container || !baseDimensions.width) return;
-
-      const safeScale = Math.min(Math.max(0.5, newScale), 5.0);
-      const prevScale = visualScaleRef.current;
+      const scrollContainer = scrollContainerRef.current;
+      const contentContainer = containerRef.current;
       
-      // อัปเดตค่าทันที
+      if (!scrollContainer || !contentContainer || !baseDimensions.width || !baseDimensions.height) return;
+
+      // คำนวณ Limit ตามขนาดเอกสารจริง เพื่อกันแอปเด้ง
+      const maxPossibleScale = MAX_RENDER_DIMENSION / Math.max(baseDimensions.width, baseDimensions.height);
+      const dynamicMaxScale = Math.min(8.0, maxPossibleScale); // ยอมให้สูงสุด 800% ถ้ารับไหว
+      
+      const safeScale = Math.min(Math.max(0.1, newScale), dynamicMaxScale);
+
+      const contentRect = contentContainer.getBoundingClientRect();
+      const scrollRect = scrollContainer.getBoundingClientRect();
+
+      const ptrX = clientX !== undefined ? clientX : scrollRect.left + scrollRect.width / 2;
+      const ptrY = clientY !== undefined ? clientY : scrollRect.top + scrollRect.height / 2;
+
+      const offsetX = ptrX - contentRect.left;
+      const offsetY = ptrY - contentRect.top;
+      const percentX = offsetX / contentRect.width;
+      const percentY = offsetY / contentRect.height;
+
       visualScaleRef.current = safeScale;
       setVisualScale(safeScale);
 
-      // 1. ข้อมูล viewport
-      const rect = container.getBoundingClientRect();
-      const viewportWidth = rect.width;
-      const viewportHeight = rect.height;
+      const newWidth = baseDimensions.width * safeScale;
+      const newHeight = baseDimensions.height * safeScale;
 
-      // 2. ตำแหน่ง pointer (ถ้าไม่มีใช้กึ่งกลาง)
-      const pointerX = clientX !== undefined ? clientX - rect.left : viewportWidth / 2;
-      const pointerY = clientY !== undefined ? clientY - rect.top : viewportHeight / 2;
+      const newPointX = 32 + (newWidth * percentX);
+      const newPointY = 32 + (newHeight * percentY);
 
-      // 3. คำนวณจุดบนเอกสารที่ pointer ชี้อยู่
-      const docPointX = (container.scrollLeft + pointerX) / prevScale;
-      const docPointY = (container.scrollTop + pointerY) / prevScale;
+      const pointerInScrollX = ptrX - scrollRect.left;
+      const pointerInScrollY = ptrY - scrollRect.top;
 
-      // 4. คำนวณ scroll ใหม่
-      const newScrollLeft = (docPointX * safeScale) - pointerX;
-      const newScrollTop = (docPointY * safeScale) - pointerY;
+      const newScrollLeft = newPointX - pointerInScrollX;
+      const newScrollTop = newPointY - pointerInScrollY;
 
-      // 5. Apply scroll ทันที
-      requestAnimationFrame(() => {
-          if (container) {
-              container.scrollLeft = Math.max(0, newScrollLeft);
-              container.scrollTop = Math.max(0, newScrollTop);
-          }
-      });
+      pendingScrollRef.current = { left: newScrollLeft, top: newScrollTop };
 
-  }, [baseDimensions, saveCurrentPageData]); 
+  }, [baseDimensions, saveCurrentPageData]);
+
+  // Scroll Correction (useLayoutEffect to prevent jumping)
+  useLayoutEffect(() => {
+      if (pendingScrollRef.current && scrollContainerRef.current) {
+          scrollContainerRef.current.style.scrollBehavior = 'auto'; 
+          scrollContainerRef.current.scrollLeft = pendingScrollRef.current.left;
+          scrollContainerRef.current.scrollTop = pendingScrollRef.current.top;
+          scrollContainerRef.current.style.scrollBehavior = ''; 
+          pendingScrollRef.current = null;
+      }
+  }, [visualScale]);
 
   // --- Reset State on Open ---
   useEffect(() => {
     if (isOpen) {
       setIsEditing(false);
       document.body.style.overflow = 'hidden';
+      pageCanvasCacheRef.current = {};
     } else {
       document.body.style.overflow = 'unset';
     }
@@ -148,16 +169,39 @@ export default function PDFPreviewModal({
     }
   }, [isEditing]);
 
-  // --- Debounce Render ---
+  // --- Smart Render Logic (High-DPI Decision) ---
   useEffect(() => {
     if (renderTimeoutRef.current) clearTimeout(renderTimeoutRef.current);
     renderTimeoutRef.current = setTimeout(() => {
-        if (Math.abs(visualScale - renderedScale) > 0.05) {
-            setRenderedScale(visualScale);
+        // 1. หาความหนาแน่นหน้าจอ (Retina = 2-3)
+        const dpr = window.devicePixelRatio || 1;
+        const maxDocDimension = Math.max(baseDimensions.width || 1, baseDimensions.height || 1);
+        
+        // 2. คำนวณ Scale สูงสุดที่ Render ไหว (รวมผลคูณของ DPR แล้ว)
+        // สูตร: (Limit / DPR) / ขนาดเอกสาร
+        // เช่น Limit 8192 / DPR 2 = 4096. ถ้่าเอกสาร 1000px -> Max Scale = 4.0
+        const maxSafeScale = (MAX_RENDER_DIMENSION / dpr) / maxDocDimension;
+        
+        // 3. ถ้า Visual Scale ยังไม่เกิน Limit -> Render เต็มความละเอียด (ชัดตาแตก)
+        // ถ้าเกิน -> Cap ไว้ที่ Limit (ชัดเท่าที่เครื่องไหว)
+        let targetScale = Math.min(visualScale, maxSafeScale);
+        
+        // Fallback: ถ้า Zoom เยอะจัดๆ ยอมลด DPR เป็น 1 เพื่อให้ Zoom ได้ลึกขึ้น (ชัดแบบ Standard)
+        if (targetScale < visualScale && dpr > 1) {
+             const maxSafeScaleNonRetina = MAX_RENDER_DIMENSION / maxDocDimension;
+             // ถ้าลด DPR แล้วได้ Scale เยอะขึ้น ให้เอาอันนี้
+             if (Math.min(visualScale, maxSafeScaleNonRetina) > targetScale) {
+                 targetScale = Math.min(visualScale, maxSafeScaleNonRetina);
+                 // *Note: ใน renderCanvas จะต้องเช็คอีกทีเพื่อปรับ Output Scale
+             }
         }
-    }, 300); // ลดเหลือ 300ms เพื่อให้ render เร็วขึ้น
+
+        if (Math.abs(targetScale - renderedScale) > 0.1) {
+            setRenderedScale(targetScale);
+        }
+    }, 400); // 400ms หลังหยุด Zoom ถึงจะ Render ใหม่
     return () => { if (renderTimeoutRef.current) clearTimeout(renderTimeoutRef.current); };
-  }, [visualScale, renderedScale]);
+  }, [visualScale, renderedScale, baseDimensions]);
 
   // --- Init ---
   useEffect(() => {
@@ -191,6 +235,7 @@ export default function PDFPreviewModal({
     if (!isOpen || !file) return;
     setThumbnails({}); setTotalPages(0); setCurrentPage(1);
     canvasDataRef.current = {}; pdfDocRef.current = null;
+    pageCanvasCacheRef.current = {};
     
     const loadPDF = async () => {
       setIsLoading(true);
@@ -234,169 +279,206 @@ export default function PDFPreviewModal({
     return () => { isCancelled = true; };
   }, [totalPages]);
 
-  // --- Save Logic ---
+  // --- Save Logic (pdf-lib Overlay) ---
   const handleSave = async () => {
-    if (!onSave || !file || !pdfDocRef.current || !allowEdit) return;
+    if (!onSave || !file || !allowEdit) return;
     setIsSaving(true);
+    
     try {
         saveCurrentPageData(); 
-        const { jsPDF } = await import('jspdf');
-        let doc: any = null; 
-        const pdf = pdfDocRef.current;
-        const exportScale = 2.0; 
 
-        for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i);
-            const originalViewport = page.getViewport({ scale: 1.0 });
-            const width = originalViewport.width; const height = originalViewport.height;
-            const orientation = width > height ? 'landscape' : 'portrait';
-            const renderViewport = page.getViewport({ scale: exportScale });
+        const existingPdfBytes = await fetch(file.fileUrl).then(res => res.arrayBuffer());
+        const pdfDoc = await PDFDocument.load(existingPdfBytes);
+        const pages = pdfDoc.getPages();
 
-            if (i === 1) doc = new jsPDF({ orientation, unit: 'px', format: [width, height], hotfixes: ['px_scaling'] });
-            else doc.addPage([width, height], orientation);
-
-            const bgCanvas = document.createElement('canvas');
-            bgCanvas.width = renderViewport.width; bgCanvas.height = renderViewport.height;
-            const ctx = bgCanvas.getContext('2d')!;
-            ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
-            await page.render({ canvasContext: ctx, viewport: renderViewport }).promise;
-
-            const json = canvasDataRef.current[i];
-            if (json) {
-                const tempCanvasEl = document.createElement('canvas');
-                const fCanvas = new fabric.StaticCanvas(tempCanvasEl, { width: width, height: height });
-                await fCanvas.loadFromJSON(json);
-                const drawingDataUrl = fCanvas.toDataURL({ format: 'png', multiplier: exportScale });
-                const img = new Image(); img.src = drawingDataUrl;
-                await new Promise(resolve => { img.onload = resolve; });
-                ctx.drawImage(img, 0, 0);
+        for (let i = 0; i < pages.length; i++) {
+            const pageData = canvasDataRef.current[i + 1]; 
+            if (pageData) {
+                const page = pages[i];
+                const { width, height } = page.getSize();
+                const tempCanvas = document.createElement('canvas');
+                // ใช้ StaticCanvas เพื่อ Render ลายเซ็นให้คมชัดที่สุด
+                const fCanvas = new fabric.StaticCanvas(tempCanvas, { width, height });
+                await fCanvas.loadFromJSON(pageData);
+                // Export เป็น PNG 2x เพื่อความคมชัดตอนแปะลง PDF
+                const imgData = fCanvas.toDataURL({ format: 'png', multiplier: 2 });
+                const pngImage = await pdfDoc.embedPng(imgData);
+                page.drawImage(pngImage, { x: 0, y: 0, width: width, height: height });
             }
-            const imgData = bgCanvas.toDataURL('image/jpeg', 0.85);
-            doc.addImage(imgData, 'JPEG', 0, 0, width, height);
         }
-        const pdfBlob = doc.output('blob');
-        onSave(new File([pdfBlob], `edited_${file.fileName}`, { type: 'application/pdf' }));
+
+        const pdfBytes = await pdfDoc.save();
+        const blob = new Blob([pdfBytes as any], { type: 'application/pdf' }); // Cast 'as any' แก้ Error TypeScript
+        
+        const editedFile = new File([blob], `edited_${file.fileName}`, { type: 'application/pdf' });
+        await onSave(editedFile); 
+
     } catch (error) { 
         console.error('Save error:', error);
-        alert("บันทึกไม่สำเร็จ"); 
-    } 
-    finally { setIsSaving(false); }
-  };
-
-  // --- Render Canvas (FIXED: Render at Visual Scale Directly) ---
-useEffect(() => {
-  if (!pdfDocRef.current || isLoading) return;
-  let isCancelled = false;
-
-  const renderCanvas = async () => {
-    const container = containerRef.current;
-    if (!container) return;
-    
-    // Wait for any ongoing render
-    while (isRenderingRef.current && !isCancelled) {
-      await new Promise(resolve => setTimeout(resolve, 50));
-    }
-    
-    if (isCancelled) return;
-    isRenderingRef.current = true;
-
-    // Cleanup
-    if (currentCanvasRef.current) { 
-      currentCanvasRef.current.dispose(); 
-      currentCanvasRef.current = null; 
-    }
-    container.innerHTML = ''; 
-
-    try {
-      const page = await pdfDocRef.current.getPage(currentPage);
-      if (isCancelled) return;
-      
-      const baseViewport = page.getViewport({ scale: 1.0 });
-      setBaseDimensions({ width: baseViewport.width, height: baseViewport.height });
-
-      // Render at visual scale
-      const viewport = page.getViewport({ scale: visualScale });
-      
-      // *** FIX: ไม่ต้องตั้ง container style ที่นี่ ให้ใช้ style จาก JSX แทน ***
-      // container.style.width = `${viewport.width}px`;  // <-- ลบออก
-      // container.style.height = `${viewport.height}px`; // <-- ลบออก
-      
-      // สร้าง PDF canvas
-      const pdfCanvas = document.createElement('canvas');
-      pdfCanvas.width = viewport.width; 
-      pdfCanvas.height = viewport.height;
-      pdfCanvas.style.position = 'absolute'; 
-      pdfCanvas.style.top = '0'; 
-      pdfCanvas.style.left = '0'; 
-      pdfCanvas.style.zIndex = '0';
-      pdfCanvas.style.display = 'block';
-      pdfCanvas.style.width = '100%';
-      pdfCanvas.style.height = '100%';
-      container.appendChild(pdfCanvas);
-      
-      await page.render({ canvasContext: pdfCanvas.getContext('2d')!, viewport }).promise;
-
-      if (isCancelled) return;
-
-      // สร้าง Fabric canvas
-      const fabricEl = document.createElement('canvas');
-      container.appendChild(fabricEl);
-      
-      const canvas = new fabric.Canvas(fabricEl, {
-        width: viewport.width, 
-        height: viewport.height, 
-        backgroundColor: 'transparent',
-        selection: isEditing && currentTool === 'select',
-        preserveObjectStacking: true,
-      });
-      
-      const wrapperEl = canvas.getElement().parentNode as HTMLElement;
-      if (wrapperEl) { 
-          wrapperEl.style.position = 'absolute'; 
-          wrapperEl.style.top = '0'; 
-          wrapperEl.style.left = '0'; 
-          wrapperEl.style.zIndex = '1'; 
-          wrapperEl.style.width = '100%';
-          wrapperEl.style.height = '100%';
-          wrapperEl.style.background = 'transparent'; 
-      }
-
-      canvas.setZoom(visualScale);
-      
-      if (canvasDataRef.current[currentPage]) {
-        await canvas.loadFromJSON(canvasDataRef.current[currentPage]);
-      }
-
-      currentCanvasRef.current = canvas;
-      setupTool(canvas);
-      activePageRef.current = currentPage;
-    } catch (err) { 
-      console.error('Render error:', err); 
+        alert("บันทึกไม่สำเร็จ: กรุณาลองใหม่อีกครั้ง"); 
     } 
     finally { 
-      isRenderingRef.current = false; 
+        setIsSaving(false); 
     }
   };
-  
-  renderCanvas();
-  
-  return () => { 
-    isCancelled = true;
-    if (currentCanvasRef.current) {
-      currentCanvasRef.current.dispose();
-      currentCanvasRef.current = null;
-    }
-  };
-}, [currentPage, visualScale, isLoading, isEditing]);
 
-  // --- Event Listeners ---
+  const handleDownload = async () => {
+    if (!file) return;
+    try {
+        const response = await fetch(file.fileUrl);
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = file.fileName;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+    } catch (error) {
+        console.error('Download failed:', error);
+        window.open(file.fileUrl, '_blank');
+    }
+  };
+
+  // --- Render Canvas (Seamless & High-DPI) ---
+  useEffect(() => {
+    if (!pdfDocRef.current || isLoading) return;
+    let isCancelled = false;
+
+    const renderCanvas = async () => {
+      const container = containerRef.current;
+      if (!container) return;
+      
+      // Debounce: รอให้รอบเก่าเคลียร์ก่อน
+      while (isRenderingRef.current && !isCancelled) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      
+      if (isCancelled) return;
+      isRenderingRef.current = true;
+
+      // [IMPORTANT] อย่าเพิ่งลบ container.innerHTML = '' ตรงนี้! 
+      // เราจะปล่อยภาพเก่าค้างไว้ก่อน (Double Buffering)
+
+      try {
+        const page = await pdfDocRef.current.getPage(currentPage);
+        if (isCancelled) return;
+        
+        const baseViewport = page.getViewport({ scale: 1.0 });
+        setBaseDimensions({ width: baseViewport.width, height: baseViewport.height });
+
+        // คำนวณ Output Scale สำหรับ High-DPI
+        const dpr = window.devicePixelRatio || 1;
+        
+        // ตรวจสอบว่า Rendered Scale ปัจจุบัน เกิน Limit ไหมเมื่อคูณ DPR
+        const maxDocDimension = Math.max(baseViewport.width, baseViewport.height);
+        let outputDpr = dpr;
+        
+        // ถ้าคูณ DPR แล้วเกิน Limit ให้ลด DPR ลงเหลือ 1
+        if ((renderedScale * dpr * maxDocDimension) > MAX_RENDER_DIMENSION) {
+            outputDpr = 1;
+        }
+
+        const logicalScale = renderedScale;
+        const physicalScale = renderedScale * outputDpr;
+
+        const logicalViewport = page.getViewport({ scale: logicalScale });
+        const renderViewport = page.getViewport({ scale: physicalScale });
+        
+        // 1. สร้าง PDF Canvas ใหม่ (Off-screen)
+        const pdfCanvas = document.createElement('canvas');
+        pdfCanvas.width = renderViewport.width; 
+        pdfCanvas.height = renderViewport.height;
+        // บีบภาพใหญ่ลงมาแสดงเท่าขนาด Logical
+        pdfCanvas.style.width = '100%';
+        pdfCanvas.style.height = '100%';
+        pdfCanvas.style.position = 'absolute'; 
+        pdfCanvas.style.top = '0'; 
+        pdfCanvas.style.left = '0'; 
+        pdfCanvas.style.zIndex = '0';
+        pdfCanvas.style.display = 'block';
+        
+        // 2. Render PDF (ช่วงนี้ User ยังเห็นภาพเก่าอยู่)
+        await page.render({ canvasContext: pdfCanvas.getContext('2d')!, viewport: renderViewport }).promise;
+        
+        if (isCancelled) return;
+
+        // 3. เตรียม Fabric ใหม่ (Off-screen setup logic)
+        // แต่ Fabric ต้อง Mount ลง DOM ถึงจะทำงานได้ เราจะเตรียม Element ไว้ก่อน
+        const fabricEl = document.createElement('canvas');
+
+        // [SWAP PHASE] สลับภาพเก่าออก เอาภาพใหม่ใส่ (ใช้เวลาเสี้ยววินาที)
+        if (currentCanvasRef.current) { 
+            currentCanvasRef.current.dispose(); 
+            currentCanvasRef.current = null; 
+        }
+        
+        container.innerHTML = ''; // ลบของเก่าตอนนี้
+        container.appendChild(pdfCanvas); // ใส่ PDF ใหม่
+        container.appendChild(fabricEl);  // ใส่ Fabric Element ใหม่
+
+        // 4. Init Fabric ทับลงไป
+        const canvas = new fabric.Canvas(fabricEl, {
+          width: logicalViewport.width, 
+          height: logicalViewport.height, 
+          backgroundColor: 'transparent',
+          selection: isEditing && currentTool === 'select',
+          preserveObjectStacking: true,
+          renderOnAddRemove: false, 
+          enableRetinaScaling: true, // เปิด Retina เพื่อความคมชัดของเส้น
+        });
+        
+        const wrapperEl = canvas.getElement().parentNode as HTMLElement;
+        if (wrapperEl) { 
+            wrapperEl.style.position = 'absolute'; 
+            wrapperEl.style.top = '0'; 
+            wrapperEl.style.left = '0'; 
+            wrapperEl.style.zIndex = '1'; 
+            wrapperEl.style.width = '100%';
+            wrapperEl.style.height = '100%';
+            wrapperEl.style.background = 'transparent'; 
+        }
+
+        canvas.setZoom(logicalScale);
+        
+        if (canvasDataRef.current[currentPage]) {
+          await canvas.loadFromJSON(canvasDataRef.current[currentPage]);
+          canvas.requestRenderAll();
+        }
+
+        currentCanvasRef.current = canvas;
+        setupTool(canvas);
+        activePageRef.current = currentPage;
+
+      } catch (err) { 
+        console.error('Render error:', err); 
+      } 
+      finally { 
+        isRenderingRef.current = false; 
+      }
+    };
+    
+    renderCanvas();
+    
+    return () => { 
+      isCancelled = true;
+      // Cleanup ตอน Unmount จริงๆ เท่านั้น
+    };
+  }, [currentPage, renderedScale, isLoading, isEditing]);
+
+  // --- Event Listeners (Exponential Zoom) ---
   useEffect(() => {
     const onWheel = (e: WheelEvent) => {
         if (e.ctrlKey || e.metaKey) {
             e.preventDefault(); 
             e.stopPropagation(); 
-            const delta = e.deltaY > 0 ? -0.1 : 0.1;
-            handleZoom(visualScaleRef.current + delta, e.clientX, e.clientY);
+            const ZOOM_SPEED = 1.2; 
+            const newScale = e.deltaY > 0 
+                ? visualScaleRef.current / ZOOM_SPEED 
+                : visualScaleRef.current * ZOOM_SPEED;
+
+            handleZoom(newScale, e.clientX, e.clientY);
         }
     };
     
@@ -416,8 +498,6 @@ useEffect(() => {
     const onTouchMove = (e: TouchEvent) => {
         if (e.touches.length === 2 && isPinchingRef.current) {
             e.preventDefault();
-            
-            // Throttle
             const now = Date.now();
             if (now - lastZoomTimeRef.current < 16) return;
             lastZoomTimeRef.current = now;
@@ -458,10 +538,6 @@ useEffect(() => {
       if(newPage < 1 || newPage > totalPages) return;
       saveCurrentPageData(); 
       setCurrentPage(newPage);
-      if(scrollContainerRef.current) {
-        scrollContainerRef.current.scrollLeft = 0;
-        scrollContainerRef.current.scrollTop = 0;
-      }
   };
 
   const handleFitWidth = () => {
@@ -493,8 +569,8 @@ useEffect(() => {
        if (e.path && e.path.globalCompositeOperation === 'destination-out') {
            e.path.set({ selectable: false, evented: false });
            canvas.discardActiveObject(); 
-           canvas.requestRenderAll();
        }
+       canvas.requestRenderAll();
     });
 
     const activeTool = isEditing ? currentTool : 'hand';
@@ -522,7 +598,6 @@ useEffect(() => {
                 lastX = evt.clientX;
                 lastY = evt.clientY;
             }
-            
             if(evt.preventDefault) evt.preventDefault(); 
             if(evt.stopPropagation) evt.stopPropagation();
         });
@@ -530,9 +605,7 @@ useEffect(() => {
         canvas.on('mouse:move', (opt) => {
             if (!isDragging) return;
             const evt = opt.e as any;
-            
             if (evt.touches && evt.touches.length > 1) return;
-
             let clientX, clientY;
             if (evt.type === 'touchmove' && evt.touches && evt.touches.length > 0) {
                 clientX = evt.touches[0].clientX;
@@ -541,18 +614,14 @@ useEffect(() => {
                 clientX = evt.clientX;
                 clientY = evt.clientY;
             }
-
             const deltaX = clientX - lastX;
             const deltaY = clientY - lastY;
-            
             if (scrollContainerRef.current) {
                 scrollContainerRef.current.scrollLeft -= deltaX;
                 scrollContainerRef.current.scrollTop -= deltaY;
             }
-            
             lastX = clientX; 
             lastY = clientY;
-            
             if(evt.preventDefault) evt.preventDefault();
             if(evt.stopPropagation) evt.stopPropagation();
         });
@@ -600,12 +669,13 @@ useEffect(() => {
                     top: pointer.y, 
                     fontFamily: 'Arial', 
                     fill: drawColor, 
-                    fontSize: 24 / visualScale 
+                    fontSize: 24 / renderedScale
                 });
                 canvas.add(text); 
                 canvas.setActiveObject(text); 
                 text.enterEditing(); 
                 setCurrentTool('select');
+                canvas.requestRenderAll();
             });
         }
         else if(['rect', 'circle'].includes(activeTool)) {
@@ -613,7 +683,6 @@ useEffect(() => {
             let shape: any = null; 
             let isDown = false; 
             let startX = 0, startY = 0;
-            
             canvas.on('mouse:down', (o: any) => {
                 if (o.target) return; 
                 isDown = true;
@@ -642,7 +711,6 @@ useEffect(() => {
                 }
                 canvas.add(shape);
             });
-            
             canvas.on('mouse:move', (o: any) => {
                 if (!isDown || !shape) return;
                 const pointer = canvas.getScenePoint(o.e);
@@ -663,7 +731,6 @@ useEffect(() => {
                 }
                 canvas.requestRenderAll();
             });
-            
             canvas.on('mouse:up', () => { 
                 isDown = false; 
                 if(shape){ 
@@ -672,10 +739,11 @@ useEffect(() => {
                 } 
                 shape = null; 
                 setCurrentTool('select'); 
+                canvas.requestRenderAll();
             });
         }
     }
-  }, [currentTool, drawColor, brushWidth, visualScale, isEditing]);
+  }, [currentTool, drawColor, brushWidth, renderedScale, isEditing]);
 
   useEffect(() => { 
     if(currentCanvasRef.current) setupTool(currentCanvasRef.current); 
@@ -703,6 +771,16 @@ useEffect(() => {
 
   return (
     <div className="fixed inset-0 z-[100] bg-gray-900/95 flex flex-col h-full w-full touch-none">
+      
+      {/* Loading Overlay */}
+      {isSaving && (
+        <div className="absolute inset-0 z-[110] bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center text-white">
+            <Loader2 className="w-16 h-16 animate-spin mb-4 text-blue-500" />
+            <h3 className="text-xl font-semibold">กำลังประมวลผลและบันทึกข้อมูล...</h3>
+            <p className="text-gray-300 mt-2">กรุณารอสักครู่ ห้ามปิดหน้าต่างนี้</p>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between bg-white px-4 py-3 shrink-0 shadow z-20">
          <div className="flex items-center gap-3">
@@ -747,6 +825,15 @@ useEffect(() => {
                     </button>
                 </>
              )}
+             
+             <button 
+               onClick={handleDownload}
+               className="p-2 bg-gray-50 text-gray-600 rounded-lg hover:bg-gray-100 border border-gray-200"
+               title="ดาวน์โหลดไฟล์ต้นฉบับ"
+             >
+               <Download size={20}/>
+             </button>
+
              <button 
                onClick={onClose} 
                className="p-2 bg-red-50 text-red-500 rounded-lg hover:bg-red-100"
@@ -880,6 +967,7 @@ useEffect(() => {
               className={`flex-1 overflow-auto relative touch-none transition-all ${isSidebarOpen && !isMobile ? 'ml-[240px]' : ''}`}
               style={{
                 backgroundColor: '#6b7280',
+                scrollBehavior: 'auto'
               }}
             >
               {isLoading ? (
@@ -891,23 +979,29 @@ useEffect(() => {
                 </div>
               ) : (
                   <div 
-                      className="flex items-center justify-center"
+                      className="origin-top-left"
                       style={{
                         width: baseDimensions.width ? `${baseDimensions.width * visualScale + 64}px` : '100%',
                         height: baseDimensions.height ? `${baseDimensions.height * visualScale + 64}px` : '100%',
                         minWidth: '100%',
                         minHeight: '100%',
                         padding: '32px',
+                        display: (baseDimensions.width * visualScale + 64) < (scrollContainerRef.current?.clientWidth || 0) ? 'flex' : 'block',
+                        justifyContent: (baseDimensions.width * visualScale + 64) < (scrollContainerRef.current?.clientWidth || 0) ? 'center' : 'flex-start',
+                        alignItems: (baseDimensions.height * visualScale + 64) < (scrollContainerRef.current?.clientHeight || 0) ? 'center' : 'flex-start',
                       }}
                   >
                       <div 
                           ref={containerRef} 
-                          className="shadow-2xl"
+                          className="shadow-2xl" 
                           style={{
                             position: 'relative',
-                            width: baseDimensions.width ? `${baseDimensions.width * visualScale}px` : 'auto',
-                            height: baseDimensions.height ? `${baseDimensions.height * visualScale}px` : 'auto',
+                            width: baseDimensions.width ? `${baseDimensions.width * renderedScale}px` : 'auto',
+                            height: baseDimensions.height ? `${baseDimensions.height * renderedScale}px` : 'auto',
                             backgroundColor: 'white',
+                            transform: `scale(${scaleRatio})`,
+                            transformOrigin: 'top left',
+                            willChange: 'transform', 
                           }}
                       />
                   </div>

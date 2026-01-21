@@ -176,43 +176,60 @@ function RFAContent() {
         setFilters({ rfaType: currentRfaType, status: 'ALL', siteId: 'ALL', showAllRevisions: false, categoryId: 'ALL', responsibleParty: 'ALL' })
         setSearchTerm('')
     }
-    const availableResponsibleParties = useMemo(() => { return [{ value: 'ALL', label: 'ทุกคน' }]; }, []); 
+
+    const availableResponsibleParties = [
+        { value: 'ALL', label: 'ทุกคน' },
+        { value: 'SITE', label: 'Site (รอตรวจสอบ/รออนุมัติขั้นสุดท้าย)' },
+        { value: 'CM', label: 'CM (รออนุมัติ)' },
+        { value: 'BIM', label: 'BIM (ต้องแก้ไข)' },
+        { value: 'APPROVED', label: 'อนุมัติแล้ว' },
+        { value: 'REJECTED', label: 'ไม่อนุมัติ' }
+    ];
+
     const availableStatuses = useMemo(() => Object.values(STATUSES), []);
     const getStatusColor = (status: string) => {
         switch (status) {
-            case STATUSES.PENDING_REVIEW: // รอตรวจสอบ
-                return 'bg-blue-100 text-blue-800';
-            
-            case STATUSES.PENDING_CM_APPROVAL: // รออนุมัติ CM
-                return 'bg-violet-100 text-violet-800'; // ปรับเป็นโทนม่วงให้ตรงกับ Workflow ใหม่
-            
-            case STATUSES.REVISION_REQUIRED: // แก้ไข
-            case STATUSES.APPROVED_REVISION_REQUIRED:
-                return 'bg-amber-100 text-amber-800';
-            
-            case STATUSES.APPROVED: // อนุมัติ
-                return 'bg-green-100 text-green-800';
-            
-            case STATUSES.APPROVED_WITH_COMMENTS: // อนุมัติ (มีคอมเมนต์)
-                return 'bg-emerald-100 text-emerald-800';
-            
-            case STATUSES.REJECTED: // ไม่อนุมัติ
-                return 'bg-red-100 text-red-800';
-            
-            case STATUSES.PENDING_FINAL_APPROVAL: // รอ Final
-                return 'bg-indigo-100 text-indigo-800';
-            
-            default:
-                return 'bg-gray-100 text-gray-800';
+            // กลุ่มรออนุมัติ (โทนหิน/เทาอมฟ้า)
+            case STATUSES.PENDING_REVIEW: 
+                return 'bg-[#78909C]/20 text-[#546E7A]'; // Slate
+            case STATUSES.PENDING_CM_APPROVAL: 
+                return 'bg-[#546E7A]/20 text-[#37474F]'; // Deep Slate
+            case STATUSES.PENDING_FINAL_APPROVAL: 
+                return 'bg-[#607D8B]/20 text-[#455A64]'; // Blue Grey
+
+            // กลุ่มแก้ไข (โทนเหลือง/ส้มดินเผา)
+            case STATUSES.REVISION_REQUIRED: 
+                return 'bg-[#C0CA33]/20 text-[#827717]'; // Muted Lime (ตัวหนังสือเขียวขี้ม้าเข้ม)
+            case STATUSES.APPROVED_REVISION_REQUIRED: 
+                return 'bg-[#D87D4A]/20 text-[#BF360C]'; // Terracotta (ตัวหนังสือส้มอิฐเข้ม)
+
+            // กลุ่มอนุมัติ (โทนเขียวธรรมชาติ/เขียวอมฟ้า)
+            case STATUSES.APPROVED: 
+                return 'bg-[#558B2F]/20 text-[#33691E]'; // Moss Green (ตัวหนังสือเขียวป่า)
+            case STATUSES.APPROVED_WITH_COMMENTS: 
+                return 'bg-[#4DB6AC]/20 text-[#00695C]'; // Muted Teal (ตัวหนังสือเขียวหัวเป็ด)
+
+            // กลุ่มไม่อนุมัติ (โทนแดงสนิม)
+            case STATUSES.REJECTED: 
+                return 'bg-[#A5574C]/20 text-[#8D3930]'; // Rust Red (ตัวหนังสือแดงเลือดหมู)
+
+            default: 
+                return 'bg-gray-100 text-gray-600';
         }
     };
-
     const getRFATypeColor = (type: string) => {
         switch (type) {
-            case 'RFA-SHOP': return 'bg-blue-50 text-blue-700 border border-blue-100';
-            case 'RFA-GEN': return 'bg-green-50 text-green-700 border border-green-100';
-            case 'RFA-MAT': return 'bg-orange-50 text-orange-700 border border-orange-100';
-            default: return 'bg-gray-50 text-gray-700 border border-gray-200';
+            case 'RFA-SHOP': 
+                // โทนฟ้าหม่น (Stone Blue)
+                return 'bg-[#78909C]/10 text-[#546E7A] border border-[#78909C]/30';
+            case 'RFA-GEN': 
+                // โทนเขียวหม่น (Sage Green)
+                return 'bg-[#558B2F]/10 text-[#33691E] border border-[#558B2F]/30';
+            case 'RFA-MAT': 
+                // โทนส้มอิฐ (Clay/Terracotta)
+                return 'bg-[#D87D4A]/10 text-[#BF360C] border border-[#D87D4A]/30';
+            default: 
+                return 'bg-gray-50 text-gray-600 border border-gray-200';
         }
     };
     // ✅ ย้าย useMemo ขึ้นมาไว้ก่อน if (!user) return null
@@ -224,23 +241,65 @@ function RFAContent() {
         }));
         
         let docsToShow: RFADocument[] = documentsWithSiteNames;
+
+        // 1. กรอง Revision (Show All)
+        if (!filters.showAllRevisions) {
+            docsToShow = docsToShow.filter(doc => doc.isLatest);
+        }  
         
+        // 2. กรอง RFA Type
         if (filters.rfaType !== 'ALL') {
             docsToShow = docsToShow.filter(doc => doc.rfaType === filters.rfaType);
         }
         
+        // 3. กรอง Status
         if (filters.status !== 'ALL') {
             docsToShow = docsToShow.filter(doc => doc.status === filters.status);
         }
 
+        // 4. กรอง Site
         if (filters.siteId !== 'ALL') {
             docsToShow = docsToShow.filter(doc => doc.site.id === filters.siteId);
         }
 
+        // 5. กรอง Category
         if (filters.categoryId !== 'ALL') {
             docsToShow = docsToShow.filter(doc => doc.category?.id === filters.categoryId);
         }
 
+        // 🔥🔥🔥 [ส่วนที่เพิ่มใหม่] 6. กรอง Responsible Party 🔥🔥🔥
+        if (filters.responsibleParty !== 'ALL') {
+            const rp = filters.responsibleParty;
+            docsToShow = docsToShow.filter(doc => {
+                switch (rp) {
+                    case 'SITE':
+                        // Site รับผิดชอบเมื่อ: รอตรวจสอบ หรือ รออนุมัติขั้นสุดท้าย
+                        return [STATUSES.PENDING_REVIEW, STATUSES.PENDING_FINAL_APPROVAL].includes(doc.status);
+                    
+                    case 'CM':
+                        // CM รับผิดชอบเมื่อ: รออนุมัติจาก CM
+                        return doc.status === STATUSES.PENDING_CM_APPROVAL;
+                    
+                    case 'BIM':
+                        // BIM รับผิดชอบเมื่อ: ต้องแก้ไข (ทั้งแก้แล้วส่งใหม่ หรือ อนุมัติแบบมีเงื่อนไข)
+                        return [STATUSES.REVISION_REQUIRED, STATUSES.APPROVED_REVISION_REQUIRED].includes(doc.status);
+                    
+                    case 'APPROVED':
+                        // เสร็จสิ้น (อนุมัติแล้ว)
+                        return [STATUSES.APPROVED, STATUSES.APPROVED_WITH_COMMENTS].includes(doc.status);
+                    
+                    case 'REJECTED':
+                        // ไม่อนุมัติ
+                        return doc.status === STATUSES.REJECTED;
+                        
+                    default:
+                        return true;
+                }
+            });
+        }
+        // 🔥🔥🔥 [จบส่วนที่เพิ่ม] 🔥🔥🔥
+
+        // 7. กรอง Search Term
         if (searchTerm.trim()) {
             const search = searchTerm.toLowerCase();
             docsToShow = docsToShow.filter((doc: RFADocument) => 
