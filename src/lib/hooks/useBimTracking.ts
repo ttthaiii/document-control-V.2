@@ -1,4 +1,4 @@
-// lib/hooks/useGoogleSheets.ts (ไฟล์ใหม่)
+// lib/hooks/useBimTracking.ts
 import { useState, useCallback } from 'react';
 import { useAuth } from '@/lib/auth/useAuth';
 
@@ -9,21 +9,17 @@ interface TaskData {
   taskUid?: string;
 }
 
-interface SheetConfig {
-  sheetId: string;
-  sheetName?: string;
-}
 
-export const useGoogleSheets = () => {
+export const useBimTracking = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { firebaseUser } = useAuth();
 
   const makeAuthenticatedRequest = useCallback(async (endpoint: string, data: any) => {
     if (!firebaseUser) throw new Error('User not authenticated');
-    
+
     const token = await firebaseUser.getIdToken();
-    
+
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
@@ -34,21 +30,21 @@ export const useGoogleSheets = () => {
     });
 
     const result = await response.json();
-    
+
     if (!result.success) {
       throw new Error(result.error || 'Request failed');
     }
-    
+
     return result.data;
   }, [firebaseUser]);
 
   // ดึงรายชื่อโครงการ
-  const getProjects = useCallback(async (config: SheetConfig): Promise<string[]> => {
+  const getProjects = useCallback(async (): Promise<string[]> => {
     setLoading(true);
     setError(null);
-    
+
     try {
-      const data = await makeAuthenticatedRequest('/api/google-sheets/projects', config);
+      const data = await makeAuthenticatedRequest('/api/bim-tracking/projects', {});
       return data.projects;
     } catch (err: any) {
       setError(err.message);
@@ -60,19 +56,19 @@ export const useGoogleSheets = () => {
 
   // ดึงหมวดงาน
   const getCategories = useCallback(async (
-    config: SheetConfig, 
     projectName: string,
-    rfaType: string // <-- เพิ่ม Parameter นี้
+    rfaType: string, // <-- เพิ่ม Parameter นี้
+    isManualFlow?: boolean
   ): Promise<string[]> => {
     setLoading(true);
     setError(null);
-    
+
     try {
       // ✅ FIX: เพิ่ม rfaType เข้าไปใน body ที่จะส่งไป API
-      const data = await makeAuthenticatedRequest('/api/google-sheets/categories', {
-        ...config,
+      const data = await makeAuthenticatedRequest('/api/bim-tracking/categories', {
         projectName,
-        rfaType
+        rfaType,
+        isManualFlow
       });
       return data.categories;
     } catch (err: any) {
@@ -85,16 +81,14 @@ export const useGoogleSheets = () => {
 
   // ดึงชื่องาน
   const getTasks = useCallback(async (
-    config: SheetConfig, 
-    projectName: string, 
+    projectName: string,
     category: string
   ): Promise<TaskData[]> => {
     setLoading(true);
     setError(null);
-    
+
     try {
-      const data = await makeAuthenticatedRequest('/api/google-sheets/tasks', {
-        ...config,
+      const data = await makeAuthenticatedRequest('/api/bim-tracking/tasks', {
         projectName,
         category
       });

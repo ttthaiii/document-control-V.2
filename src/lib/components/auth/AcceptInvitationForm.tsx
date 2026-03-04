@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { useNotification } from '@/lib/context/NotificationContext';
+import { Eye, EyeOff } from 'lucide-react';
 
 interface AcceptInvitationFormProps {
   token: string;
@@ -20,9 +21,11 @@ export function AcceptInvitationForm({ token }: AcceptInvitationFormProps) {
   const [error, setError] = useState<string>('');
 
   const { register, handleSubmit, watch, formState: { errors } } = useForm<AcceptFormData>();
-  
+
   const password = watch('password');
   const { showNotification } = useNotification();
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   useEffect(() => {
     // Fetch invitation details
@@ -32,7 +35,11 @@ export function AcceptInvitationForm({ token }: AcceptInvitationFormProps) {
         const result = await response.json();
 
         if (result.success) {
-          setInvitation(result.invitation);
+          if (result.invitation.status !== 'PENDING') {
+            router.push('/login');
+          } else {
+            setInvitation(result.invitation);
+          }
         } else {
           setError(result.error || 'Invalid invitation');
         }
@@ -65,8 +72,8 @@ export function AcceptInvitationForm({ token }: AcceptInvitationFormProps) {
       if (result.success) {
         // Success! Redirect to login
         showNotification(
-          'success', 
-          'สร้างบัญชีสำเร็จ!', 
+          'success',
+          'สร้างบัญชีสำเร็จ!',
           'กรุณาเข้าสู่ระบบด้วยอีเมลและรหัสผ่านที่คุณตั้งไว้'
         );
         router.push('/login');
@@ -116,12 +123,22 @@ export function AcceptInvitationForm({ token }: AcceptInvitationFormProps) {
       <h2 className="text-2xl font-bold text-center text-gray-800 mb-2">
         🎉 ยินดีต้อนรับ!
       </h2>
-      
+
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
         <p className="text-blue-800 text-sm">
-          <strong>อีเมล:</strong> {invitation.email}<br/>
-          <strong>ตำแหน่งงาน:</strong> {invitation.role}<br/>
+          <strong>อีเมล:</strong> {invitation.email}<br />
+          <strong>ตำแหน่งงาน:</strong> {invitation.role}<br />
           <strong>สถานะ:</strong> {invitation.status}
+        </p>
+      </div>
+
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
+        <p className="text-amber-800 text-sm flex items-start gap-2">
+          <span>💡</span>
+          <span>
+            <strong>คำแนะนำ:</strong> กรุณาจดจำรหัสผ่านที่คุณตั้งไว้นี้
+            เพื่อใช้ในการเข้าสู่ระบบครั้งถัดไปผ่านหน้าเว็บหลัก
+          </span>
         </p>
       </div>
 
@@ -130,15 +147,24 @@ export function AcceptInvitationForm({ token }: AcceptInvitationFormProps) {
           <label className="block text-sm font-medium text-gray-700 mb-1">
             รหัสผ่าน
           </label>
-          <input
-            type="password"
-            {...register('password', { 
-              required: 'กรุณาใส่รหัสผ่าน',
-              minLength: { value: 6, message: 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร' }
-            })}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-gray-900"
-            placeholder="ใส่รหัสผ่านของคุณ"
-          />
+          <div className="relative">
+            <input
+              type={showPassword ? 'text' : 'password'}
+              {...register('password', {
+                required: 'กรุณาใส่รหัสผ่าน',
+                minLength: { value: 6, message: 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร' }
+              })}
+              className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-gray-900"
+              placeholder="ใส่รหัสผ่านของคุณ"
+            />
+            <button
+              type="button"
+              className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 focus:outline-none"
+              onClick={() => setShowPassword(!showPassword)}
+            >
+              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
           {errors.password && (
             <p className="text-red-500 text-sm mt-1">{errors.password.message}</p>
           )}
@@ -148,15 +174,24 @@ export function AcceptInvitationForm({ token }: AcceptInvitationFormProps) {
           <label className="block text-sm font-medium text-gray-700 mb-1">
             ยืนยันรหัสผ่าน
           </label>
-          <input
-            type="password"
-            {...register('confirmPassword', {
-              required: 'กรุณายืนยันรหัสผ่าน',
-              validate: value => value === password || 'รหัสผ่านไม่ตรงกัน'
-            })}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-gray-900"
-            placeholder="ใส่รหัสผ่านอีกครั้ง"
-          />
+          <div className="relative">
+            <input
+              type={showConfirmPassword ? 'text' : 'password'}
+              {...register('confirmPassword', {
+                required: 'กรุณายืนยันรหัสผ่าน',
+                validate: value => value === password || 'รหัสผ่านไม่ตรงกัน'
+              })}
+              className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-gray-900"
+              placeholder="ใส่รหัสผ่านอีกครั้ง"
+            />
+            <button
+              type="button"
+              className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 focus:outline-none"
+              onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+            >
+              {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
           {errors.confirmPassword && (
             <p className="text-red-500 text-sm mt-1">{errors.confirmPassword.message}</p>
           )}

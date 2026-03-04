@@ -46,6 +46,18 @@
 - **Logic Flow:** Create/Read/Update เอกสารใน Collection `rfa`
 - **External Dependencies:** Firestore, Storage (ไฟล์แนบ)
 
+### 3. Data Sync to BIM Tracking
+- **Trigger:** เมื่อมีการ Create หรือ Update RFA Document
+- **Destination:** BIM Tracking Project -> Collection `tasks`
+- **Synced Fields:**
+  - `lastUpdate`: วันที่แก้ไขล่าสุด (admin.firestore.Timestamp.now())
+  - `link`: URL ไปยังเอกสาร
+  - `currentStep`: สถานะปัจจุบัน
+  - `documentNumber`: เลขที่เอกสาร
+  - `rev`: Revision Number
+  - `workflowDates`: (Optional) วันที่เกิดสถานะต่างๆ ดึงจาก `workflow` array
+
+
 ---
 
 ## Feature: [F-004] Work Request

@@ -7,15 +7,16 @@ import { CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUSES, STATUS_LABELS,
 import { RFAFile } from '@/types/rfa';
 import { sendPushNotification } from '@/lib/utils/push-notification';
 import { PERMISSION_KEYS } from '@/lib/config/permissions';
+import { getFileUrl } from '@/lib/utils/storage';
 
 export const dynamic = 'force-dynamic';
 
 // Helper Check Permission
 const checkPermission = (
-    userRole: string, 
-    userOverrides: any, 
-    group: string, 
-    key: string,   
+    userRole: string,
+    userOverrides: any,
+    group: string,
+    key: string,
     defaultAllowedRoles: string[]
 ): boolean => {
     const overrideValue = userOverrides?.[group]?.[key];
@@ -27,8 +28,8 @@ const checkPermission = (
 
 // --- GET Function ---
 export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
+    request: NextRequest,
+    { params }: { params: { id: string } }
 ) {
     try {
         const authHeader = request.headers.get('authorization');
@@ -51,7 +52,7 @@ export async function GET(
         if (userData.role !== ROLES.ADMIN && !userSites.includes(rfaData.siteId)) {
             return NextResponse.json({ success: false, error: 'Access denied' }, { status: 403 });
         }
-        
+
         let siteInfo: any = { id: rfaData.siteId, name: 'N/A' };
         let userOverrides = {};
         let cmSystemType = 'INTERNAL'; // Default
@@ -60,8 +61,8 @@ export async function GET(
             const siteDoc = await adminDb.collection('sites').doc(rfaData.siteId).get();
             if (siteDoc.exists) {
                 const siteData = siteDoc.data();
-                siteInfo = { 
-                    id: siteDoc.id, 
+                siteInfo = {
+                    id: siteDoc.id,
                     name: siteData?.name || 'Unknown Site',
                     cmSystemType: siteData?.cmSystemType || 'INTERNAL'
                 };
@@ -69,12 +70,12 @@ export async function GET(
                 userOverrides = siteData?.userOverrides?.[userId] || {};
             }
         }
-        
-        const categoryInfo = { 
-            id: rfaData.categoryId, 
-            categoryCode: rfaData.taskData?.taskCategory || rfaData.categoryId || 'N/A' 
+
+        const categoryInfo = {
+            id: rfaData.categoryId,
+            categoryCode: rfaData.taskData?.taskCategory || rfaData.categoryId || 'N/A'
         };
-        
+
         // --- Logic การแสดงปุ่ม (Permissions) ---
         const userRole = userData.role;
         const status = rfaData.status;
@@ -115,10 +116,12 @@ export async function GET(
             canReject,
             canDownloadFiles: true
         };
-        
-        return NextResponse.json({ success: true, document: { 
-            id: rfaDoc.id, ...rfaData, site: siteInfo, category: categoryInfo, permissions 
-        }});
+
+        return NextResponse.json({
+            success: true, document: {
+                id: rfaDoc.id, ...rfaData, site: siteInfo, category: categoryInfo, permissions
+            }
+        });
 
     } catch (error) {
         console.error('Error fetching RFA:', error);
@@ -128,8 +131,8 @@ export async function GET(
 
 // --- PUT Function ---
 export async function PUT(
-  request: NextRequest,
-  { params }: { params: { id: string } }
+    request: NextRequest,
+    { params }: { params: { id: string } }
 ) {
     try {
         const authHeader = request.headers.get('authorization');
@@ -137,21 +140,21 @@ export async function PUT(
         const token = authHeader.split('Bearer ')[1];
         const decodedToken = await adminAuth.verifyIdToken(token);
         const userId = decodedToken.uid;
-    
+
         const userDoc = await adminDb.collection('users').doc(userId).get();
         if (!userDoc.exists) return NextResponse.json({ error: 'User not found' }, { status: 404 });
-        
+
         const userData = userDoc.data()!;
         const userRole = userData.role;
         const body = await request.json();
         const { action, comments, newFiles, documentNumber } = body;
 
         if (!action) return NextResponse.json({ error: 'Action is required' }, { status: 400 });
-        
+
         const rfaDocRef = adminDb.collection('rfaDocuments').doc(params.id);
         const rfaDoc = await rfaDocRef.get();
         if (!rfaDoc.exists) return NextResponse.json({ error: 'RFA not found' }, { status: 404 });
-        
+
         const docData = rfaDoc.data()!;
         const siteDoc = await adminDb.collection('sites').doc(docData.siteId).get();
         const siteData = siteDoc.data();
@@ -162,7 +165,7 @@ export async function PUT(
 
         let newStatus = docData.status;
         let canPerformAction = false;
-        
+
         // 1. Reviewer Actions (ส่งไป CM)
         const isReviewer = REVIEWER_ROLES.includes(userRole as Role);
         if (isReviewer && docData.status === STATUSES.PENDING_REVIEW) {
@@ -203,37 +206,37 @@ export async function PUT(
         }
 
         if (!canPerformAction) {
-          return NextResponse.json({ success: false, error: 'Permission denied or invalid status.' }, { status: 403 });
+            return NextResponse.json({ success: false, error: 'Permission denied or invalid status.' }, { status: 403 });
         }
 
         const actionsRequiringFiles = [
-            'SEND_TO_CM', 
-            'REQUEST_REVISION', 
+            'SEND_TO_CM',
+            'REQUEST_REVISION',
             'SUBMIT_REVISION',
-            'APPROVE', 
-            'APPROVE_WITH_COMMENTS', 
-            'APPROVE_REVISION_REQUIRED', 
+            'APPROVE',
+            'APPROVE_WITH_COMMENTS',
+            'APPROVE_REVISION_REQUIRED',
             'REJECT'
         ];
 
         if (actionsRequiringFiles.includes(action)) {
-             // เช็คว่ามีไฟล์แนบมาหรือไม่
-             if (!newFiles || !Array.isArray(newFiles) || newFiles.length === 0) {
-                 return NextResponse.json(
-                     { success: false, error: `Action '${action}' requires at least one file attachment.` }, 
-                     { status: 400 }
-                 );
-             }
+            // เช็คว่ามีไฟล์แนบมาหรือไม่
+            if (!newFiles || !Array.isArray(newFiles) || newFiles.length === 0) {
+                return NextResponse.json(
+                    { success: false, error: `Action '${action}' requires at least one file attachment.` },
+                    { status: 400 }
+                );
+            }
         }
-            
+
         // --- Logic การเปลี่ยนสถานะ ---
-        switch(action) {
+        switch (action) {
             case 'SEND_TO_CM': newStatus = STATUSES.PENDING_CM_APPROVAL; break;
             case 'REQUEST_REVISION': newStatus = STATUSES.REVISION_REQUIRED; break;
             case 'SUBMIT_REVISION': newStatus = STATUSES.PENDING_REVIEW; break;
             case 'REJECT': newStatus = STATUSES.REJECTED; break;
             case 'APPROVE_REVISION_REQUIRED': newStatus = STATUSES.APPROVED_REVISION_REQUIRED; break;
-            
+
             case 'APPROVE':
             case 'APPROVE_WITH_COMMENTS':
                 if (cmSystemType === 'INTERNAL' && docData.status === STATUSES.PENDING_CM_APPROVAL) {
@@ -245,13 +248,12 @@ export async function PUT(
                 }
                 break;
         }
-        
+
         // ... (ส่วนจัดการไฟล์) ...
         let finalDocFiles: RFAFile[] = docData.files || [];
         let workflowFiles: RFAFile[] = [];
 
         if (newFiles && Array.isArray(newFiles) && newFiles.length > 0) {
-            const cdnUrlBase = "https://ttsdoc-cdn.ttthaiii30.workers.dev";
             for (const tempFile of newFiles) {
                 const sourcePath = tempFile.filePath;
                 if (!sourcePath || !sourcePath.startsWith(`temp/${userId}/`)) continue;
@@ -260,7 +262,7 @@ export async function PUT(
                 // ใช้ adminBucket ที่ import มาถูกต้องแล้ว
                 await adminBucket.file(sourcePath).move(destinationPath);
                 const movedFile = {
-                    fileName: tempFile.fileName, fileUrl: `${cdnUrlBase}/${destinationPath}`,
+                    fileName: tempFile.fileName, fileUrl: getFileUrl(destinationPath),
                     filePath: destinationPath, size: tempFile.size, fileSize: tempFile.size,
                     contentType: tempFile.contentType, uploadedAt: new Date().toISOString(), uploadedBy: userId,
                 };
@@ -268,60 +270,60 @@ export async function PUT(
                 finalDocFiles.push(movedFile);
             }
         }
-    
+
         const workflowEntry = {
-          action, status: newStatus, userId, userName: userData.email, role: userRole,
-          timestamp: new Date().toISOString(), comments: comments || '',
-          files: workflowFiles,
+            action, status: newStatus, userId, userName: userData.email, role: userRole,
+            timestamp: new Date().toISOString(), comments: comments || '',
+            files: workflowFiles,
         };
-    
+
         const updates: { [key: string]: any } = {
-          status: newStatus,
-          currentStep: newStatus,
-          workflow: FieldValue.arrayUnion(workflowEntry),
-          updatedAt: FieldValue.serverTimestamp(),
+            status: newStatus,
+            currentStep: newStatus,
+            workflow: FieldValue.arrayUnion(workflowEntry),
+            updatedAt: FieldValue.serverTimestamp(),
         };
         if (documentNumber) updates.documentNumber = documentNumber;
         if (workflowFiles.length > 0) updates.files = finalDocFiles;
-        
+
         await rfaDocRef.update(updates);
 
         // ... (Notification Logic) ...
         const notifyStatuses = [STATUSES.APPROVED, STATUSES.APPROVED_WITH_COMMENTS, STATUSES.APPROVED_REVISION_REQUIRED, STATUSES.PENDING_FINAL_APPROVAL];
         if (notifyStatuses.includes(newStatus)) {
-             const targetUserIds: string[] = [];
-             const usersSnapshot = await adminDb.collection('users')
+            const targetUserIds: string[] = [];
+            const usersSnapshot = await adminDb.collection('users')
                 .where('sites', 'array-contains', docData.siteId).where('status', '==', 'ACTIVE').get();
-             
-             usersSnapshot.forEach(doc => {
-                 const role = doc.data().role as Role;
-                 // ถ้าเป็น Pending Final -> แจ้ง Site Admin / PE / OE
-                 if (newStatus === STATUSES.PENDING_FINAL_APPROVAL) {
-                     if (REVIEWER_ROLES.includes(role)) targetUserIds.push(doc.id);
-                 } 
-                 // ถ้าจบแล้ว -> แจ้ง SE/FM
-                 else if (['SE', 'FM'].includes(role)) {
-                     targetUserIds.push(doc.id);
-                 }
-             });
-             
-             if (targetUserIds.length > 0) {
-                 let notiTitle = `📣 อัปเดตสถานะ: ${documentNumber || docData.documentNumber}`;
-                 if (newStatus === STATUSES.PENDING_FINAL_APPROVAL) notiTitle = `⏳ รออนุมัติขั้นสุดท้าย: ${documentNumber || docData.documentNumber}`;
-                 if (newStatus === STATUSES.APPROVED) notiTitle = `✅ อนุมัติแล้ว: ${documentNumber || docData.documentNumber}`;
 
-                 // ใช้ STATUS_LABELS แทน STATUSES เพื่อแก้ Type Error และได้ข้อความภาษาไทย
-                 const statusLabel = STATUS_LABELS[newStatus] || newStatus;
-                 const notiBody = `โครงการ: ${siteName}\nสถานะ: ${statusLabel}`;
-                 
-                 await sendPushNotification(targetUserIds, { title: notiTitle, body: notiBody, url: `/dashboard/rfa/${params.id}` });
-             }
+            usersSnapshot.forEach(doc => {
+                const role = doc.data().role as Role;
+                // ถ้าเป็น Pending Final -> แจ้ง Site Admin / PE / OE
+                if (newStatus === STATUSES.PENDING_FINAL_APPROVAL) {
+                    if (REVIEWER_ROLES.includes(role)) targetUserIds.push(doc.id);
+                }
+                // ถ้าจบแล้ว -> แจ้ง SE/FM
+                else if (['SE', 'FM'].includes(role)) {
+                    targetUserIds.push(doc.id);
+                }
+            });
+
+            if (targetUserIds.length > 0) {
+                let notiTitle = `📣 อัปเดตสถานะ: ${documentNumber || docData.documentNumber}`;
+                if (newStatus === STATUSES.PENDING_FINAL_APPROVAL) notiTitle = `⏳ รออนุมัติขั้นสุดท้าย: ${documentNumber || docData.documentNumber}`;
+                if (newStatus === STATUSES.APPROVED) notiTitle = `✅ อนุมัติแล้ว: ${documentNumber || docData.documentNumber}`;
+
+                // ใช้ STATUS_LABELS แทน STATUSES เพื่อแก้ Type Error และได้ข้อความภาษาไทย
+                const statusLabel = STATUS_LABELS[newStatus] || newStatus;
+                const notiBody = `โครงการ: ${siteName}\nสถานะ: ${statusLabel}`;
+
+                await sendPushNotification(targetUserIds, { title: notiTitle, body: notiBody, url: `/dashboard/rfa/${params.id}` });
+            }
         }
 
         return NextResponse.json({ success: true, message: `Action completed`, newStatus });
-    
-      } catch (error) {
+
+    } catch (error) {
         console.error('Error updating RFA:', error);
         return NextResponse.json({ success: false, error: (error as Error).message }, { status: 500 });
-      }
+    }
 }

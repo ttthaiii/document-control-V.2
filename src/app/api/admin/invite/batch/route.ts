@@ -30,24 +30,24 @@ export async function POST(request: NextRequest) {
     };
 
     const usersRef = adminDb.collection('users'); // เตรียม Reference
-    
+
     // 3. วนลูปสร้าง Invite
     for (const user of users) {
       try {
         if (!user.email || !user.name || !user.employeeId || !user.role) {
-            throw new Error(`ข้อมูลไม่ครบ: ${user.email || 'Unknown'}`);
+          throw new Error(`ข้อมูลไม่ครบ: ${user.email || 'Unknown'}`);
         }
 
         const emailCheck = await usersRef.where('email', '==', user.email).limit(1).get();
         if (!emailCheck.empty) {
-            throw new Error(`อีเมล ${user.email} มีอยู่แล้ว`);
+          throw new Error(`อีเมล ${user.email} มีอยู่แล้ว`);
         }
 
         const empIdCheck = await usersRef.where('employeeId', '==', user.employeeId).limit(1).get();
         if (!empIdCheck.empty) {
-            throw new Error(`รหัสพนักงาน ${user.employeeId} มีอยู่แล้ว`);
+          throw new Error(`รหัสพนักงาน ${user.employeeId} มีอยู่แล้ว`);
         }
-        
+
         const inviteResult = await InvitationService.createInvitation({
           email: user.email,
           name: user.name,
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
         );
 
         results.success++;
-        results.details.push({ email: user.email, status: 'success' });
+        results.details.push({ email: user.email, status: 'success', url: inviteResult.invitationUrl });
 
       } catch (err: any) {
         console.error(`Failed to invite ${user.email}:`, err);

@@ -97,7 +97,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
             ))}
           </select>
         </div>
-        
+
         {/* Responsible Party Filter */}
         <div className="md:col-span-2">
           <label htmlFor="responsible-party-filter" className="text-sm font-medium text-gray-700">ผู้รับผิดชอบ</label>
@@ -105,7 +105,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
             id="responsible-party-filter"
             value={filters.responsibleParty}
             onChange={(e) => handleFilterChange('responsibleParty', e.target.value)}
-            className={inputStyle} 
+            className={inputStyle}
           >
             {availableResponsibleParties.map(party => (
               <option key={party.value} value={party.value}>{party.label}</option>
@@ -116,8 +116,8 @@ const FilterBar: React.FC<FilterBarProps> = ({
         {/* Category Filter */}
         <div className="md:col-span-2">
           <label htmlFor="category-filter" className="text-sm font-medium text-gray-700">หมวดงาน</label>
-          <select 
-            id="category-filter" 
+          <select
+            id="category-filter"
             className={inputStyle}
             value={filters.categoryId}
             onChange={(e) => handleFilterChange('categoryId', e.target.value)}
@@ -142,7 +142,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
           />
           <label htmlFor="show-all-revisions" className="ml-2 text-sm text-gray-700">ทุกฉบับ</label>
         </div>
-        
+
         {/* Reset Button */}
         <div className="md:col-span-1">
           <button onClick={resetFilters} className="w-full h-10 px-4 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 font-medium"> {/* ✅ ใส่ h-10 */}

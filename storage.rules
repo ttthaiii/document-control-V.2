@@ -1,0 +1,18 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Folder `sites`: อนุญาตให้อ่านได้ทุกคนที่ล็อกอิน แต่ไม่อนุญาตให้เขียนโดยตรงจาก Client
+    // การเขียนจะทำผ่าน Backend (Admin SDK) เท่านั้น ซึ่งจะข้ามกฎนี้ไป
+    match /sites/{siteId}/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    // Folder `temp`: อนุญาตให้ผู้ใช้เขียนไฟล์ได้เฉพาะในโฟลเดอร์ของตัวเองเท่านั้น
+    // และอนุญาตให้อ่านและลบไฟล์ของตัวเองได้
+    match /temp/{userId}/{allPaths=**} {
+      allow read, write, delete: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}

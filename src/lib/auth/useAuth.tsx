@@ -4,12 +4,13 @@
 
 import React, { useState, useEffect, useContext, createContext, ReactNode, useCallback } from 'react';
 import { User, onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, onSnapshot, setDoc, getDoc, FirestoreError } from 'firebase/firestore'; 
+import { doc, onSnapshot, setDoc, getDoc, FirestoreError } from 'firebase/firestore';
 // เพิ่ม Unsubscribe ใน import
 import { getToken, deleteToken, onMessage, MessagePayload, Unsubscribe } from 'firebase/messaging';
 // ใช้ getMessagingInstance แทน messaging
 import { auth, db, getMessagingInstance } from '@/lib/firebase/client';
 import { Role } from '@/lib/config/workflow';
+import { useNotification } from '@/lib/context/NotificationContext';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // INTERFACES
@@ -39,8 +40,8 @@ const AuthContext = createContext<AuthContextType>({
   firebaseUser: null,
   loading: true,
   error: null,
-  logout: async () => {},
-  requestNotificationPermission: async () => {},
+  logout: async () => { },
+  requestNotificationPermission: async () => { },
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -59,12 +60,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { showNotification } = useNotification();
 
   // ═══════════════════════════════════════════════════════════════════════════
   // FCM TOKEN MANAGEMENT
   // ═══════════════════════════════════════════════════════════════════════════
   const handleFCMToken = useCallback(async (uid: string, action: 'SAVE' | 'REMOVE') => {
-    if (!isMobileDevice()) return; 
+    if (!isMobileDevice()) return;
 
     try {
       // 1. เรียกใช้ messaging ผ่านฟังก์ชัน Async เพื่อความชัวร์
@@ -78,29 +80,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // 2. เช็ค Permission
         const currentPermission = Notification.permission;
         if (currentPermission !== 'granted') {
-            console.log('⚠️ Notification permission not granted yet. Waiting for user gesture.');
-            return; 
+          console.log('⚠️ Notification permission not granted yet. Waiting for user gesture.');
+          return;
         }
 
         // 3. ✅ iOS FIX: ต้องรอ Service Worker Ready และส่ง registration ไปให้ getToken
         let registration;
         try {
-            if ('serviceWorker' in navigator) {
-                registration = await navigator.serviceWorker.ready;
-            }
+          if ('serviceWorker' in navigator) {
+            registration = await navigator.serviceWorker.ready;
+          }
         } catch (e) {
-            console.error('❌ Service Worker not ready:', e);
+          console.error('❌ Service Worker not ready:', e);
         }
 
         // 4. ขอ Token
         const currentToken = await getToken(messaging, {
           vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY,
-          serviceWorkerRegistration: registration 
+          serviceWorkerRegistration: registration
         });
-        
+
         if (currentToken) {
           await setDoc(doc(db, 'users', uid), {
-            fcmTokens: [currentToken], 
+            fcmTokens: [currentToken],
             lastLogin: new Date()
           }, { merge: true });
           console.log('✅ FCM Token Updated');
@@ -120,10 +122,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
       // ❌ ของเดิม: navigator.serviceWorker.register('/sw.js') 
-      
+
       // ✅ แก้ไข: เปลี่ยนเป็นไฟล์ที่มีโค้ด Firebase ของเรา
       navigator.serviceWorker
-        .register('/firebase-messaging-sw.js') 
+        .register('/firebase-messaging-sw.js')
         .then((registration) => {
           console.log('✅ Service Worker registered:', registration.scope);
         })
@@ -132,7 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
     }
   }, []);
-  
+
   // ═══════════════════════════════════════════════════════════════════════════
   // FOREGROUND MESSAGE LISTENER (แก้ไขส่วนนี้)
   // ═══════════════════════════════════════════════════════════════════════════
@@ -144,11 +146,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // ✅ เรียกใช้ messaging ผ่านฟังก์ชัน Async แทนตัวแปร global
       const messaging = await getMessagingInstance();
-      
+
       if (messaging) {
         unsubscribe = onMessage(messaging, (payload: MessagePayload) => {
           console.log('📩 Foreground Message Received:', payload);
-          
+
           // ดึงข้อมูล Title/Body (รองรับทั้ง notification และ data payload)
           const title = payload.notification?.title || payload.data?.title || 'การแจ้งเตือนใหม่';
           const body = payload.notification?.body || payload.data?.body || '';
@@ -198,17 +200,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (fbUser) {
         const userDocRef = doc(db, 'users', fbUser.uid);
-        
+
         try {
           const docSnapCheck = await getDoc(userDocRef);
-          
+
           if (!docSnapCheck.exists()) {
             console.log("📝 User doc not found, creating new one...");
             await setDoc(userDocRef, {
               email: fbUser.email,
               role: 'BIM' as Role,
               status: 'ACTIVE',
-              sites: [], 
+              sites: [],
               createdAt: new Date(),
               updatedAt: new Date(),
               fcmTokens: [],
@@ -217,7 +219,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch (err) {
           const firestoreError = err as FirestoreError;
           console.error("❌ Error checking/creating user doc:", firestoreError.code, firestoreError.message);
-          
+
           if (firestoreError.code === 'permission-denied') {
             if (isMounted) {
               setError('ไม่สามารถเข้าถึงข้อมูลผู้ใช้ได้ กรุณาติดต่อผู้ดูแลระบบ');
@@ -229,13 +231,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         unsubscribeSnapshot = onSnapshot(
-          userDocRef, 
+          userDocRef,
           (docSnap) => {
             if (!isMounted) return;
-            
+
             if (docSnap.exists()) {
               const userData = docSnap.data();
-              
+
               if (userData.status === 'DISABLED') {
                 console.warn("⚠️ User account is disabled");
                 signOut(auth);
@@ -245,6 +247,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 return;
               }
 
+              // [DEBUG] Log user sites
               setUser({
                 id: fbUser.uid,
                 email: fbUser.email || '',
@@ -261,7 +264,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               setUser(null);
             }
             setLoading(false);
-          }, 
+          },
           (err: FirestoreError) => {
             if (!isMounted) return;
             console.error('❌ Snapshot Error:', err.code, err.message);
@@ -274,9 +277,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setLoading(false);
           }
         );
-        
+
         handleFCMToken(fbUser.uid, 'SAVE');
-        
+
       } else {
         if (isMounted) {
           setUser(null);
@@ -315,37 +318,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ═══════════════════════════════════════════════════════════════════════════
   const requestNotificationPermission = useCallback(async () => {
     if (!isMobileDevice()) {
-      alert('ระบบแจ้งเตือนรองรับเฉพาะการใช้งานบนโทรศัพท์มือถือเท่านั้น');
+      showNotification('warning', 'คำเตือน', 'ระบบแจ้งเตือนรองรับเฉพาะการใช้งานบนโทรศัพท์มือถือเท่านั้น');
       return;
     }
-    
+
     try {
       const permission = await Notification.requestPermission();
       if (permission === 'granted') {
         if (user?.id) {
           await handleFCMToken(user.id, 'SAVE');
-          alert('✅ เปิดรับการแจ้งเตือนเรียบร้อยแล้ว');
+          showNotification('success', 'สำเร็จ', 'เปิดรับการแจ้งเตือนเรียบร้อยแล้ว');
         }
       } else {
-        alert('❌ คุณไม่อนุญาตให้แจ้งเตือน กรุณาไปตั้งค่าที่ Settings ของมือถือ');
+        showNotification('error', 'ข้อผิดพลาด', 'คุณไม่อนุญาตให้แจ้งเตือน กรุณาไปตั้งค่าที่ Settings ของมือถือ');
       }
     } catch (error) {
       console.error('Request Permission Error:', error);
-      alert('เกิดข้อผิดพลาดในการขอสิทธิ์');
+      showNotification('error', 'เกิดข้อผิดพลาด', 'เกิดข้อผิดพลาดในการขอสิทธิ์');
     }
-  }, [user?.id, handleFCMToken]);
+  }, [user?.id, handleFCMToken, showNotification]);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // RENDER
   // ═══════════════════════════════════════════════════════════════════════════
   return (
-    <AuthContext.Provider value={{ 
-      user, 
-      firebaseUser, 
-      loading, 
-      error, 
-      logout, 
-      requestNotificationPermission 
+    <AuthContext.Provider value={{
+      user,
+      firebaseUser,
+      loading,
+      error,
+      logout,
+      requestNotificationPermission
     }}>
       {children}
     </AuthContext.Provider>

@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { FileText, Calendar, User, Clock, Building, Tag, ArrowUp, ArrowDown } from 'lucide-react'
 import { RFADocument } from '@/types/rfa'
+
 import { STATUSES } from '@/lib/config/workflow'
 import Spinner from '@/components/shared/Spinner'
 
@@ -55,7 +56,7 @@ export default function RFAListTable({
   getRFATypeColor
 }: RFAListTableProps) {
   const [isMobile, setIsMobile] = useState(false)
-  
+
   // ✅ [CHANGE 1] เพิ่ม State สำหรับจัดการการเรียงลำดับ
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection } | null>({ key: 'updatedAt', direction: 'descending' });
 
@@ -81,19 +82,19 @@ export default function RFAListTable({
         return { name: doc.createdByInfo?.role || 'Creator', role: doc.createdByInfo?.role || 'Creator' };
 
       case STATUSES.REJECTED:
-        return doc.isLatest 
+        return doc.isLatest
           ? { name: doc.createdByInfo?.role || 'Creator', role: doc.createdByInfo?.role || 'Creator' }
           : { name: 'เสร็จสิ้น', role: 'Completed' };
 
       case STATUSES.APPROVED:
       case STATUSES.APPROVED_WITH_COMMENTS:
         return { name: 'เสร็จสิ้น', role: 'Completed' };
-        
+
       default:
         return { name: 'N/A', role: 'N/A' };
     }
   }
-  
+
   const calculatePendingDays = (document: RFADocument) => {
     const lastUpdate = convertToDate(document.updatedAt);
     if (!lastUpdate) return 0;
@@ -112,25 +113,25 @@ export default function RFAListTable({
     if (sortConfig !== null) {
       sortableDocuments.sort((a, b) => {
         const getNestedValue = (obj: any, path: string) => path.split('.').reduce((o, p) => (o ? o[p] : undefined), obj);
-        
+
         let aValue: any;
         let bValue: any;
 
         // --- 👇 2. เพิ่ม Logic การเรียงลำดับสำหรับ pendingDays ---
         if (sortConfig.key === 'pendingDays') {
-            const aIsActive = ACTIVE_STATUSES_FOR_PENDING_DAYS.includes(a.status);
-            const bIsActive = ACTIVE_STATUSES_FOR_PENDING_DAYS.includes(b.status);
-            aValue = aIsActive ? calculatePendingDays(a) : -1; // ตอนนี้จะเรียกใช้งานได้แล้ว
-            bValue = bIsActive ? calculatePendingDays(b) : -1; // ตอนนี้จะเรียกใช้งานได้แล้ว
+          const aIsActive = ACTIVE_STATUSES_FOR_PENDING_DAYS.includes(a.status);
+          const bIsActive = ACTIVE_STATUSES_FOR_PENDING_DAYS.includes(b.status);
+          aValue = aIsActive ? calculatePendingDays(a) : -1; // ตอนนี้จะเรียกใช้งานได้แล้ว
+          bValue = bIsActive ? calculatePendingDays(b) : -1; // ตอนนี้จะเรียกใช้งานได้แล้ว
         } else if (sortConfig.key === 'responsibleParty') {
-            aValue = getResponsibleParty(a).name;
-            bValue = getResponsibleParty(b).name;
+          aValue = getResponsibleParty(a).name;
+          bValue = getResponsibleParty(b).name;
         } else if (sortConfig.key === 'updatedAt') {
-            aValue = convertToDate(a.updatedAt)?.getTime() || 0;
-            bValue = convertToDate(b.updatedAt)?.getTime() || 0;
+          aValue = convertToDate(a.updatedAt)?.getTime() || 0;
+          bValue = convertToDate(b.updatedAt)?.getTime() || 0;
         } else {
-            aValue = getNestedValue(a, sortConfig.key);
-            bValue = getNestedValue(b, sortConfig.key);
+          aValue = getNestedValue(a, sortConfig.key);
+          bValue = getNestedValue(b, sortConfig.key);
         }
 
         if (aValue < bValue) {
@@ -153,7 +154,7 @@ export default function RFAListTable({
     }
     setSortConfig({ key, direction });
   };
-  
+
   // ✅ [CHANGE 1] Component สำหรับแสดงไอคอนการเรียงลำดับ
   const SortIcon = ({ columnKey }: { columnKey: SortKey }) => {
     if (!sortConfig || sortConfig.key !== columnKey) {
@@ -174,7 +175,7 @@ export default function RFAListTable({
       </div>
     );
   }
-  
+
   if (!sortedDocuments || sortedDocuments.length === 0) {
     return (
       <div className="w-full h-96 flex flex-col justify-center items-center bg-white rounded-lg shadow text-center">
@@ -184,7 +185,7 @@ export default function RFAListTable({
       </div>
     );
   }
-    
+
   const formatDate = (date: any) => {
     const d = convertToDate(date);
     if (!d) return 'Invalid Date';
@@ -216,7 +217,7 @@ export default function RFAListTable({
                       {doc.rfaType}
                     </span>
                     <span className="inline-flex items-center px-2 py-1 bg-gray-200 text-gray-800 rounded-full text-xs font-semibold">
-                        REV-{String(doc.revisionNumber).padStart(2, '0')}
+                      REV-{String(doc.revisionNumber).padStart(2, '0')}
                     </span>
                   </div>
                   <h3 className="font-medium text-gray-900 text-sm mb-1 truncate">
@@ -274,36 +275,36 @@ export default function RFAListTable({
           <thead className="bg-gray-50 sticky top-0 z-10">
             <tr>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                 <button onClick={() => requestSort('runningNumber')} className="flex items-center justify-center w-full">
-                    System No. <SortIcon columnKey='runningNumber' />
-                 </button>
+                <button onClick={() => requestSort('runningNumber')} className="flex items-center justify-center w-full">
+                  System No. <SortIcon columnKey='runningNumber' />
+                </button>
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                 <button onClick={() => requestSort('site.name')} className="flex items-center w-full">
-                    โครงการ <SortIcon columnKey='site.name' />
-                 </button>
+                <button onClick={() => requestSort('site.name')} className="flex items-center w-full">
+                  โครงการ <SortIcon columnKey='site.name' />
+                </button>
               </th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                 <button onClick={() => requestSort('category.categoryCode')} className="flex items-center justify-center w-full">
-                    หมวดหมู่ <SortIcon columnKey='category.categoryCode' />
-                 </button>
+                <button onClick={() => requestSort('category.categoryCode')} className="flex items-center justify-center w-full">
+                  หมวดหมู่ <SortIcon columnKey='category.categoryCode' />
+                </button>
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">เอกสาร</th>
               <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Rev.</th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
-                 <button onClick={() => requestSort('pendingDays')} className="flex items-center justify-center w-full">
-                    สถานะ <SortIcon columnKey='pendingDays' />
-                 </button>
+                <button onClick={() => requestSort('pendingDays')} className="flex items-center justify-center w-full">
+                  สถานะ <SortIcon columnKey='pendingDays' />
+                </button>
               </th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                 <button onClick={() => requestSort('responsibleParty')} className="flex items-center justify-center w-full">
-                    ผู้รับผิดชอบ <SortIcon columnKey='responsibleParty' />
-                 </button>
+                <button onClick={() => requestSort('responsibleParty')} className="flex items-center justify-center w-full">
+                  ผู้รับผิดชอบ <SortIcon columnKey='responsibleParty' />
+                </button>
               </th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                 <button onClick={() => requestSort('updatedAt')} className="flex items-center justify-center w-full">
-                    วันที่อัปเดตล่าสุด <SortIcon columnKey='updatedAt' />
-                 </button>
+                <button onClick={() => requestSort('updatedAt')} className="flex items-center justify-center w-full">
+                  วันที่อัปเดตล่าสุด <SortIcon columnKey='updatedAt' />
+                </button>
               </th>
             </tr>
           </thead>
@@ -355,7 +356,7 @@ export default function RFAListTable({
                   </td>
                   <td className="px-6 py-4">
                     <div className="text-sm text-gray-600 text-center">
-                        <span>{formatDate(doc.updatedAt)}</span>
+                      <span>{formatDate(doc.updatedAt)}</span>
                     </div>
                   </td>
                 </tr>

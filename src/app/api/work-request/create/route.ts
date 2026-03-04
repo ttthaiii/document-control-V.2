@@ -2,6 +2,7 @@ import { NextResponse, NextRequest } from "next/server";
 import { adminDb, adminBucket, adminAuth } from "@/lib/firebase/admin";
 import { FieldValue } from 'firebase-admin/firestore';
 import { WR_STATUSES, WR_CREATOR_ROLES } from '@/lib/config/workflow';
+import { getFileUrl } from '@/lib/utils/storage';
 
 export const dynamic = 'force-dynamic';
 
@@ -73,7 +74,6 @@ export async function POST(req: NextRequest) {
 
         const finalFilesData: any[] = [];
         if (uploadedFiles && uploadedFiles.length > 0) {
-            const cdnUrlBase = "https://ttsdoc-cdn.ttthaiii30.workers.dev";
             for (const tempFile of uploadedFiles) {
                 const sourcePath = tempFile.filePath;
                 if (!sourcePath || !sourcePath.startsWith(`temp/${uid}/`)) {
@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
                     await adminBucket.file(sourcePath).move(destinationPath);
                     finalFilesData.push({
                         ...tempFile,
-                        fileUrl: `${cdnUrlBase}/${destinationPath}`,
+                        fileUrl: getFileUrl(destinationPath),
                         filePath: destinationPath,
                         uploadedAt: new Date().toISOString(),
                         uploadedBy: uid,

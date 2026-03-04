@@ -1,0 +1,19 @@
+{
+    "indexes": [
+        {
+            "collectionGroup": "rfaDocuments",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "siteId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "updatedAt",
+                    "order": "DESCENDING"
+                }
+            ]
+        }
+    ],
+    "fieldOverrides": []
+}

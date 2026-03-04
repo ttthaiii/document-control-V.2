@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { adminDb, adminBucket, adminAuth } from "@/lib/firebase/admin";
 import { FieldValue } from 'firebase-admin/firestore';
 import { STATUSES } from '@/lib/config/workflow';
+import { getFileUrl } from '@/lib/utils/storage';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,9 +40,9 @@ export async function POST(req: Request) {
         if (!originalDocId || !uploadedFiles || uploadedFiles.length === 0 || (!isManualFlow && !verifiedTaskId)) {
             return NextResponse.json({ error: "Missing required fields (originalDocId, uploadedFiles, and verifiedTaskId for non-manual flow)" }, { status: 400 });
         }
-        
+
         const originalRfaRef = adminDb.collection("rfaDocuments").doc(originalDocId);
-        
+
         await adminDb.runTransaction(async (transaction) => {
             const originalDoc = await transaction.get(originalRfaRef);
             if (!originalDoc.exists) {
@@ -49,7 +50,7 @@ export async function POST(req: Request) {
             }
 
             const originalData = originalDoc.data()!;
-            
+
             // --- 🔽 [แก้ไขจุดที่ 2] 🔽 ---
             // สร้าง object taskData ใหม่ โดยใช้ verifiedTaskId ที่ได้รับมา
             // ถ้าเป็น Manual Flow จะไม่มี verifiedTaskId ก็ให้ใช้ของเดิมไป
@@ -64,7 +65,6 @@ export async function POST(req: Request) {
             const newDocumentNumber = originalData.documentNumber;
 
             const finalFilesData = [];
-            const cdnUrlBase = "https://ttsdoc-cdn.ttthaiii30.workers.dev";
             for (const tempFile of uploadedFiles) {
                 const sourcePath = tempFile.filePath;
                 if (!sourcePath || !sourcePath.startsWith(`temp/${uid}/`)) continue;
@@ -74,7 +74,7 @@ export async function POST(req: Request) {
 
                 finalFilesData.push({
                     ...tempFile,
-                    fileUrl: `${cdnUrlBase}/${destinationPath}`,
+                    fileUrl: getFileUrl(destinationPath),
                     filePath: destinationPath,
                     uploadedAt: new Date().toISOString(),
                     uploadedBy: uid,

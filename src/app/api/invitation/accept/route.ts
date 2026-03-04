@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error accepting invitation:', error);
     return NextResponse.json(
-      { error: error },
+      { error: (error as any).message || 'Failed to accept invitation' },
       { status: 400 }
     );
   }
