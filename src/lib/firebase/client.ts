@@ -1,6 +1,8 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
+import { getAuth, connectAuthEmulator } from 'firebase/auth';
+import { getFirestore, enableIndexedDbPersistence, connectFirestoreEmulator } from 'firebase/firestore';
+import { getStorage, connectStorageEmulator } from 'firebase/storage';
+import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 import { getMessaging, isSupported } from 'firebase/messaging';
 
 const firebaseConfig = {
@@ -15,6 +17,21 @@ const firebaseConfig = {
 export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const storage = getStorage(app);
+export const functions = getFunctions(app, 'asia-southeast1');
+
+// Connect to Emulators if running locally and env var is set
+if (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === 'true') {
+  console.log('🔗 Connecting to Firebase Emulators...');
+  // auth
+  connectAuthEmulator(auth, 'http://127.0.0.1:9099');
+  // firestore
+  connectFirestoreEmulator(db, '127.0.0.1', 8080);
+  // storage
+  connectStorageEmulator(storage, '127.0.0.1', 9199);
+  // functions
+  connectFunctionsEmulator(functions, '127.0.0.1', 5001);
+}
 
 // ✅ แก้ไข: สร้างฟังก์ชันเพื่อดึง Messaging instance แทนการ export ตัวแปรโดยตรง
 // วิธีนี้จะป้องกันค่า null เวลาเครื่องยังโหลดไม่เสร็จ

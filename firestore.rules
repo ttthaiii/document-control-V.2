@@ -1,0 +1,92 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // --- Helper Functions ---
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Helper Safe Get
+    function getUserData() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) 
+             ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data 
+             : {};
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && getUserData().get('role', '') == 'Admin';
+    }
+
+    function isUserActive() {
+      return isAuthenticated() && getUserData().get('status', '') == 'ACTIVE';
+    }
+
+    // --- Collection Rules ---
+
+    // 1. Users
+    match /users/{userId} {
+      allow read, create, update: if isOwner(userId);
+      allow read, delete: if isAdmin();
+    }
+
+    // 2. Sites (ตรวจสอบจาก sites array ของ user แทน members array)
+    match /sites/{siteId} {
+      allow read: if isAuthenticated() && (
+        siteId in getUserData().get('sites', []) ||
+        isAdmin()
+      );
+      allow write: if isAdmin();
+
+      // อนุญาตให้อ่าน Category ย่อยภายใน Site
+      match /categories/{categoryId} {
+        allow read: if isAuthenticated();
+        allow write: if isAdmin();
+      }
+    }
+    
+    // อนุญาต collectionGroup query สำหรับ categories (สำคัญสำหรับหน้า RFA list)
+    match /{path=**}/categories/{categoryId} {
+      allow read: if isAuthenticated();
+    }
+
+    // 3. RFA Documents & Work Requests
+    match /rfaDocuments/{docId} {
+      allow read, create, update: if isUserActive();
+      allow delete: if isAdmin();
+    }
+    
+    match /workRequests/{docId} {
+      allow read, create, update: if isUserActive();
+      allow delete: if isAdmin();
+    }
+    
+    // 4. Others
+    match /constructionInfo/{docId} {
+      allow read: if isUserActive();
+      allow write: if isAdmin();
+    }
+    
+    match /comments/{commentId} { 
+        allow read, create: if isUserActive(); 
+        allow update, delete: if isUserActive() && (isAdmin() || isOwner(resource.data.createdBy)); 
+    }
+    
+    match /counters/{counterId} {
+      allow read, write: if isUserActive();
+    }
+
+    match /invitations/{inviteId} {
+      allow get: if true; 
+      allow list, write: if isAdmin();
+    }
+    
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

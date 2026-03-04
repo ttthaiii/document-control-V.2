@@ -24,7 +24,6 @@ const formatDate = (date: any): string => {
   return d.toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' });
 };
 
-
 const useIsMobile = () => {
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
@@ -55,7 +54,7 @@ export default function ApprovedDocumentLibrary() {
     setSelectedSite('ALL');
     setSelectedCategory('ALL');
   };
-  
+
   useEffect(() => {
     const fetchFilterData = async () => {
       if (!firebaseUser) return;
@@ -67,7 +66,7 @@ export default function ApprovedDocumentLibrary() {
         ]);
 
         if (!sitesResponse.ok || !categoriesResponse.ok) throw new Error('Failed to fetch filter data');
-        
+
         const sitesData = await sitesResponse.json();
         const categoriesData = await categoriesResponse.json();
 
@@ -90,15 +89,15 @@ export default function ApprovedDocumentLibrary() {
       }
       setIsLoading(true);
       setError(null);
-      
+
       try {
         let q = query(
           collection(db, 'rfaDocuments'),
           where('siteId', 'in', user.sites),
           where('isLatest', '==', true),
           where('status', 'in', [
-            STATUSES.APPROVED, 
-            STATUSES.APPROVED_WITH_COMMENTS, 
+            STATUSES.APPROVED,
+            STATUSES.APPROVED_WITH_COMMENTS,
             STATUSES.APPROVED_REVISION_REQUIRED
           ]),
           orderBy('updatedAt', 'desc')
@@ -110,9 +109,9 @@ export default function ApprovedDocumentLibrary() {
         if (selectedCategory !== 'ALL') {
           q = query(q, where('categoryId', '==', selectedCategory));
         }
-        
+
         const querySnapshot = await getDocs(q);
-        
+
         const docsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as RFADocument));
         setDocuments(docsData);
 
@@ -157,46 +156,46 @@ export default function ApprovedDocumentLibrary() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
             <div className="relative md:col-span-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <input 
-                type="text" 
-                placeholder="ค้นหา..." 
+              <input
+                type="text"
+                placeholder="ค้นหา..."
                 // 🟢 แก้ไข: เติม bg-white text-gray-900
                 className="w-full h-10 pl-10 pr-4 border rounded-lg bg-white text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-blue-500 outline-none"
-                value={searchTerm} 
-                onChange={(e) => setSearchTerm(e.target.value)} 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
             <div className="relative md:col-span-1">
-               <Building className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <select 
-                  // 🟢 แก้ไข: เติม bg-white text-gray-900
-                  className="w-full h-10 pl-10 pr-4 border rounded-lg appearance-none truncate bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none"
-                  value={selectedSite} 
-                  onChange={(e) => setSelectedSite(e.target.value)}
-                >
-                  <option value="ALL">ทุกโครงการ</option>
-                  {sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
-               </select>
+              <Building className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <select
+                // 🟢 แก้ไข: เติม bg-white text-gray-900
+                className="w-full h-10 pl-10 pr-4 border rounded-lg appearance-none truncate bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none"
+                value={selectedSite}
+                onChange={(e) => setSelectedSite(e.target.value)}
+              >
+                <option value="ALL">ทุกโครงการ</option>
+                {sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
+              </select>
             </div>
             <div className="relative md:col-span-1">
-               <Tag className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <select 
-                  // 🟢 แก้ไข: เติม bg-white text-gray-900
-                  className="w-full h-10 pl-10 pr-4 border rounded-lg appearance-none bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none"
-                  value={selectedCategory} 
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                >
-                  <option value="ALL">ทุกหมวดงาน</option>
-                   {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.categoryCode}</option>)}
-               </select>
+              <Tag className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <select
+                // 🟢 แก้ไข: เติม bg-white text-gray-900
+                className="w-full h-10 pl-10 pr-4 border rounded-lg appearance-none bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none"
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+              >
+                <option value="ALL">ทุกหมวดงาน</option>
+                {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.categoryCode}</option>)}
+              </select>
             </div>
             <div className="md:col-span-1">
-                <button 
-                    onClick={resetFilters}
-                    className="w-full h-10 px-4 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors font-medium"
-                >
-                    รีเซ็ต
-                </button>
+              <button
+                onClick={resetFilters}
+                className="w-full h-10 px-4 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors font-medium"
+              >
+                รีเซ็ต
+              </button>
             </div>
           </div>
           {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
@@ -216,13 +215,13 @@ export default function ApprovedDocumentLibrary() {
                     <p className="text-sm text-gray-600 line-clamp-2 mt-1">{doc.title}</p>
                   </div>
                   {doc.files && doc.files.length > 0 && (
-                     <button
-                        onClick={() => handleFileClick(doc.files[0])}
-                        className="w-full flex items-center justify-center text-sm bg-white border border-gray-300 rounded-md p-2 hover:bg-gray-100 transition-colors text-gray-700 font-medium"
-                      >
-                       {doc.files[0].fileName.toLowerCase().endsWith('.pdf') ? <Eye className="w-4 h-4 mr-2 text-red-500"/> : <Download className="w-4 h-4 mr-2 text-blue-500"/>}
-                       <span className="truncate">{doc.files[0].fileName}</span>
-                     </button>
+                    <button
+                      onClick={() => handleFileClick(doc.files[0])}
+                      className="w-full flex items-center justify-center text-sm bg-white border border-gray-300 rounded-md p-2 hover:bg-gray-100 transition-colors text-gray-700 font-medium"
+                    >
+                      {doc.files[0].fileName.toLowerCase().endsWith('.pdf') ? <Eye className="w-4 h-4 mr-2 text-red-500" /> : <Download className="w-4 h-4 mr-2 text-blue-500" />}
+                      <span className="truncate">{doc.files[0].fileName}</span>
+                    </button>
                   )}
                   <div className="flex justify-between items-center pt-2 border-t text-xs text-gray-500">
                     <span className="px-2 py-1 bg-green-100 text-green-800 rounded font-medium">{STATUS_LABELS[doc.status] || doc.status}</span>
@@ -250,12 +249,12 @@ export default function ApprovedDocumentLibrary() {
                       <td className="px-6 py-4 text-sm text-gray-700">{doc.title}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
                         {doc.files && doc.files.length > 0 ? (
-                           <button
-                             onClick={() => handleFileClick(doc.files[0])}
-                             className="flex items-center text-blue-600 hover:text-blue-800 hover:underline"
-                             title={doc.files[0].fileName}
-                           >
-                            <FileText className="w-4 h-4 mr-2 flex-shrink-0"/>
+                          <button
+                            onClick={() => handleFileClick(doc.files[0])}
+                            className="flex items-center text-blue-600 hover:text-blue-800 hover:underline"
+                            title={doc.files[0].fileName}
+                          >
+                            <FileText className="w-4 h-4 mr-2 flex-shrink-0" />
                             <span className="truncate max-w-[250px]">{doc.files[0].fileName}</span>
                           </button>
                         ) : (

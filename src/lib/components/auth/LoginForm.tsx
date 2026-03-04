@@ -5,6 +5,7 @@ import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '@/lib/firebase/client';
 import { useForm } from 'react-hook-form';
 import { HardHat } from 'lucide-react';
+import Link from 'next/link';
 
 interface LoginFormData {
   email: string;
@@ -26,7 +27,7 @@ export function LoginForm() {
     try {
       const userCredential = await signInWithEmailAndPassword(auth, data.email, data.password);
       console.log('Login successful:', userCredential.user);
-      
+
       // --- 🔽 [แก้ไขจุดสำคัญ] 🔽 ---
       const redirectUrl = searchParams.get('redirect');
       // ถ้ามี redirectUrl ให้ไปที่นั่น, ถ้าไม่มีให้ไปที่ /dashboard ตามเดิม
@@ -35,7 +36,7 @@ export function LoginForm() {
 
     } catch (error: any) {
       console.error('Login error:', error);
-      
+
       switch (error.code) {
         case 'auth/user-not-found':
         case 'auth/wrong-password':
@@ -57,10 +58,10 @@ export function LoginForm() {
 
   return (
     <div className="max-w-md mx-auto bg-white p-8 rounded-lg shadow-lg">
-    <h2 className="text-3xl font-bold text-center text-gray-800 mb-2 flex items-center justify-center gap-3">
+      <h2 className="text-3xl font-bold text-center text-gray-800 mb-2 flex items-center justify-center gap-3">
         <HardHat className="text-orange-600" size={40} />
         TTS Document Control
-    </h2>
+      </h2>
       <p className="text-center text-gray-600 mb-6">เข้าสู่ระบบจัดการเอกสารงานก่อสร้าง</p>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -93,6 +94,11 @@ export function LoginForm() {
           {errors.password && (
             <p className="text-red-500 text-sm mt-1">{errors.password.message}</p>
           )}
+          <div className="flex justify-end mt-1">
+            <Link href="/forgot-password" className="text-sm text-blue-600 hover:text-blue-800">
+              ลืมรหัสผ่าน?
+            </Link>
+          </div>
         </div>
 
         {error && (
@@ -112,7 +118,7 @@ export function LoginForm() {
 
       <div className="mt-6 text-center">
         <p className="text-gray-600 text-sm">
-          ต้องการสิทธิ์การเข้าใช้งาน? 
+          ต้องการสิทธิ์การเข้าใช้งาน?
           <br />
           <span className="text-blue-600">ติดต่อผู้ดูแลระบบ</span>
         </p>

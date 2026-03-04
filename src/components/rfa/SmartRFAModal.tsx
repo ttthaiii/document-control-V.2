@@ -6,6 +6,7 @@ import { doc, getDoc } from 'firebase/firestore'
 import { db } from '@/lib/firebase/client'
 import { RFADocument } from '@/types/rfa'
 import RFADetailModal from './RFADetailModal' // <-- ใช้ Modal ตัวเดิมที่คุณมี
+import { useNotification } from '@/lib/context/NotificationContext';
 
 interface SmartRFAModalProps {
   documentId: string | null
@@ -16,6 +17,7 @@ export default function SmartRFAModal({ documentId, onClose }: SmartRFAModalProp
   const router = useRouter()
   const searchParams = useSearchParams()
   const [documentData, setDocumentData] = useState<RFADocument | null>(null)
+  const { showNotification } = useNotification()
   // ไม่ต้องใช้ state loading, error ที่นี่ เพราะ RFADetailModal จัดการภายในตัวเองได้
 
   // Effect สำหรับดึงข้อมูลเอกสารเมื่อ documentId เปลี่ยน
@@ -32,7 +34,7 @@ export default function SmartRFAModal({ documentId, onClose }: SmartRFAModalProp
         setDocumentData({ id: docSnap.id, ...docSnap.data() } as RFADocument)
       } else {
         // หากไม่เจอเอกสาร ให้ปิด Modal และแจ้งผู้ใช้
-        alert('Error: ไม่พบเอกสารที่คุณต้องการ')
+        showNotification('error', 'ข้อผิดพลาด', 'ไม่พบเอกสารที่คุณต้องการ')
         onClose()
       }
     }

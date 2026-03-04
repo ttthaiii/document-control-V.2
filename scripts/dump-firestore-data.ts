@@ -5,15 +5,12 @@ import { resolve } from 'path';
 // Load environment variables FIRST
 config({ path: resolve(process.cwd(), '.env.local') });
 
-// Add debug to verify loading
-console.log('ENV CHECK:', {
-  projectId: process.env.FIREBASE_PROJECT_ID ? 'SET' : 'MISSING',
-  clientEmail: process.env.FIREBASE_CLIENT_EMAIL ? 'SET' : 'MISSING',
-  privateKey: process.env.FIREBASE_PRIVATE_KEY ? 'SET' : 'MISSING'
-});
-
-// Import Firebase AFTER env vars loaded
-import { adminDb } from '../src/lib/firebase/admin';
+// FORCE PRODUCTION MODE for this script
+// We want to dump from real Fireatore, not Emulator!
+process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR = 'false';
+delete process.env.FIRESTORE_EMULATOR_HOST;
+delete process.env.FIREBASE_AUTH_EMULATOR_HOST;
+delete process.env.FIREBASE_STORAGE_EMULATOR_HOST;
 
 interface DataDump {
   users: any[];
@@ -25,8 +22,14 @@ interface DataDump {
   invitations: any[];
 }
 
+let adminDb: any;
+
 async function dumpFirestoreData(): Promise<DataDump> {
-  console.log('🔍 Starting Firestore data dump...\n');
+  // Dynamically import admin to avoid hoisting issues
+  const adminModule = await import('../src/lib/firebase/admin');
+  adminDb = adminModule.adminDb;
+
+  console.log('🔍 Starting Firestore data dump from PRODUCTION...\n');
 
   const dump: DataDump = {
     users: [],
@@ -59,7 +62,7 @@ async function dumpFirestoreData(): Promise<DataDump> {
     // 2. Dump Sites
     console.log('🏗️ Fetching Sites...');
     const sitesSnapshot = await adminDb.collection('sites').get();
-    
+
     for (const doc of sitesSnapshot.docs) {
       const data = doc.data();
       const siteData = {
@@ -80,7 +83,7 @@ async function dumpFirestoreData(): Promise<DataDump> {
           .doc(doc.id)
           .collection('categories')
           .get();
-        
+
         categoriesSnapshot.docs.forEach((catDoc: any) => {
           const catData = catDoc.data();
           siteData.categories.push({
@@ -122,18 +125,11 @@ async function dumpFirestoreData(): Promise<DataDump> {
     rfaSnapshot.docs.forEach(doc => {
       const data = doc.data();
       dump.rfaDocuments.push({
+        ...data, // ✅ Capture ALL fields (isLatest, revisionNumber, files, workflow, etc.)
         id: doc.id,
-        documentNumber: data.documentNumber || 'N/A',
-        rfaType: data.rfaType || 'N/A',
-        title: data.title || 'N/A',
-        siteId: data.siteId || 'N/A',
-        categoryId: data.categoryId || 'N/A',
-        status: data.status || 'N/A',
-        currentStep: data.currentStep || 'N/A',
-        createdBy: data.createdBy || 'N/A',
-        assignedTo: data.assignedTo || 'N/A',
-        createdAt: data.createdAt?.toDate() || null,
-        taskData: data.taskData || null
+        // Ensure Dates are properly converted
+        createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : null,
+        updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : null
       });
     });
     console.log(`   Found ${dump.rfaDocuments.length} RFA documents`);
@@ -188,15 +184,15 @@ function analyzeData(dump: DataDump) {
   // Users Analysis
   console.log('\n👥 USERS ANALYSIS:');
   console.log(`Total users: ${dump.users.length}`);
-  
+
   if (dump.users.length > 0) {
     const roleDistribution = dump.users.reduce((acc, user) => {
       acc[user.role] = (acc[user.role] || 0) + 1;
       return acc;
     }, {});
-    
+
     console.log('Role distribution:', roleDistribution);
-    
+
     dump.users.forEach((user: any, index: number) => {
       console.log(`  ${index + 1}. ${user.email} (${user.role})`);
       console.log(`     ID: ${user.id}`);
@@ -210,7 +206,7 @@ function analyzeData(dump: DataDump) {
   // Sites Analysis  
   console.log('\n🏗️ SITES ANALYSIS:');
   console.log(`Total sites: ${dump.sites.length}`);
-  
+
   dump.sites.forEach((site, index) => {
     console.log(`  ${index + 1}. ${site.name}`);
     console.log(`     ID: ${site.id}`);
@@ -218,7 +214,7 @@ function analyzeData(dump: DataDump) {
     console.log(`     Categories: ${site.categories.length}`);
     console.log(`     Status: ${site.status}`);
     console.log(`     Settings:`, JSON.stringify(site.settings, null, 6));
-    
+
     if (site.categories.length > 0) {
       console.log('     Categories:');
       site.categories.forEach((cat: any) => {
@@ -231,7 +227,7 @@ function analyzeData(dump: DataDump) {
   // Counters Analysis
   console.log('\n🔢 COUNTERS ANALYSIS:');
   console.log(`Total counters: ${dump.counters.length}`);
-  
+
   dump.counters.forEach((counter, index) => {
     console.log(`  ${index + 1}. ${counter.id}`);
     console.log(`     Type: ${counter.documentType}`);
@@ -249,7 +245,7 @@ function analyzeData(dump: DataDump) {
 
   // Check for potential issues
   console.log('\n⚠️ POTENTIAL ISSUES:');
-  
+
   // Check for users without sites
   const usersWithoutSites = dump.users.filter((user: any) => !user.sites || user.sites.length === 0);
   if (usersWithoutSites.length > 0) {
@@ -261,10 +257,10 @@ function analyzeData(dump: DataDump) {
 
   // Check for invalid site references
   const validSiteIds = new Set(dump.sites.map((site: any) => site.id));
-  const invalidUserSites = dump.users.filter((user: any) => 
+  const invalidUserSites = dump.users.filter((user: any) =>
     user.sites.some((siteId: string) => !validSiteIds.has(siteId))
   );
-  
+
   if (invalidUserSites.length > 0) {
     console.log(`❗ Users with invalid site references: ${invalidUserSites.length}`);
     invalidUserSites.forEach((user: any) => {
@@ -287,7 +283,7 @@ function analyzeData(dump: DataDump) {
     acc[user.email] = (acc[user.email] || 0) + 1;
     return acc;
   }, {});
-  
+
   const duplicateEmails = Object.entries(emailCounts).filter(([_, count]) => (count as number) > 1);
   if (duplicateEmails.length > 0) {
     console.log(`❗ Duplicate user emails: ${duplicateEmails.length}`);
@@ -305,13 +301,13 @@ if (require.main === module) {
     .then((dump) => {
       analyzeData(dump);
       console.log('\n✅ Data dump completed!');
-      
+
       // Save to file
       const fs = require('fs');
       const outputPath = './firestore-dump.json';
       fs.writeFileSync(outputPath, JSON.stringify(dump, null, 2));
       console.log(`💾 Data saved to: ${outputPath}`);
-      
+
       process.exit(0);
     })
     .catch((error) => {

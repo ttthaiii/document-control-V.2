@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
     let siteSnapshots: FirebaseFirestore.DocumentSnapshot[];
 
     // --- 👇 จุดที่แก้ไขคือตรงนี้ครับ 👇 ---
-    if (userProfile.role === ROLES.ADMIN) { 
+    if (userProfile.role === ROLES.ADMIN) {
       // 1. ถ้าเป็น Admin: ให้ดึงข้อมูลจาก collection 'sites' มาทั้งหมด
       const allSitesSnapshot = await adminDb.collection('sites').get();
       siteSnapshots = allSitesSnapshot.docs;
@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
       if (userSiteIds.length === 0) {
         return NextResponse.json({ success: true, sites: [] });
       }
-      const sitesPromises = userSiteIds.map((siteId: string) => 
+      const sitesPromises = userSiteIds.map((siteId: string) =>
         adminDb.collection('sites').doc(siteId).get()
       );
       siteSnapshots = await Promise.all(sitesPromises);
@@ -48,9 +48,7 @@ export async function GET(request: NextRequest) {
         const data = doc.data()!;
         return {
           id: doc.id,
-          name: data.name,
-          sheetId: data.settings?.googleSheetsConfig?.spreadsheetId || null,
-          sheetName: data.settings?.googleSheetsConfig?.sheetName || null,
+          name: data.name
         };
       });
 
@@ -62,7 +60,7 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     console.error('❌ Sites API error:', error);
     return NextResponse.json(
-      { success: false, error: error.message }, 
+      { success: false, error: error.message },
       { status: 500 }
     );
   }

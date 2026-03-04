@@ -3,6 +3,7 @@ import { NextResponse, NextRequest } from "next/server";
 import { getAdminDb, getBimTrackingDb, getAdminAuth, getAdminBucket } from "@/lib/firebase/admin"; // ✅ เพิ่ม getAdminBucket
 import { FieldValue } from 'firebase-admin/firestore';
 import { WR_STATUSES } from '@/lib/config/workflow';
+import { getFileUrl } from '@/lib/utils/storage';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,20 +42,20 @@ export async function POST(req: NextRequest) {
         if (!originalDocId || !uploadedFiles || uploadedFiles.length === 0 || !verifiedTaskId) {
             return NextResponse.json({ success: false, error: "Missing required fields" }, { status: 400 });
         }
-        
+
         const originalWrRef = adminDb.collection("workRequests").doc(originalDocId);
-        
+
         const newRevisionDoc = await adminDb.runTransaction(async (transaction) => {
             const originalDoc = await transaction.get(originalWrRef);
             if (!originalDoc.exists) throw new Error("Original document not found");
 
             const originalData = originalDoc.data()!;
-            
+
             // ดึงข้อมูล Site
             const siteDoc = await adminDb.collection('sites').doc(originalData.siteId).get();
             if (!siteDoc.exists) throw new Error(`Site not found.`);
             const siteData = siteDoc.data()!;
-            
+
             // ตรวจสอบ Task
             const taskDoc = await bimTrackingDb.collection('tasks').doc(verifiedTaskId).get();
             if (!taskDoc.exists) throw new Error(`Verified Task ID not found.`);
@@ -72,7 +73,6 @@ export async function POST(req: NextRequest) {
 
             // 🔥🔥🔥 [เริ่มส่วนแก้ไข] ย้ายไฟล์จาก Temp -> Permanent 🔥🔥🔥
             const finalFilesData = [];
-            const cdnUrlBase = "https://ttsdoc-cdn.ttthaiii30.workers.dev";
 
             for (const file of uploadedFiles) {
                 if (file.filePath && file.filePath.startsWith('temp/')) {
@@ -82,10 +82,10 @@ export async function POST(req: NextRequest) {
                         // แต่ในเคสนี้เราทำนอก transaction block ยากเพราะต้องรอเลข DocumentNumber
                         // ดังนั้นเราจะ move จริงๆ ตรงนี้ (ถ้า transaction fail ไฟล์อาจจะถูกย้ายไปแล้ว แต่ก็ยังดีกว่าไฟล์หาย)
                         await adminBucket.file(file.filePath).move(destinationPath);
-                        
+
                         finalFilesData.push({
                             ...file,
-                            fileUrl: `${cdnUrlBase}/${destinationPath}`,
+                            fileUrl: getFileUrl(destinationPath),
                             filePath: destinationPath,
                             uploadedAt: new Date().toISOString(),
                             uploadedBy: uid,
@@ -129,15 +129,15 @@ export async function POST(req: NextRequest) {
                     }
                 ],
             };
-            
+
             transaction.set(newWrRef, newDocData);
             transaction.update(originalWrRef, { isLatest: false, status: WR_STATUSES.COMPLETED });
-            
+
             return { id: newWrRef.id, documentNumber: newDocumentNumber };
         });
 
-        return NextResponse.json({ 
-            success: true, 
+        return NextResponse.json({
+            success: true,
             message: "New revision created",
             newDocumentId: newRevisionDoc.id,
             newDocumentNumber: newRevisionDoc.documentNumber

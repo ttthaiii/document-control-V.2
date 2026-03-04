@@ -1,10 +1,9 @@
-// app/api/google-sheets/projects/route.ts (แก้ไขแล้ว)
+// app/api/bim-tracking/projects/route.ts (แก้ไขแล้ว)
 import { NextRequest, NextResponse } from 'next/server';
 // 🔽 1. เปลี่ยน import: นำเข้า bimTrackingDb และ adminAuth
-import { adminAuth, bimTrackingDb } from '@/lib/firebase/admin'; 
+import { adminAuth, bimTrackingDb } from '@/lib/firebase/admin';
 
-// 🗑️ 2. ลบ import ของ googleSheetsService ที่ไม่ได้ใช้แล้ว
-// import { googleSheetsService } from '@/lib/google-sheets/service';
+
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +20,7 @@ export async function POST(request: NextRequest) {
     // --- 🔽 3. เปลี่ยน Logic การดึงข้อมูล ---
     // ไม่ต้องใช้ sheetId จาก body อีกต่อไป
     // const { sheetId, sheetName } = await request.json();
-    
+
     // Query ไปยัง collection 'projects' ใน Firestore ของ BIM-Tracking
     const projectsSnapshot = await bimTrackingDb.collection('projects').get();
 
@@ -51,10 +50,10 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error('❌ Firestore projects API error:', error);
     return NextResponse.json(
-      { 
-        success: false, 
-        error: error.message 
-      }, 
+      {
+        success: false,
+        error: error.message
+      },
       { status: 500 }
     );
   }

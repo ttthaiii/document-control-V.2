@@ -12,10 +12,10 @@ export interface CreateInvitationData {
 }
 
 interface InvitationData extends CreateInvitationData {
-    status: 'PENDING' | 'ACCEPTED' | 'EXPIRED';
-    createdAt: Date;
-    expiresAt: Date;
-    createdByAdmin: boolean;
+  status: 'PENDING' | 'ACCEPTED' | 'EXPIRED';
+  createdAt: Date;
+  expiresAt: Date;
+  createdByAdmin: boolean;
 }
 
 export class InvitationService {
@@ -26,17 +26,19 @@ export class InvitationService {
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
       await adminDb.collection('invitations').doc(token).set({
-        ...data, 
+        ...data,
         status: 'PENDING',
         createdAt: new Date(),
         expiresAt: expiresAt,
         createdByAdmin: true,
       });
 
-      const domain = 'https://ttsdocumentcontrol.web.app'; 
-      
+      // Use environment variable if available, or fallback to localhost in development, otherwise use the production URL
+      const isDev = process.env.NODE_ENV === 'development';
+      const domain = process.env.NEXT_PUBLIC_APP_URL || (isDev ? 'http://localhost:3000' : 'https://ttsdocumentcontrol.web.app');
+
       const invitationUrl = `${domain}/accept-invitation?token=${token}`;
-      
+
       return {
         success: true,
         token,
@@ -54,17 +56,17 @@ export class InvitationService {
   static async acceptInvitation(token: string, password: string) {
     try {
       const invitationDoc = await adminDb.collection('invitations').doc(token).get();
-      
+
       if (!invitationDoc.exists) {
         throw new Error("Invalid or expired invitation token.");
       }
-      
+
       const invitation = invitationDoc.data() as InvitationData;
 
       if (invitation.status !== 'PENDING') {
-         throw new Error("Invitation has already been used or expired.");
+        throw new Error("Invitation has already been used or expired.");
       }
-      
+
       // สร้าง User Authentication (ตั้ง Display Name ให้เลย)
       const userRecord = await adminAuth.createUser({
         email: invitation.email,
@@ -89,12 +91,12 @@ export class InvitationService {
 
       // เพิ่ม User เข้า Site Members
       if (sitesToStore.length > 0) {
-        const updatePromises = sitesToStore.map(siteId => 
-            adminDb.collection('sites').doc(siteId).update({
-                members: FieldValue.arrayUnion(userRecord.uid)
-            }).catch(err => {
-                console.error(`Warning: Failed to add user to site ${siteId}`, err);
-            })
+        const updatePromises = sitesToStore.map(siteId =>
+          adminDb.collection('sites').doc(siteId).update({
+            members: FieldValue.arrayUnion(userRecord.uid)
+          }).catch(err => {
+            console.error(`Warning: Failed to add user to site ${siteId}`, err);
+          })
         );
         await Promise.all(updatePromises);
       }

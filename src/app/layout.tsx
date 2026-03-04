@@ -45,13 +45,13 @@ export default function RootLayout({
   return (
     <html lang="th">
       <body className={inter.className}>
-        <AuthProvider>
-          <LoadingProvider>
-            <NotificationProvider>
+        <NotificationProvider>
+          <AuthProvider>
+            <LoadingProvider>
               {children}
-            </NotificationProvider>
-          </LoadingProvider>
-        </AuthProvider>
+            </LoadingProvider>
+          </AuthProvider>
+        </NotificationProvider>
       </body>
     </html>
   )

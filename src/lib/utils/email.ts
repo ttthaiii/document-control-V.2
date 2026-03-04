@@ -11,15 +11,15 @@ const transporter = nodemailer.createTransport({
 });
 
 export async function sendInvitationEmail(
-  to: string, 
-  inviteLink: string, 
+  to: string,
+  inviteLink: string,
   inviterName: string,
   userData: { name: string, role: string }
 ) {
   // ✅ แก้ไขข้อความหัวเรื่องใน HTML
-  const headerText = "ยินดีต้อนรับสู่ระบบ TTS Document Control"; 
+  const headerText = "ยินดีต้อนรับสู่ระบบ TTS Document Control";
   const themeColor = "#f97316";
-  
+
   const htmlContent = `
     <div style="font-family: 'Sarabun', sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
       <div style="background-color: ${themeColor}; padding: 20px; text-align: center;">
@@ -64,7 +64,61 @@ export async function sendInvitationEmail(
     from: process.env.SMTP_FROM,
     to: to,
     // ✅ แก้ไขหัวข้ออีเมล (Subject) ที่จะแสดงใน Inbox ผู้รับ
-    subject: 'แจ้งเชิญเข้าร่วมใช้งานระบบบริหารจัดการเอกสารภายในโครงการ (TTS Document Control)', 
+    subject: 'แจ้งเชิญเข้าร่วมใช้งานระบบบริหารจัดการเอกสารภายในโครงการ (TTS Document Control)',
+    html: htmlContent,
+  });
+}
+
+export async function sendPasswordResetEmail(
+  to: string,
+  resetLink: string,
+  userName: string
+) {
+  const headerText = "รีเซ็ตรหัสผ่าน - TTS Document Control";
+  const themeColor = "#f97316"; // Theme color orange
+
+  const htmlContent = `
+    <div style="font-family: 'Sarabun', sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+      <div style="background-color: ${themeColor}; padding: 20px; text-align: center;">
+        <h2 style="color: white; margin: 0; font-size: 20px;">${headerText}</h2>
+      </div>
+      
+      <div style="padding: 30px; background-color: #ffffff;">
+        <p style="font-size: 16px; color: #374151;">เรียน คุณ <strong>${userName}</strong>,</p>
+        
+        <p style="color: #4b5563; line-height: 1.6;">
+          มีการแจ้งคำขอสำหรับการตั้งรหัสผ่านใหม่ (Reset Password) ในระบบ TTS Document Control สำหรับบัญชีของคุณ 
+        </p>
+        <p style="color: #4b5563; line-height: 1.6;">
+          หากคุณเป็นผู้ดำเนินการคำขอนี้ กรุณาคลิกที่ปุ่มด้านล่างเพื่อทำการตั้งรหัสผ่านใหม่ (ลิงก์นี้จะหมดอายุภายใน 1 ชั่วโมง)
+        </p>
+
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${resetLink}" style="background-color: ${themeColor}; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+            ตั้งรหัสผ่านใหม่
+          </a>
+        </div>
+        
+        <p style="font-size: 14px; color: #6b7280; margin-top: 20px;">
+          หากคุณไม่ได้เป็นผู้ขอตั้งรหัสผ่านใหม่ สามารถเพิกเฉยต่ออีเมลฉบับนี้ได้เลย รหัสผ่านของคุณจะไม่มีการเปลี่ยนแปลง
+        </p>
+        
+        <p style="font-size: 14px; color: #6b7280; margin-top: 20px; border-top: 1px solid #e5e7eb; padding-top: 10px;">
+          หากปุ่มกดไม่ได้ สามารถคลิกลิงก์ด้านล่าง:<br>
+          <a href="${resetLink}" style="color: ${themeColor}; word-break: break-all;">${resetLink}</a>
+        </p>
+      </div>
+      
+      <div style="background-color: #f9fafb; padding: 15px; text-align: center; font-size: 12px; color: #9ca3af;">
+        © TTS Engineering - Automated System
+      </div>
+    </div>
+  `;
+
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM,
+    to: to,
+    subject: 'รีเซ็ตรหัสผ่าน (Reset Password) - ระบบบริหารจัดการเอกสารภายในโครงการ (TTS Document Control)',
     html: htmlContent,
   });
 }
