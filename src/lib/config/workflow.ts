@@ -21,20 +21,20 @@ export type Role = ObjectValues<typeof ROLES>;
 
 // Creators (RFA): BIM, ME, SN, Site Admin, PM, PE, OE, Admin
 export const CREATOR_ROLES: Role[] = [
-  ROLES.BIM, ROLES.ME, ROLES.SN, 
-  ROLES.SITE_ADMIN, ROLES.ADMIN, 
+  ROLES.BIM, ROLES.ME, ROLES.SN,
+  ROLES.SITE_ADMIN, ROLES.ADMIN,
   ROLES.PM, ROLES.PE, ROLES.OE
 ];
 
 // Reviewers: ยังคงสถานะเดิมไว้สำหรับการตรวจสอบเบื้องต้น (ถ้ามี workflow นี้)
 export const REVIEWER_ROLES: Role[] = [
-  ROLES.SITE_ADMIN, ROLES.ADMIN_SITE_2, 
+  ROLES.SITE_ADMIN, ROLES.ADMIN_SITE_2,
   ROLES.OE, ROLES.PE, ROLES.ADMIN
 ];
 
 // Approvers (RFA Final): CM, Site Admin, PM, PE, OE, Admin
 export const APPROVER_ROLES: Role[] = [
-  ROLES.CM, ROLES.ADMIN, 
+  ROLES.CM, ROLES.ADMIN,
   ROLES.SITE_ADMIN, ROLES.PM, ROLES.PE, ROLES.OE
 ];
 
@@ -46,7 +46,7 @@ export const WR_CREATOR_ROLES: Role[] = [ROLES.PE, ROLES.OE, ROLES.ADMIN];
 export const WR_APPROVER_ROLES: Role[] = [ROLES.PM, ROLES.ADMIN];
 
 // Viewer Roles
-export const VIEWER_ROLES: Role[] = [ROLES.PD, ROLES.SE, ROLES.FM]; 
+export const VIEWER_ROLES: Role[] = [ROLES.PD, ROLES.SE, ROLES.FM];
 
 export const STATUSES = {
   PENDING_REVIEW: 'PENDING_REVIEW',
@@ -63,6 +63,7 @@ export const WR_STATUSES = {
   DRAFT: 'DRAFT',
   REJECTED_BY_PM: 'REJECTED_BY_PM',
   PENDING_BIM: 'PENDING_BIM',
+  REJECTED_BY_BIM: 'REJECTED_BY_BIM',
   IN_PROGRESS: 'IN_PROGRESS',
   PENDING_ACCEPTANCE: 'PENDING_ACCEPTANCE',
   REVISION_REQUESTED: 'REVISION_REQUESTED',
@@ -82,6 +83,7 @@ export const STATUS_LABELS: { [key: string]: string } = {
   [WR_STATUSES.DRAFT]: 'รออนุมัติ (PM)',
   [WR_STATUSES.REJECTED_BY_PM]: 'ไม่อนุมัติ (PM)',
   [WR_STATUSES.PENDING_BIM]: 'รอ BIM รับงาน',
+  [WR_STATUSES.REJECTED_BY_BIM]: 'ไม่อนุมัติ (BIM)',
   [WR_STATUSES.IN_PROGRESS]: 'BIM กำลังดำเนินการ',
   [WR_STATUSES.PENDING_ACCEPTANCE]: 'รอตรวจรับ (Site)',
   [WR_STATUSES.REVISION_REQUESTED]: 'ขอแก้ไข (WR)',
@@ -90,24 +92,25 @@ export const STATUS_LABELS: { [key: string]: string } = {
 
 export const STATUS_COLORS: { [key: string]: string } = {
   [STATUSES.PENDING_REVIEW]: '#3B82F6', // Blue-500 (รอตรวจสอบ - สีฟ้า)
-  
+
   // 🟢 แก้ไข: เปลี่ยนจาก Teal (#00C49F) เป็น Violet (#8B5CF6) เพื่อไม่ให้กลืนกับสีเขียว
   [STATUSES.PENDING_CM_APPROVAL]: '#8B5CF6', // Violet-500 (รออนุมัติ - สีม่วง)
-  
+
   [STATUSES.REVISION_REQUIRED]: '#F59E0B', // Amber-500 (แก้ไข - สีเหลืองส้ม)
   [STATUSES.APPROVED]: '#22C55E', // Green-500 (อนุมัติ - สีเขียวสด)
   [STATUSES.REJECTED]: '#EF4444', // Red-500 (ไม่อนุมัติ - สีแดง)
-  
+
   // สีเขียวเข้ม สำหรับอนุมัติแบบมีคอมเมนต์
   [STATUSES.APPROVED_WITH_COMMENTS]: '#15803d', // Green-700
-  
+
   [STATUSES.APPROVED_REVISION_REQUIRED]: '#F97316', // Orange-500
   [STATUSES.PENDING_FINAL_APPROVAL]: '#6366F1', // Indigo-500
-  
+
   // Work Request Colors (คงเดิมหรือปรับให้เข้าชุดกัน)
   [WR_STATUSES.DRAFT]: '#6B7280',
   [WR_STATUSES.REJECTED_BY_PM]: '#EF4444',
   [WR_STATUSES.PENDING_BIM]: '#3B82F6',
+  [WR_STATUSES.REJECTED_BY_BIM]: '#EF4444',
   [WR_STATUSES.IN_PROGRESS]: '#F59E0B',
   [WR_STATUSES.PENDING_ACCEPTANCE]: '#A855F7',
   [WR_STATUSES.REVISION_REQUESTED]: '#F97316',

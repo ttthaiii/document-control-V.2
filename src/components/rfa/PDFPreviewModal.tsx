@@ -6,7 +6,7 @@ import { RFAFile } from '@/types/rfa';
 import {
   X, Edit3, Undo, Trash2, Menu, Plus, Minus, Save,
   MousePointer2, Hand, Square, Circle, Eraser, Monitor, Type, XCircle,
-  Loader2, ChevronLeft, ChevronRight, Download
+  Loader2, ChevronLeft, ChevronRight, Download, Layers, ChevronUp, ChevronDown, FilePlus
 } from 'lucide-react';
 
 import * as fabric from 'fabric';
@@ -70,6 +70,11 @@ export default function PDFPreviewModal({
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [thumbnails, setThumbnails] = useState<{ [key: number]: { src: string, width: number, height: number } }>({});
   const [isMobile, setIsMobile] = useState(false);
+
+  // --- Page Management States ---
+  const [managedFileUrl, setManagedFileUrl] = useState<string | null>(null);
+  const [isPageManagementMode, setIsPageManagementMode] = useState(false);
+  const [draggedPage, setDraggedPage] = useState<number | null>(null);
 
   const isPinchingRef = useRef(false);
   const startPinchDistRef = useRef<number>(0);
@@ -247,7 +252,8 @@ export default function PDFPreviewModal({
         // @ts-ignore
         const pdfjsLib = window.pdfjsLib;
         if (!pdfjsLib) { setTimeout(loadPDF, 500); return; }
-        const loadingTask = pdfjsLib.getDocument(file.fileUrl);
+        const urlToLoad = managedFileUrl || file.fileUrl; // Load the managed file if exists
+        const loadingTask = pdfjsLib.getDocument(urlToLoad);
         const pdf = await loadingTask.promise;
         pdfDocRef.current = pdf;
         setTotalPages(pdf.numPages);
@@ -256,7 +262,7 @@ export default function PDFPreviewModal({
       } catch (error) { console.error(error); setIsLoading(false); }
     };
     loadPDF();
-  }, [isOpen, file]);
+  }, [isOpen, file, managedFileUrl]);
 
   // --- Generate Thumbnails ---
   useEffect(() => {
@@ -291,7 +297,7 @@ export default function PDFPreviewModal({
     try {
       saveCurrentPageData();
 
-      const existingPdfBytes = await fetch(file.fileUrl).then(res => res.arrayBuffer());
+      const existingPdfBytes = await fetch(managedFileUrl || file.fileUrl).then(res => res.arrayBuffer());
       const pdfDoc = await PDFDocument.load(existingPdfBytes);
       const pages = pdfDoc.getPages();
 
@@ -356,7 +362,8 @@ export default function PDFPreviewModal({
   const handleDownload = async () => {
     if (!file) return;
     try {
-      const response = await fetch(file.fileUrl);
+      const targetUrl = managedFileUrl || file.fileUrl;
+      const response = await fetch(targetUrl);
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -368,8 +375,137 @@ export default function PDFPreviewModal({
       document.body.removeChild(a);
     } catch (error) {
       console.error('Download failed:', error);
-      window.open(file.fileUrl, '_blank');
+      window.open(managedFileUrl || file.fileUrl, '_blank');
     }
+  };
+
+  // --- PDF Page Management Operations ---
+  const performPdfOperation = async (operation: (currentBytes: ArrayBuffer) => Promise<Uint8Array>) => {
+    setIsLoading(true);
+    try {
+      const currentUrl = managedFileUrl || file!.fileUrl;
+      const pdfBytes = await fetch(currentUrl).then(res => res.arrayBuffer());
+
+      const newPdfBytes = await operation(pdfBytes);
+
+      const blob = new Blob([newPdfBytes as any], { type: 'application/pdf' });
+      const newUrl = URL.createObjectURL(blob);
+
+      setManagedFileUrl(newUrl);
+    } catch (error) {
+      console.error(error);
+      showNotification('error', 'เกิดข้อผิดพลาด', 'ไม่สามารถจัดหน้า PDF ได้ ไฟล์อาจจะเสียหายหรือมีการตั้งค่าป้องกันไว้');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeletePage = (pageNum1Based: number) => {
+    performPdfOperation(async (bytes) => {
+      const doc = await PDFDocument.load(bytes);
+      doc.removePage(pageNum1Based - 1);
+      return await doc.save();
+    });
+  };
+
+  const handleMovePage = (pageNum1Based: number, direction: 'up' | 'down') => {
+    if ((direction === 'up' && pageNum1Based === 1) || (direction === 'down' && pageNum1Based === totalPages)) return;
+
+    performPdfOperation(async (bytes) => {
+      const doc = await PDFDocument.load(bytes);
+      const total = doc.getPageCount();
+      const idx = pageNum1Based - 1;
+      const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+
+      const newOrder = Array.from({ length: total }, (_, i) => i);
+      const temp = newOrder[idx];
+      newOrder[idx] = newOrder[targetIdx];
+      newOrder[targetIdx] = temp;
+
+      const newDoc = await PDFDocument.create();
+      const copiedPages = await newDoc.copyPages(doc, newOrder);
+      copiedPages.forEach(p => newDoc.addPage(p));
+      return await newDoc.save();
+    });
+  };
+
+  const handleDragStart = (e: React.DragEvent, pageNum: number) => {
+    setDraggedPage(pageNum);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault(); // Necessary to allow dropping
+  };
+
+  const handleDrop = (e: React.DragEvent, targetPageNum: number) => {
+    e.preventDefault();
+    if (draggedPage === null || draggedPage === targetPageNum) return;
+
+    performPdfOperation(async (bytes) => {
+      const doc = await PDFDocument.load(bytes);
+      const total = doc.getPageCount();
+      const fromIdx = draggedPage - 1;
+      const toIdx = targetPageNum - 1;
+
+      const newOrder = Array.from({ length: total }, (_, i) => i);
+      newOrder.splice(fromIdx, 1);
+      newOrder.splice(toIdx, 0, fromIdx);
+
+      const newDoc = await PDFDocument.create();
+      const copiedPages = await newDoc.copyPages(doc, newOrder);
+      copiedPages.forEach(p => newDoc.addPage(p));
+      return await newDoc.save();
+    });
+    setDraggedPage(null);
+  };
+
+  const handleAppendPdf = (e: React.ChangeEvent<HTMLInputElement>, position: 'start' | 'end') => {
+    const uploaded = e.target.files?.[0];
+    if (!uploaded) return;
+    performPdfOperation(async (bytes) => {
+      const baseDoc = await PDFDocument.load(bytes);
+      const appendBytes = await uploaded.arrayBuffer();
+      const appendDoc = await PDFDocument.load(appendBytes);
+
+      const appendIndices = Array.from({ length: appendDoc.getPageCount() }, (_, i) => i);
+
+      const newDoc = await PDFDocument.create();
+
+      const copiedAppendPages = await newDoc.copyPages(appendDoc, appendIndices);
+      const baseIndices = Array.from({ length: baseDoc.getPageCount() }, (_, i) => i);
+      const copiedBasePages = await newDoc.copyPages(baseDoc, baseIndices);
+
+      if (position === 'start') {
+        copiedAppendPages.forEach(p => newDoc.addPage(p));
+        copiedBasePages.forEach(p => newDoc.addPage(p));
+      } else {
+        copiedBasePages.forEach(p => newDoc.addPage(p));
+        copiedAppendPages.forEach(p => newDoc.addPage(p));
+      }
+
+      return await newDoc.save();
+    });
+    e.target.value = '';
+  };
+
+  const togglePageManagement = () => {
+    if (isPageManagementMode) {
+      setIsPageManagementMode(false);
+      return;
+    }
+
+    const sizeInMB = file!.size / (1024 * 1024);
+    if (sizeInMB > 10) {
+      showNotification('error', 'ไฟล์มีขนาดใหญ่เกินไป', 'ระบบปิดฟีเจอร์จัดหน้าสำหรับไฟล์ขนาด >10MB เพื่อป้องกันเบราว์เซอร์ค้าง กรุณาจัดหน้าด้วยโปรแกรมภายนอก');
+      return;
+    }
+    if (sizeInMB > 5) {
+      if (!window.confirm('คำเตือน: ไฟล์ PDF นี้มีขนาดค่อนข้างใหญ่ อาจทำให้หน่วงหรือเบราว์เซอร์ทำงานช้าลงระหว่างจัดการหน้ากระดาษ ต้องการดำเนินการต่อหรือไม่?')) {
+        return;
+      }
+    }
+    setIsPageManagementMode(true);
+    setIsSidebarOpen(true); // Force open sidebar
   };
 
   // --- Render Canvas (Seamless & High-DPI) ---
@@ -930,13 +1066,23 @@ export default function PDFPreviewModal({
         </div>
         <div className="flex items-center gap-2">
           {allowEdit && !isEditing && (
-            <button
-              onClick={() => setIsEditing(true)}
-              className="flex items-center gap-2 px-3 py-2 text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100"
-            >
-              <Edit3 size={18} />
-              <span className="hidden sm:inline font-medium">แก้ไข</span>
-            </button>
+            <>
+              <button
+                onClick={togglePageManagement}
+                className={`flex items-center gap-2 px-3 py-2 border rounded-lg transition-colors ${isPageManagementMode ? 'bg-indigo-600 text-white border-indigo-600 shadow-inner' : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'}`}
+              >
+                <Layers size={18} />
+                <span className="hidden sm:inline font-medium">{isPageManagementMode ? 'เสร็จสิ้น' : 'จัดการหน้า'}</span>
+              </button>
+              <button
+                onClick={() => setIsEditing(true)}
+                disabled={isPageManagementMode}
+                className="flex items-center gap-2 px-3 py-2 text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Edit3 size={18} />
+                <span className="hidden sm:inline font-medium">แก้ไข</span>
+              </button>
+            </>
           )}
           {allowEdit && isEditing && (
             <>
@@ -1068,13 +1214,17 @@ export default function PDFPreviewModal({
               {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
                 <div
                   key={p}
+                  draggable={isPageManagementMode}
+                  onDragStart={(e) => handleDragStart(e, p)}
+                  onDragOver={handleDragOver}
+                  onDrop={(e) => handleDrop(e, p)}
                   onClick={() => {
                     handlePageChange(p);
-                    if (isMobile) setIsSidebarOpen(false);
+                    if (isMobile && !isPageManagementMode) setIsSidebarOpen(false);
                   }}
-                  className={`cursor-pointer rounded border-2 transition-all p-1 bg-gray-100 ${currentPage === p ? 'border-blue-500 ring-1 ring-blue-300' : 'border-transparent hover:border-gray-300'}`}
+                  className={`relative cursor-pointer rounded border-2 transition-all p-1 bg-gray-100 ${currentPage === p ? 'border-blue-500 ring-1 ring-blue-300' : 'border-transparent hover:border-gray-300'} ${draggedPage === p ? 'opacity-50 ring-2 ring-indigo-400 border-indigo-400' : ''}`}
                 >
-                  <div className="w-full flex items-center justify-center bg-white overflow-hidden min-h-[100px]">
+                  <div className="w-full flex items-center justify-center bg-white overflow-hidden min-h-[100px] relative">
                     {thumbnails[p] ? (
                       <img
                         src={thumbnails[p].src}
@@ -1085,6 +1235,39 @@ export default function PDFPreviewModal({
                     ) : (
                       <div className="text-gray-400 text-xs">Loading...</div>
                     )}
+
+                    {/* Management Overlay */}
+                    {isPageManagementMode && (
+                      <div className="absolute top-1 right-1 flex flex-col gap-1 z-10">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleMovePage(p, 'up'); }}
+                          disabled={p === 1}
+                          className="p-1 bg-white border rounded shadow hover:bg-gray-100 text-gray-700 disabled:opacity-30"
+                          title="เลื่อนขึ้น"
+                        >
+                          <ChevronUp size={16} />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleMovePage(p, 'down'); }}
+                          disabled={p === totalPages}
+                          className="p-1 bg-white border rounded shadow hover:bg-gray-100 text-gray-700 disabled:opacity-30"
+                          title="เลื่อนลง"
+                        >
+                          <ChevronDown size={16} />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (window.confirm(`ต้องการลบหน้า ${p} ใช่หรือไม่?`)) handleDeletePage(p);
+                          }}
+                          disabled={totalPages <= 1}
+                          className="p-1 bg-red-50 border border-red-200 rounded shadow hover:bg-red-100 text-red-600 disabled:opacity-30"
+                          title="ลบหน้านี้"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <div className="text-center text-xs mt-1 font-medium text-gray-500">
                     {p}
@@ -1092,6 +1275,41 @@ export default function PDFPreviewModal({
                 </div>
               ))}
             </div>
+
+            {/* Append PDF Buttons */}
+            {isPageManagementMode && (
+              <div className="p-3 border-t bg-gray-50 shrink-0 space-y-2">
+                <input
+                  type="file"
+                  id="append-pdf-input-start"
+                  accept="application/pdf"
+                  className="hidden"
+                  onChange={(e) => handleAppendPdf(e, 'start')}
+                />
+                <input
+                  type="file"
+                  id="append-pdf-input-end"
+                  accept="application/pdf"
+                  className="hidden"
+                  onChange={(e) => handleAppendPdf(e, 'end')}
+                />
+                <label
+                  htmlFor="append-pdf-input-start"
+                  className="flex items-center justify-center w-full gap-2 px-3 py-2 bg-white border-2 border-dashed border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-100 hover:border-indigo-400 cursor-pointer transition-colors font-medium text-sm"
+                >
+                  <FilePlus size={18} />
+                  <span>แทรก PDF ด้านหน้าสุด</span>
+                </label>
+                <label
+                  htmlFor="append-pdf-input-end"
+                  className="flex items-center justify-center w-full gap-2 px-3 py-2 bg-white border-2 border-dashed border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-100 hover:border-indigo-400 cursor-pointer transition-colors font-medium text-sm"
+                >
+                  <FilePlus size={18} />
+                  <span>แทรก PDF ด้านหลังสุด</span>
+                </label>
+                <p className="text-[10px] text-gray-500 text-center mt-2 leading-tight">การเพิ่มไฟล์อาจใช้เวลาสักครู่ ขึ้นอยู่กับขนาดไฟล์</p>
+              </div>
+            )}
           </div>
         )}
 

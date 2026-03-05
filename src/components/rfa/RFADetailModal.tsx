@@ -27,14 +27,27 @@ const formatFileSize = (bytes: number): string => {
 };
 
 // --- Component: Workflow History Modal ---
-const WorkflowHistoryModal = ({ workflow, onClose, userRole }: { workflow: RFAWorkflowStep[], onClose: () => void, userRole?: string }) => {
+const WorkflowHistoryModal = ({
+  workflow,
+  onClose,
+  userRole,
+  cmSystemType = 'INTERNAL' // Default as internal
+}: {
+  workflow: RFAWorkflowStep[],
+  onClose: () => void,
+  userRole?: string,
+  cmSystemType?: 'INTERNAL' | 'EXTERNAL'
+}) => {
   const filteredWorkflow = useMemo(() => {
-    if (userRole && APPROVER_ROLES.includes(userRole as Role)) {
+    // Hide internal drafting steps ONLY for CM, and ONLY if it's an INTERNAL system type.
+    // PMs and all Reviewers (Site Admin, PE, OE) should see everything.
+    // If it's an EXTERNAL CM system, the CM is part of the system and needs to see everything.
+    if (userRole === ROLES.CM && cmSystemType === 'INTERNAL') {
       const statusesToHide = [STATUSES.PENDING_REVIEW, STATUSES.REVISION_REQUIRED];
       return workflow.filter(item => !statusesToHide.includes(item.status));
     }
     return workflow;
-  }, [workflow, userRole]);
+  }, [workflow, userRole, cmSystemType]);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 z-[60] flex items-center justify-center p-4">
@@ -962,14 +975,14 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                     disabled={isActionDisabled}
                     className="flex items-center px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-lg hover:bg-orange-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
                   >
-                    <Edit3 size={16} className="mr-2" /> อนุมัติ (ต้องแก้ไข)
+                    <Edit3 size={16} className="mr-2" /> อนุมัติตามคอมเมนต์ (ต้องแก้ไข)
                   </button>
                   <button
                     onClick={() => handleAction('APPROVE_WITH_COMMENTS')}
                     disabled={isActionDisabled}
                     className="flex items-center px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
                   >
-                    <MessageSquare size={16} className="mr-2" /> อนุมัติ (ตามคอมเมนต์)
+                    <MessageSquare size={16} className="mr-2" /> อนุมัติตามคอมเมนต์ (ไม่แก้ไข)
                   </button>
                   <button
                     onClick={() => handleAction('APPROVE')}
@@ -990,6 +1003,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
           workflow={document.workflow || []}
           onClose={() => setShowHistory(false)}
           userRole={user?.role}
+          cmSystemType={document.site?.cmSystemType}
         />
       )}
       <PDFPreviewModal

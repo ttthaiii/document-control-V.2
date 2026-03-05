@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '@/lib/auth/useAuth'
 import { Site, Category, RFADocument, RFAFile } from '@/types/rfa'
-import { Search, Building, Tag, FileText, Calendar, Download, Eye } from 'lucide-react'
+import { Search, Building, Tag, FileText, Calendar, Download, Eye, FileDigit } from 'lucide-react'
 import Spinner from '@/components/shared/Spinner'
 import PDFPreviewModal from './PDFPreviewModal'
 
@@ -44,6 +44,7 @@ export default function ApprovedDocumentLibrary() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSite, setSelectedSite] = useState('ALL');
   const [selectedCategory, setSelectedCategory] = useState('ALL');
+  const [selectedRfaType, setSelectedRfaType] = useState('ALL');
   const [documents, setDocuments] = useState<RFADocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -53,6 +54,7 @@ export default function ApprovedDocumentLibrary() {
     setSearchTerm('');
     setSelectedSite('ALL');
     setSelectedCategory('ALL');
+    setSelectedRfaType('ALL');
   };
 
   useEffect(() => {
@@ -109,6 +111,9 @@ export default function ApprovedDocumentLibrary() {
         if (selectedCategory !== 'ALL') {
           q = query(q, where('categoryId', '==', selectedCategory));
         }
+        if (selectedRfaType !== 'ALL') {
+          q = query(q, where('rfaType', '==', selectedRfaType));
+        }
 
         const querySnapshot = await getDocs(q);
 
@@ -124,7 +129,7 @@ export default function ApprovedDocumentLibrary() {
     };
 
     fetchDocuments();
-  }, [user, selectedSite, selectedCategory]);
+  }, [user, selectedSite, selectedCategory, selectedRfaType]);
 
   const filteredDocuments = useMemo(() => {
     if (!searchTerm) return documents;
@@ -153,7 +158,7 @@ export default function ApprovedDocumentLibrary() {
           <h2 className="text-xl font-bold text-gray-800 mb-4">
             📚 คลังเอกสารอนุมัติ (Approved Document Library)
           </h2>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
             <div className="relative md:col-span-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
               <input
@@ -181,12 +186,25 @@ export default function ApprovedDocumentLibrary() {
               <Tag className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
               <select
                 // 🟢 แก้ไข: เติม bg-white text-gray-900
-                className="w-full h-10 pl-10 pr-4 border rounded-lg appearance-none bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full h-10 pl-10 pr-4 border rounded-lg appearance-none bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none truncate"
                 value={selectedCategory}
                 onChange={(e) => setSelectedCategory(e.target.value)}
               >
                 <option value="ALL">ทุกหมวดงาน</option>
                 {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.categoryCode}</option>)}
+              </select>
+            </div>
+            <div className="relative md:col-span-1">
+              <FileDigit className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <select
+                className="w-full h-10 pl-10 pr-4 border rounded-lg appearance-none bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none truncate"
+                value={selectedRfaType}
+                onChange={(e) => setSelectedRfaType(e.target.value)}
+              >
+                <option value="ALL">ทุกประเภท</option>
+                <option value="RFA-SHOP">Shop Drawing</option>
+                <option value="RFA-MAT">Material</option>
+                <option value="RFA-GEN">General</option>
               </select>
             </div>
             <div className="md:col-span-1">
