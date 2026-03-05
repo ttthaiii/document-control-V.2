@@ -72,6 +72,27 @@ const WorkflowHistoryModal = ({ workflow, onClose }: { workflow: WorkRequestWork
                                             <p className="text-gray-600">"{item.comments}"</p>
                                         </div>
                                     )}
+                                    {item.files && item.files.length > 0 && (
+                                        <div className="mt-2 pl-2 border-l-2 border-gray-100">
+                                            <p className="text-xs font-semibold text-gray-500 mb-1">ไฟล์แนบ ณ ขั้นตอนนี้:</p>
+                                            <ul className="space-y-1">
+                                                {item.files.map((file, fileIndex) => (
+                                                    <li key={fileIndex} className="flex items-center text-xs text-gray-600">
+                                                        <FileText size={12} className="mr-2 flex-shrink-0" />
+                                                        <a
+                                                            href={file.fileUrl}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="truncate hover:underline text-blue-600"
+                                                            title={file.fileName}
+                                                        >
+                                                            {file.fileName}
+                                                        </a>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
                                 </div>
                             ))
                         ) : (
@@ -135,9 +156,20 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
     }, [document, newRevisionNumber]);
 
     const currentStepFiles = useMemo(() => {
-        if (!document || !document.workflow) return [];
-        const currentStep = document.workflow.find(step => step.status === document.status);
-        return currentStep?.files || [];
+        if (!document) return [];
+
+        // 1. ลองหาไฟล์จากสถานะปัจจุบันใน workflow ก่อน (ถอยหลังหาจากอันใหม่สุด)
+        // จำเป็นสำหรับสถานะเช่น PENDING_ACCEPTANCE ที่ต้องโชว์เฉพาะ "ไฟล์ผลงาน" ที่ BIM ส่งมา ไม่เอาไฟล์อ้างอิง
+        if (document.workflow) {
+            const currentStep = [...document.workflow].reverse().find(step => step.status === document.status);
+            if (currentStep?.files && currentStep.files.length > 0) {
+                return currentStep.files;
+            }
+        }
+
+        // 2. ท่าไม้ตายสุดท้าย: ถ้าจังหวะนี้ workflow ไม่มีไฟล์ (เช่น IN_PROGRESS, REJECTED_BY_BIM 
+        // หรือ PM กดผ่านแล้วไฟล์ไม่ติดไป) ให้ดึงไฟล์จาก root `document.files` มาเปิดโชว์เลย ชัวร์ 100%
+        return document.files || [];
     }, [document]);
 
     useEffect(() => {
@@ -470,12 +502,19 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
         setIsSubmitting(true);
         try {
             const token = await firebaseUser.getIdToken();
+
+            // For PM approval, carry over the existing files from the draft
+            const filesToKeep = action === 'APPROVE_DRAFT' ? currentStepFiles : [];
+
             const response = await fetch(`/api/work-request/${document.id}/update`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     action,
-                    payload: { comments: rejectComment }
+                    payload: {
+                        comments: rejectComment,
+                        files: filesToKeep
+                    }
                 }),
             });
             const result = await response.json();
@@ -606,6 +645,15 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                                 <div><strong className="text-gray-700 font-semibold block">วันที่กำหนดส่ง:</strong><span className="text-gray-900">{formatDate(document.dueDate, false)}</span></div>
                             </div>
                             {document.description && <div className='mt-4'><strong className="text-gray-700 font-semibold block text-sm">รายละเอียด:</strong><div className="text-gray-900 whitespace-pre-wrap bg-white p-3 rounded-md mt-1 border border-gray-300 shadow-sm"><p>"{document.description}"</p></div></div>}
+
+                            {document.status === WR_STATUSES.REJECTED_BY_BIM && (
+                                <div className='mt-4'>
+                                    <strong className="text-red-600 font-semibold block text-sm">เหตุผลที่ไม่อนุมัติรับงาน (BIM):</strong>
+                                    <div className="text-red-700 whitespace-pre-wrap bg-red-50 p-3 rounded-md mt-1 border border-red-200 shadow-sm">
+                                        <p>{document.workflow.find(w => w.status === WR_STATUSES.REJECTED_BY_BIM)?.comments || "ไม่มีการระบุเหตุผล"}</p>
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         {/* Files Section (View Only - Latest Step) */}

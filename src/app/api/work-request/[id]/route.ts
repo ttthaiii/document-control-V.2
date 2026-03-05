@@ -38,26 +38,31 @@ export async function GET(
 
     // --- Authorization Check ---
     if (userData.role !== ROLES.ADMIN && !userSites.includes(docData.siteId)) {
-        return NextResponse.json({ success: false, error: 'Access to this document is denied' }, { status: 403 });
+      return NextResponse.json({ success: false, error: 'Access to this document is denied' }, { status: 403 });
     }
 
     // --- Fetch Additional Info (Site, Users) ---
     const siteSnap = await adminDb.collection('sites').doc(docData.siteId).get();
-    
+
     // --- 👇 นี่คือจุดที่แก้ไข ---
     const siteData = siteSnap.exists ? { id: siteSnap.id, ...siteSnap.data() } : { id: docData.siteId, name: 'Unknown Site' };
     // --- 👆 สิ้นสุดการแก้ไข ---
 
-    const userIds = Array.from(new Set(docData.workflow.map((step: any) => step.userId)));
+    // ดึงรายชื่อคนที่มีส่วนร่วมในประวัติ แต่ต้องกรองเฉพาะอันที่ 'userId' ไม่เป็น undefined หรือ null
+    const userIds = Array.from(new Set(
+      (docData.workflow || [])
+        .map((step: any) => step.userId)
+        .filter((uid: any) => Boolean(uid))
+    ));
     const userPromises = userIds.map(uid => adminDb.collection('users').doc(uid as string).get());
     const userDocs = await Promise.all(userPromises);
-    
+
     const usersInfo: Record<string, any> = {};
     userDocs.forEach(userSnap => {
-        if (userSnap.exists) {
-            const uData = userSnap.data()!;
-            usersInfo[userSnap.id] = { email: uData.email, role: uData.role };
-        }
+      if (userSnap.exists) {
+        const uData = userSnap.data()!;
+        usersInfo[userSnap.id] = { email: uData.email, role: uData.role };
+      }
     });
 
     return NextResponse.json({
