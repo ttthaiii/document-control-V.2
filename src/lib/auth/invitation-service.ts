@@ -33,9 +33,13 @@ export class InvitationService {
         createdByAdmin: true,
       });
 
-      // Use environment variable if available, or fallback to localhost in development, otherwise use the production URL
-      const isDev = process.env.NODE_ENV === 'development';
-      const domain = process.env.NEXT_PUBLIC_APP_URL || (isDev ? 'http://localhost:3000' : 'https://ttsdocumentcontrol.web.app');
+      // ดึง URL จาก Environment Variable
+      let domain = process.env.NEXT_PUBLIC_APP_URL || 'https://ttsdocumentcontrol.web.app';
+
+      // ถ้าบน Server (Production) ดึงค่า localhost มาบังเอิญ ให้แก้เป็น Domain จริงทันที
+      if (domain.includes('localhost') && process.env.NODE_ENV !== 'development') {
+        domain = 'https://ttsdocumentcontrol.web.app';
+      }
 
       const invitationUrl = `${domain}/accept-invitation?token=${token}`;
 
