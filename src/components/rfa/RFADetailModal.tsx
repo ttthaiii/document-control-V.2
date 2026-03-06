@@ -510,46 +510,73 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const renderFileList = (files: UploadedFile[], target: 'action' | 'revision' | 'resubmission') => (
     <div className="mt-2 space-y-2">
       {files.map((fileObj, index) => (
-        <div key={fileObj.id} className="flex items-center text-sm p-2 bg-slate-100 rounded group hover:bg-slate-200 transition-colors">
-          <div className="mr-3 flex-shrink-0" title={fileObj.status}>
-            {fileObj.status === 'uploading' ? (
-              <Spinner className="w-4 h-4 text-blue-500" />
-            ) : fileObj.status === 'success' ? (
-              <Check className="w-4 h-4 text-green-500" />
-            ) : fileObj.status === 'error' ? (
-              <div title={fileObj.error}>
-                <AlertTriangle className="w-4 h-4 text-red-500" />
+        <div key={fileObj.id} className="flex flex-col gap-2 p-2 bg-slate-100 rounded group transition-colors">
+          {renameState.isOpen && renameState.index === index && renameState.target === target ? (
+            <div className="flex items-center w-full gap-2">
+              <input
+                type="text"
+                value={renameState.newName}
+                onChange={(e) => setRenameState({ ...renameState, newName: e.target.value })}
+                className="flex-1 p-1 text-sm outline-none border rounded border-blue-400 bg-white text-gray-900"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); confirmRenameFile(); }
+                  if (e.key === 'Escape') setRenameState({ isOpen: false, index: -1, target: 'action', currentName: '', newName: '' });
+                }}
+              />
+              <div className="flex items-center border-l pl-2 space-x-1">
+                <button type="button" onClick={confirmRenameFile} className="p-1 hover:bg-green-100 text-green-600 rounded" title="บันทึกชื่อ">
+                  <Check size={16} />
+                </button>
+                <button type="button" onClick={() => setRenameState({ isOpen: false, index: -1, target: 'action', currentName: '', newName: '' })} className="p-1 hover:bg-red-100 text-red-500 rounded" title="ยกเลิก">
+                  <X size={16} />
+                </button>
               </div>
-            ) : (
-              <FileText className="w-4 h-4 text-slate-500" />
-            )}
-          </div>
-          <span
-            onClick={() => handlePreviewLocalFile(fileObj)}
-            className={`flex-1 truncate cursor-pointer mr-2 transition-colors ${fileObj.status === 'error' ? 'text-red-600' : 'text-gray-700 hover:text-blue-600 hover:underline'
-              }`}
-            title={fileObj.status === 'error' ? fileObj.error : "คลิกเพื่อดูตัวอย่างไฟล์"}
-          >
-            {fileObj.file.name}
-          </span>
-          <div className="flex items-center flex-shrink-0 gap-1">
-            <button
-              onClick={() => handleRenameFile(index, target)}
-              className="p-1.5 text-gray-400 hover:text-blue-600 rounded-md hover:bg-blue-50 transition-colors"
-              title="เปลี่ยนชื่อไฟล์"
-              type="button"
-            >
-              <Edit3 size={16} />
-            </button>
-            <button
-              onClick={() => removeFile(index, target)}
-              className="p-1.5 text-gray-400 hover:text-red-600 rounded-md hover:bg-red-50 transition-colors"
-              title="ลบไฟล์"
-              type="button"
-            >
-              <X size={16} />
-            </button>
-          </div>
+            </div>
+          ) : (
+            <div className="flex items-center text-sm w-full">
+              <div className="mr-3 flex-shrink-0" title={fileObj.status}>
+                {fileObj.status === 'uploading' ? (
+                  <Spinner className="w-4 h-4 text-blue-500" />
+                ) : fileObj.status === 'success' ? (
+                  <Check className="w-4 h-4 text-green-500" />
+                ) : fileObj.status === 'error' ? (
+                  <div title={fileObj.error}>
+                    <AlertTriangle className="w-4 h-4 text-red-500" />
+                  </div>
+                ) : (
+                  <FileText className="w-4 h-4 text-slate-500" />
+                )}
+              </div>
+              <span
+                onClick={() => handlePreviewLocalFile(fileObj)}
+                className={`flex-1 truncate cursor-pointer mr-2 transition-colors ${fileObj.status === 'error' ? 'text-red-600' : 'text-gray-700 hover:text-blue-600 hover:underline'}`}
+                title={fileObj.status === 'error' ? fileObj.error : "คลิกเพื่อดูตัวอย่างไฟล์"}
+              >
+                {fileObj.file.name}
+              </span>
+              <div className="flex items-center flex-shrink-0 gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                {!fileObj.status || fileObj.status === 'pending' || fileObj.status === 'success' ? (
+                  <button
+                    onClick={() => handleRenameFile(index, target)}
+                    className="p-1.5 text-gray-500 hover:text-blue-600 rounded-md hover:bg-white transition-colors"
+                    title="เปลี่ยนชื่อไฟล์"
+                    type="button"
+                  >
+                    <Edit3 size={16} />
+                  </button>
+                ) : null}
+                <button
+                  onClick={() => removeFile(index, target)}
+                  className="p-1.5 text-gray-500 hover:text-red-600 rounded-md hover:bg-white transition-colors"
+                  title="ลบไฟล์"
+                  type="button"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       ))}
     </div>

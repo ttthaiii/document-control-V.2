@@ -36,9 +36,12 @@ export async function POST(request: NextRequest) {
             const urlObj = new URL(fullLink);
             const oobCode = urlObj.searchParams.get('oobCode');
 
-            // สร้างลิงก์ใหม่ชี้มาที่เว็บของเราเอง
-            const isDev = process.env.NODE_ENV === 'development';
-            const appDomain = process.env.NEXT_PUBLIC_APP_URL || (isDev ? 'http://localhost:3000' : 'https://ttsdocumentcontrol.web.app');
+            // สร้างลิงก์ใหม่ชี้มาที่เว็บของเราเอง (ใช้โดเมนของ Firebase Hosting เป็นค่าเริ่มต้น)
+            let appDomain = process.env.NEXT_PUBLIC_APP_URL || 'https://ttsdocumentcontrol.web.app';
+            // ถ้าบน Server (Production) ดึงค่า localhost มาบังเอิญ ให้แก้เป็น Domain จริงทันที
+            if (appDomain.includes('localhost') && process.env.NODE_ENV !== 'development') {
+                appDomain = 'https://ttsdocumentcontrol.web.app';
+            }
             const customResetLink = `${appDomain}/reset-password?oobCode=${oobCode}`;
 
             // 4. ส่งอีเมลด้วย Template สีส้มของเรา
