@@ -76,10 +76,15 @@ export async function POST(req: Request) {
     const userData = userDoc.data();
     const userRole = userData?.role;
 
-    // ✅ FIX 2: อ่าน body ที่ถูกแก้ไขแล้ว และดึง payload ออกมา
     const body = await readRequest(req);
     const { payload } = body;
-    const { rfaType, siteId, categoryId, title, description, taskData, documentNumber, revisionNumber, uploadedFiles } = payload || {};
+    const { rfaType, siteId, categoryId, title, description, taskData, revisionNumber, uploadedFiles } = payload || {};
+    let { documentNumber } = payload || {};
+
+    if (documentNumber) {
+      // แทนที่ Space (\s) และ Tab (\t) ที่กดมาผิดกลายเป็นช่องว่าง ให้เป็นขีด (-) เพื่อให้เป็นมาตรฐาน
+      documentNumber = documentNumber.trim().replace(/\s+/g, '-');
+    }
 
     if (!rfaType || !siteId || !title || !uploadedFiles || uploadedFiles.length === 0 || !categoryId) {
       return NextResponse.json({ error: "Missing required fields. Required: rfaType, siteId, categoryId, title, uploadedFiles." }, { status: 400 });

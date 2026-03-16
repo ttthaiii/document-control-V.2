@@ -283,7 +283,9 @@ export async function PUT(
             workflow: FieldValue.arrayUnion(workflowEntry),
             updatedAt: FieldValue.serverTimestamp(),
         };
-        if (documentNumber) updates.documentNumber = documentNumber;
+        if (documentNumber) {
+            updates.documentNumber = documentNumber.trim().replace(/\s+/g, '-');
+        }
         if (workflowFiles.length > 0) updates.files = finalDocFiles;
 
         await rfaDocRef.update(updates);

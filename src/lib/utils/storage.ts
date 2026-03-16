@@ -20,6 +20,7 @@ export function getFileUrl(destinationPath: string): string {
     }
 
     const cdnUrlBase = "https://ttsdoc-cdn.ttthaiii30.workers.dev";
-    // The Cloudflare Worker handles regular slashes
-    return `${cdnUrlBase}/${destinationPath}`;
+    // Encode each path segment to handle spaces, tabs, and special characters properly
+    const encodedPath = destinationPath.split('/').map(segment => encodeURIComponent(segment)).join('/');
+    return `${cdnUrlBase}/${encodedPath}`;
 }
