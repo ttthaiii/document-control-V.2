@@ -147,7 +147,7 @@ export async function PUT(
         const userData = userDoc.data()!;
         const userRole = userData.role;
         const body = await request.json();
-        const { action, comments, newFiles, documentNumber } = body;
+        const { action, comments, newFiles, documentNumber, supersededAt } = body;
 
         if (!action) return NextResponse.json({ error: 'Action is required' }, { status: 400 });
 
@@ -156,6 +156,17 @@ export async function PUT(
         if (!rfaDoc.exists) return NextResponse.json({ error: 'RFA not found' }, { status: 404 });
 
         const docData = rfaDoc.data()!;
+
+        // --- SUPERSEDE Action: ซ่อน Rev. เก่าหลัง Rev. ใหม่อนุมัติ (Modal #2) ---
+        // ไม่ต้องตรวจสอบ Permission แบบเดิม เพราะนี่คือการทำด้วย Token ที่ผ่าน Auth แล้ว
+        if (action === 'SUPERSEDE') {
+            await rfaDocRef.update({
+                supersededStatus: 'SUPERSEDED',
+                supersededAt: supersededAt || new Date().toISOString(),
+                updatedAt: FieldValue.serverTimestamp(),
+            });
+            return NextResponse.json({ success: true, message: 'Document superseded successfully.' });
+        }
         const siteDoc = await adminDb.collection('sites').doc(docData.siteId).get();
         const siteData = siteDoc.data();
         const cmSystemType = siteData?.cmSystemType || 'INTERNAL';
@@ -275,6 +286,7 @@ export async function PUT(
             action, status: newStatus, userId, userName: userData.email, role: userRole,
             timestamp: new Date().toISOString(), comments: comments || '',
             files: workflowFiles,
+            revisionNumber: docData.revisionNumber || 0,
         };
 
         const updates: { [key: string]: any } = {
@@ -289,6 +301,32 @@ export async function PUT(
         if (workflowFiles.length > 0) updates.files = finalDocFiles;
 
         await rfaDocRef.update(updates);
+
+        // --- Auto-Supersede: ถ้าอนุมัติ Rev.ใหม่ ให้ Mark Rev.เก่าเป็น SUPERSEDED อัตโนมัติ ---
+        // (ตามหลัก Document Control: Rev.ใหม่อนุมัติ = Rev.เก่า Obsolete ทันที ไม่ต้องถาม User)
+        const isApprovalAction = ['APPROVE', 'APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED'].includes(action);
+        const isFinalApproval = (
+            cmSystemType === 'INTERNAL' ? docData.status === STATUSES.PENDING_FINAL_APPROVAL :
+            docData.status === STATUSES.PENDING_CM_APPROVAL
+        );
+        if (isApprovalAction && isFinalApproval && docData.previousRevisionId) {
+            try {
+                const prevRef = adminDb.collection('rfaDocuments').doc(docData.previousRevisionId);
+                const prevDoc = await prevRef.get();
+                if (prevDoc.exists) {
+                    await prevRef.update({
+                        supersededStatus: 'SUPERSEDED',
+                        supersededById: params.id,
+                        supersededByRevision: docData.revisionNumber || 1,
+                        supersededAt: new Date().toISOString(),
+                        updatedAt: FieldValue.serverTimestamp(),
+                    });
+                }
+            } catch (supersedeErr) {
+                // Non-critical: log but don't fail the main action
+                console.error('[PUT] Failed to auto-supersede old revision:', supersedeErr);
+            }
+        }
 
         // ... (Notification Logic) ...
         const notifyStatuses = [STATUSES.APPROVED, STATUSES.APPROVED_WITH_COMMENTS, STATUSES.APPROVED_REVISION_REQUIRED, STATUSES.PENDING_FINAL_APPROVAL];

@@ -1,4 +1,4 @@
-// src/app/api/rfa/create_revision/route.ts (แก้ไขสมบูรณ์)
+// src/app/api/rfa/create_revision/route.ts (แก้ไขแล้วสำหรับ Workflow ใหม่)
 import { NextResponse } from "next/server";
 import { adminDb, adminBucket, adminAuth } from "@/lib/firebase/admin";
 import { FieldValue } from 'firebase-admin/firestore';
@@ -26,11 +26,9 @@ export async function POST(req: Request) {
     }
 
     try {
-        // --- 🔽 [แก้ไขจุดที่ 1] 🔽 ---
-        // รับ verifiedTaskId เพิ่มจาก request body
-        const { originalDocId, uploadedFiles, verifiedTaskId } = await req.json();
+        // รับ verifiedTaskId และ comments จาก request body
+        const { originalDocId, uploadedFiles, verifiedTaskId, comments } = await req.json();
 
-        // ตรวจสอบ `verifiedTaskId` เพิ่มเติม (สำหรับ Role ที่ไม่ใช่ Manual Flow)
         const userDoc = await adminDb.collection('users').doc(uid).get();
         const userData = userDoc.data();
         if (!userData) return NextResponse.json({ error: 'User not found' }, { status: 403 });
@@ -42,6 +40,7 @@ export async function POST(req: Request) {
         }
 
         const originalRfaRef = adminDb.collection("rfaDocuments").doc(originalDocId);
+        let newDocId: string = '';
 
         await adminDb.runTransaction(async (transaction) => {
             const originalDoc = await transaction.get(originalRfaRef);
@@ -51,19 +50,29 @@ export async function POST(req: Request) {
 
             const originalData = originalDoc.data()!;
 
-            // --- 🔽 [แก้ไขจุดที่ 2] 🔽 ---
-            // สร้าง object taskData ใหม่ โดยใช้ verifiedTaskId ที่ได้รับมา
-            // ถ้าเป็น Manual Flow จะไม่มี verifiedTaskId ก็ให้ใช้ของเดิมไป
+            // ตรวจสอบสถานะที่อนุญาต: รองรับทั้ง REJECTED (flow เดิม) และ APPROVED family (flow ใหม่)
+            const allowedOriginStatuses = [
+                STATUSES.REJECTED,
+                STATUSES.APPROVED,
+                STATUSES.APPROVED_WITH_COMMENTS,
+                STATUSES.APPROVED_REVISION_REQUIRED,
+            ];
+            const isSuspended = originalData.supersededStatus === 'SUSPENDED';
+
+            if (!allowedOriginStatuses.includes(originalData.status) && !isSuspended) {
+                throw new Error(`ไม่สามารถสร้าง Revision จากเอกสารที่มีสถานะ "${originalData.status}" ได้`);
+            }
+
+            // สร้าง taskData ใหม่: ใช้ verifiedTaskId ที่ได้รับมา ถ้าไม่มีใช้ของเดิม
             const newTaskData = verifiedTaskId ? {
                 ...originalData.taskData,
                 taskUid: verifiedTaskId,
             } : originalData.taskData;
-            // --- 👆 [สิ้นสุดการแก้ไข] 👆 ---
-
 
             const newRevisionNumber = (originalData.revisionNumber || 0) + 1;
             const newDocumentNumber = originalData.documentNumber;
 
+            // Move temp files to permanent storage
             const finalFilesData = [];
             for (const tempFile of uploadedFiles) {
                 const sourcePath = tempFile.filePath;
@@ -82,11 +91,13 @@ export async function POST(req: Request) {
             }
 
             const newRfaRef = adminDb.collection("rfaDocuments").doc();
+            newDocId = newRfaRef.id;
             const newStatus = STATUSES.PENDING_REVIEW;
 
+            // สร้างเอกสาร Rev. ใหม่
             transaction.set(newRfaRef, {
                 ...originalData,
-                taskData: newTaskData, // <-- ใช้ taskData ที่อัปเดตแล้ว
+                taskData: newTaskData,
                 revisionNumber: newRevisionNumber,
                 documentNumber: newDocumentNumber,
                 status: newStatus,
@@ -94,27 +105,50 @@ export async function POST(req: Request) {
                 isLatest: true,
                 parentRfaId: originalData.parentRfaId || originalDoc.id,
                 revisionHistory: [...(originalData.revisionHistory || []), originalDoc.id],
+                previousRevisionId: originalDoc.id, // link กลับไป Rev. เก่า
                 createdAt: FieldValue.serverTimestamp(),
                 updatedAt: FieldValue.serverTimestamp(),
                 files: finalFilesData,
-                workflow: [{
-                    action: "CREATE_REVISION",
-                    status: newStatus,
-                    userId: uid,
-                    userName: userData.email,
-                    role: userData.role,
-                    timestamp: new Date().toISOString(),
-                    files: finalFilesData
-                }],
+                // Reset supersede fields สำหรับ Rev. ใหม่
+                supersededStatus: 'ACTIVE',
+                supersededById: null,
+                supersededByRevision: null,
+                supersededAt: null,
+                supersededComment: null,
+                supersededFiles: null,
+                supersededRequestedBy: null,
+                supersededRequestedAt: null,
+                // ✅ track whether the previous revision was already suspended before this revision was created
+                previousRevisionSuspended: originalData.supersededStatus === 'SUSPENDED',
+                workflow: [
+                    ...((originalData.workflow || []).map((w: any) => ({
+                        ...w,
+                        revisionNumber: w.revisionNumber ?? (originalData.revisionNumber || 0)
+                    }))),
+                    {
+                        action: "CREATE_REVISION",
+                        status: newStatus,
+                        userId: uid,
+                        userName: userData.email,
+                        role: userData.role,
+                        timestamp: new Date().toISOString(),
+                        comments: comments || '',
+                        files: finalFilesData,
+                        revisionNumber: newRevisionNumber,
+                    }
+                ],
             });
 
+            // อัปเดตเอกสารเดิม: isLatest = false + link ไป Rev. ใหม่
             transaction.update(originalRfaRef, {
                 isLatest: false,
+                supersededById: newRfaRef.id,
+                supersededByRevision: newRevisionNumber,
                 updatedAt: FieldValue.serverTimestamp(),
             });
         });
 
-        return NextResponse.json({ success: true, message: "New revision created successfully." }, { status: 201 });
+        return NextResponse.json({ success: true, message: "New revision created successfully.", newDocId }, { status: 201 });
 
     } catch (err: any) {
         console.error("Create Revision Error:", err);

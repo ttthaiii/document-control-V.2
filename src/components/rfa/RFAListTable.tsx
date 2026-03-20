@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useMemo } from 'react'
-import { FileText, Calendar, User, Clock, Building, Tag, ArrowUp, ArrowDown } from 'lucide-react'
+import { FileText, Calendar, User, Clock, Building, Tag, ArrowUp, ArrowDown, Lock, AlertTriangle } from 'lucide-react'
 import { RFADocument } from '@/types/rfa'
 
 import { STATUSES } from '@/lib/config/workflow'
@@ -208,7 +208,10 @@ export default function RFAListTable({
             <div
               key={doc.id}
               onClick={() => onDocumentClick(doc)}
-              className="bg-white rounded-lg shadow border p-4 cursor-pointer"
+              className={`rounded-lg shadow border p-4 cursor-pointer transition-all ${
+                doc.supersededStatus === 'SUSPENDED' ? 'bg-red-50 border-red-300'
+                : 'bg-white'
+              }`}
             >
               <div className="flex items-start justify-between mb-3">
                 <div className="flex-1 min-w-0">
@@ -218,11 +221,21 @@ export default function RFAListTable({
                     </span>
                     <span className="inline-flex items-center px-2 py-1 bg-gray-200 text-gray-800 rounded-full text-xs font-semibold">
                       REV-{String(doc.revisionNumber).padStart(2, '0')}
+                      {!!doc.supersededComment && (
+                        <span className="ml-1 text-[10px] text-orange-600 font-bold" title="ต้องการ Rev. ใหม่">⚠️</span>
+                      )}
                     </span>
                   </div>
-                  <h3 className="font-medium text-gray-900 text-sm mb-1 truncate">
-                    {doc.documentNumber}
-                  </h3>
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <h3 className="font-medium text-gray-900 text-sm truncate">
+                      {doc.documentNumber}
+                    </h3>
+                    {doc.supersededStatus === 'SUSPENDED' && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-600 text-white flex-shrink-0">
+                        <Lock className="w-2.5 h-2.5 mr-0.5" />ห้ามใช้
+                      </span>
+                    )}
+                  </div>
                   <p className="text-sm text-gray-600 line-clamp-2">
                     {doc.title}
                   </p>
@@ -269,7 +282,7 @@ export default function RFAListTable({
     // 1. ให้ Container หลักสูงเต็มพื้นที่ (h-full) และเป็น Flexbox แนวตั้ง
     <div className="sticky top-16 bg-white rounded-lg shadow overflow-hidden h-[calc(100vh-12rem)] flex flex-col">
       {/* 2. ทำให้ส่วนนี้ (ที่ครอบตาราง) เป็นส่วนที่ Scroll ได้ */}
-      <div className="overflow-auto flex-1">
+      <div className="overflow-auto flex-1 scroll-locked-when-modal">
         <table className="min-w-full divide-y divide-gray-200">
           {/* 3. ทำให้ Header ของตาราง "ติด" อยู่ที่ top-0 ของ container ที่ scroll ได้ */}
           <thead className="bg-gray-50 sticky top-0 z-10">
@@ -313,7 +326,10 @@ export default function RFAListTable({
               const responsible = getResponsibleParty(doc);
               const pendingDays = calculatePendingDays(doc);
               return (
-                <tr key={doc.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => onDocumentClick(doc)}>
+                <tr key={doc.id} className={`hover:bg-gray-100 cursor-pointer transition-colors ${
+                  doc.supersededStatus === 'SUSPENDED' ? 'bg-red-50'
+                  : 'bg-white'
+                }`} onClick={() => onDocumentClick(doc)}>
                   <td className="px-6 py-4">
                     <p className="text-sm font-semibold text-blue-600 text-center">{doc.runningNumber || 'N/A'}</p>
                   </td>
@@ -327,13 +343,23 @@ export default function RFAListTable({
                   </td>
                   <td className="px-6 py-4">
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-gray-900 truncate">{doc.documentNumber}</p>
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <p className="text-sm font-medium text-gray-900 truncate">{doc.documentNumber}</p>
+                        {doc.supersededStatus === 'SUSPENDED' && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-600 text-white flex-shrink-0">
+                            <Lock className="w-2.5 h-2.5 mr-0.5" />ห้ามใช้
+                          </span>
+                        )}
+                      </div>
                       <p className="text-sm text-gray-600 line-clamp-2">{doc.title}</p>
                     </div>
                   </td>
                   <td className="px-4 py-4 text-center">
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gray-200 text-gray-800">
+                    <span className="inline-flex items-center px-2.5 py-0.5 bg-gray-200 text-gray-800 rounded-full text-xs font-semibold">
                       {String(doc.revisionNumber).padStart(2, '0')}
+                      {!!doc.supersededComment && (
+                        <span className="ml-1 text-[10px] text-orange-600 font-bold" title="ต้องการ Rev. ใหม่">⚠️</span>
+                      )}
                     </span>
                   </td>
                   <td className="px-6 py-4">

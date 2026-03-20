@@ -1,9 +1,9 @@
 // src/components/rfa/RFADetailModal.tsx
 'use client'
 
-import React, { useState, useMemo, useEffect } from 'react'
+import React, { useState, useMemo, useEffect, useCallback } from 'react'
 import { RFADocument, RFAPermissions, RFAWorkflowStep, RFAFile, RFASite } from '@/types/rfa'
-import { X, Paperclip, Clock, User, Check, Send, AlertTriangle, FileText, Download, History, MessageSquare, Edit3, Upload, ThumbsUp, ThumbsDown, Eye, CornerUpLeft } from 'lucide-react'
+import { X, Paperclip, Clock, User, Check, Send, AlertTriangle, FileText, Download, History, MessageSquare, Edit3, Upload, ThumbsUp, ThumbsDown, Eye, CornerUpLeft, RefreshCw, EyeOff, Lock } from 'lucide-react'
 import Spinner from '@/components/shared/Spinner';
 import { useAuth } from '@/lib/auth/useAuth'
 import { Role, STATUS_LABELS, STATUSES, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUS_COLORS, ROLES } from '@/lib/config/workflow'
@@ -67,7 +67,12 @@ const WorkflowHistoryModal = ({
               filteredWorkflow.map((item, index) => (
                 <div key={index} className="relative pl-6 pb-8 last:pb-0">
                   <div className="absolute -left-[9px] top-1 w-4 h-4 bg-blue-500 rounded-full border-2 border-white"></div>
-                  <p className="font-semibold text-gray-800">{STATUS_LABELS[item.status] || item.status}</p>
+                  <p className="font-semibold text-gray-800">
+                    {item.revisionNumber !== undefined && (
+                      <span className="text-blue-600 mr-2 font-bold">[Rev.{item.revisionNumber}]</span>
+                     )}
+                     {STATUS_LABELS[item.status] || item.status}
+                  </p>
                   <p className="text-sm text-gray-600">โดย: {item.userName} ({item.role})</p>
                   <time className="text-xs text-gray-400">{formatDate(item.timestamp)}</time>
                   {item.comments && (
@@ -148,6 +153,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const [document, setDocument] = useState<FullRFADocument | null>(initialDoc as FullRFADocument);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loadingAction, setLoadingAction] = useState<string | null>(null);
 
   // UI States
   const [showHistory, setShowHistory] = useState(false);
@@ -157,6 +163,15 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const [revisionFiles, setRevisionFiles] = useState<UploadedFile[]>([]);
   const [resubmissionFiles, setResubmissionFiles] = useState<UploadedFile[]>([]);
   const [previewFile, setPreviewFile] = useState<RFAFile | null>(null);
+
+  // Supersede Modal States (Modal #1 — ขอแก้ไข)
+  const [showSupersedeModal, setShowSupersedeModal] = useState(false);
+  const [supersedeComment, setSupersedeComment] = useState('');
+  const [supersedeFiles, setSupersedeFiles] = useState<UploadedFile[]>([]);
+  const [suspendOldDoc, setSuspendOldDoc] = useState(true); // default = ระงับ
+  const [isSupersedeSubmitting, setIsSupersedeSubmitting] = useState(false);
+
+  // SupersedeComplete Modal States removed: auto-supersede is now done by the backend on approval
 
   // State for Rename File Modal
   const [renameState, setRenameState] = useState<{
@@ -173,6 +188,58 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const [verificationError, setVerificationError] = useState<string | null>(null);
   const [verifiedTaskId, setVerifiedTaskId] = useState<string | null>(null);
   const [newDocumentNumberInput, setNewDocumentNumberInput] = useState('');
+
+  // 0. Prevent Body Scroll without causing Jump to Top (Anti-pattern fix)
+  useEffect(() => {
+    // Save current scroll position to prevent layout shifts
+    const scrollY = window.scrollY;
+    const body = window.document.body;
+    
+    // Get scrollbar width to prevent layout shift when hiding internal scrollbars
+    const scrollbarWidth = window.innerWidth - window.document.documentElement.clientWidth;
+    
+    const originalStyle = {
+      position: body.style.position,
+      top: body.style.top,
+      width: body.style.width,
+      overflow: body.style.overflow,
+      paddingRight: body.style.paddingRight
+    };
+    
+    // Lock the body to the current scroll position securely 
+    // This perfectly hides the 'html' scrollbar without resetting scrollTop to 0
+    body.style.position = 'fixed';
+    body.style.top = `-${scrollY}px`;
+    body.style.width = '100%';
+    body.style.overflow = 'hidden';
+    body.style.paddingRight = `${scrollbarWidth}px`;
+    
+    // Hide all internal scrollbars in the background table by adding a global style temporarily
+    const style = window.document.createElement('style');
+    style.id = 'rfa-modal-scroll-lock';
+    style.innerHTML = `
+      .scroll-locked-when-modal {
+        overflow: hidden !important;
+        padding-right: ${scrollbarWidth}px !important;
+      }
+    `;
+    window.document.head.appendChild(style);
+    
+    return () => {
+      // Restore layout
+      body.style.position = originalStyle.position;
+      body.style.top = originalStyle.top;
+      body.style.width = originalStyle.width;
+      body.style.overflow = originalStyle.overflow;
+      body.style.paddingRight = originalStyle.paddingRight;
+      
+      const styleEl = window.document.getElementById('rfa-modal-scroll-lock');
+      if (styleEl) styleEl.remove();
+
+      // Restore scroll position instantly
+      window.scrollTo(0, scrollY);
+    };
+  }, []);
 
   // 1. Fetch Full Document Data
   useEffect(() => {
@@ -232,7 +299,22 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   // for BIM Tracking documents, any BIM user.
   // Additionally, God Admins (ROLES.ADMIN) can revise any document.
   const canRevise = isCreator || requiresBimVerification || user?.role === ROLES.ADMIN;
-  const isRevisionFlow = document?.status === STATUSES.REJECTED && canRevise && document?.isLatest;
+  const hasRequestedRevision = !!document?.supersededComment;
+  const isRevisionFlow = (document?.status === STATUSES.REJECTED || hasRequestedRevision) && canRevise && document?.isLatest;
+
+  // --- สิทธิ์ขอแก้ไข Rev. ใหม่จากเอกสาร "อนุมัติ" (Supersede Flow) ---
+  const APPROVED_STATUSES = [STATUSES.APPROVED, STATUSES.APPROVED_WITH_COMMENTS, STATUSES.APPROVED_REVISION_REQUIRED];
+  const isApprovedStatus = document ? APPROVED_STATUSES.includes(document.status) : false;
+  const isApprover = APPROVER_ROLES.includes(user?.role as Role);
+  const isAdmin = user?.role === ROLES.ADMIN;
+  const canRequestSupersede =
+    isApprovedStatus &&
+    document?.supersededStatus !== 'SUSPENDED' && // ยังไม่ได้ขอแก้ไขอยู่
+    (
+      isAdmin ||
+      isApprover ||
+      (isBimDocument && isBimUser)
+    );
 
   const canEditPDF = useMemo(() => {
     if (!document || !user) return false;
@@ -244,70 +326,72 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     const isSiteReviewing = REVIEWER_ROLES.includes(userRole as Role) && status === STATUSES.PENDING_REVIEW;
     const isApproving = permissions.canApprove;
     const isResubmissionFlow = status === STATUSES.REVISION_REQUIRED && document.createdBy === user.id;
-    const isDocRevisionFlow = status === STATUSES.REJECTED && canRevise && document.isLatest;
+    const isDocRevisionFlow = (status === STATUSES.REJECTED || !!document.supersededComment) && canRevise && document.isLatest;
 
-    if (status === STATUSES.APPROVED || status === STATUSES.APPROVED_WITH_COMMENTS) return false;
+    if (isDocRevisionFlow) return true;
+    if (status === STATUSES.APPROVED || status === STATUSES.APPROVED_WITH_COMMENTS || status === STATUSES.APPROVED_REVISION_REQUIRED) return false;
     if (isSiteReviewing) return true;
     if (isApproving) return true;
     if (isResubmissionFlow) return true;
-    if (isDocRevisionFlow) return true;
 
     return false;
   }, [document, user]);
 
   // 3. Task Verification Logic (for Revision)
+  // 3. Task Verification Logic (for Revision)
+  const verifyBimTask = useCallback(async () => {
+    if (!document?.site?.name || !document?.documentNumber || !document?.taskData?.taskName) {
+      setVerificationError("ข้อมูลเอกสารไม่สมบูรณ์ ไม่สามารถตรวจสอบ Task ได้");
+      return;
+    }
+
+    setIsVerifyingTask(true);
+    setIsTaskVerified(false);
+    setVerificationError(null);
+    setVerifiedTaskId(null);
+
+    try {
+      const token = await firebaseUser?.getIdToken();
+      if (!token) throw new Error("Authentication failed");
+      const newRevNumber = (document.revisionNumber || 0) + 1;
+
+      const response = await fetch('/api/bim-tracking/verify-task', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          documentNumber: document.documentNumber.split('-REV')[0],
+          projectName: document.site.name,
+          rev: newRevNumber,
+          taskName: document.taskData.taskName,
+        }),
+      });
+
+      const result = await response.json();
+      if (response.ok && result.success) {
+        if (result.exists) {
+          setIsTaskVerified(true);
+          setVerifiedTaskId(result.taskId);
+        } else {
+          setVerificationError(`กรุณาสร้าง Task สำหรับ Rev.${String(newRevNumber).padStart(2, '0')} ในระบบ BIM Tracking ก่อน`);
+        }
+      } else {
+        throw new Error(result.error || 'ไม่สามารถตรวจสอบ Task ได้');
+      }
+    } catch (error: any) {
+      setVerificationError(error.message);
+    } finally {
+      setIsVerifyingTask(false);
+    }
+  }, [document, firebaseUser]);
+
   useEffect(() => {
     if (isRevisionFlow && requiresBimVerification && firebaseUser && document) {
-      const verifyTask = async () => {
-        if (!document.site?.name || !document.documentNumber || !document.taskData?.taskName) {
-          setVerificationError("ข้อมูลเอกสารไม่สมบูรณ์ ไม่สามารถตรวจสอบ Task ได้");
-          return;
-        }
-
-        setIsVerifyingTask(true);
-        setIsTaskVerified(false);
-        setVerificationError(null);
-        setVerifiedTaskId(null);
-
-        try {
-          const token = await firebaseUser.getIdToken();
-          const newRevNumber = (document.revisionNumber || 0) + 1;
-
-          const response = await fetch('/api/bim-tracking/verify-task', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              documentNumber: document.documentNumber.split('-REV')[0],
-              projectName: document.site.name,
-              rev: newRevNumber,
-              taskName: document.taskData.taskName,
-            }),
-          });
-
-          const result = await response.json();
-          if (response.ok && result.success) {
-            if (result.exists) {
-              setIsTaskVerified(true);
-              setVerifiedTaskId(result.taskId);
-            } else {
-              setVerificationError('กรุณาสร้าง Task สำหรับ Revision นี้ในระบบ BIM Tracking ก่อน');
-            }
-          } else {
-            throw new Error(result.error || 'ไม่สามารถตรวจสอบ Task ได้');
-          }
-        } catch (error: any) {
-          setVerificationError(error.message);
-        } finally {
-          setIsVerifyingTask(false);
-        }
-      };
-
-      verifyTask();
+      verifyBimTask();
     }
-  }, [isRevisionFlow, document, firebaseUser]);
+  }, [isRevisionFlow, requiresBimVerification, firebaseUser, document, verifyBimTask]);
 
   // 4. Loading State
   if (isLoading) {
@@ -335,7 +419,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const isApproving = permissions.canApprove;
 
   // 6. File Handling Functions
-  const uploadTempFile = (fileObj: UploadedFile, target: 'action' | 'revision' | 'resubmission') => {
+  const uploadTempFile = (fileObj: UploadedFile, target: 'action' | 'revision' | 'resubmission' | 'supersede') => {
     return new Promise<void>((resolve, reject) => {
       if (!user?.id) {
         reject(new Error('User ID not found for upload.'));
@@ -351,7 +435,9 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
         contentType: fileObj.file.type || "application/octet-stream",
       });
 
-      const setFiles = target === 'revision' ? setRevisionFiles : setNewFiles;
+      const setFiles = target === 'revision' ? setRevisionFiles
+        : target === 'supersede' ? setSupersedeFiles
+        : setNewFiles;
 
       uploadTask.on(
         'state_changed',
@@ -600,6 +686,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     }
 
     setIsSubmitting(true);
+    setLoadingAction(action);
     try {
       const token = await firebaseUser?.getIdToken();
 
@@ -635,6 +722,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       showNotification('error', 'เกิดข้อผิดพลาด', message);
     } finally {
       setIsSubmitting(false);
+      setLoadingAction(null);
     }
   };
 
@@ -673,6 +761,73 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     }
   };
 
+  // --- Supersede Flow Handlers ---
+  const handleSupersedeFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+    const uploadedFileObjects: UploadedFile[] = files.map(file => ({
+      id: `${file.name}-${Date.now()}`, file, status: 'pending', progress: 0
+    }));
+    setSupersedeFiles(prev => [...prev, ...uploadedFileObjects]);
+    uploadedFileObjects.forEach(fileObj => {
+      uploadTempFile(fileObj, 'supersede').catch(err => console.error('Supersede upload failed', err));
+    });
+    event.target.value = '';
+  };
+
+  const handleSupersedeRequest = async () => {
+    if (!supersedeComment.trim()) {
+      showNotification('warning', 'คำเตือน', 'กรุณาระบุเหตุผล/คำสั่งก่อนขอแก้ไข');
+      return;
+    }
+    const successfulUploads = supersedeFiles.filter(f => f.status === 'success');
+    if (successfulUploads.length === 0) {
+      showNotification('warning', 'คำเตือน', 'กรุณาแนบไฟล์หลักฐานคำสั่งอย่างน้อย 1 ไฟล์');
+      return;
+    }
+    setIsSupersedeSubmitting(true);
+    try {
+      const token = await firebaseUser?.getIdToken();
+      const response = await fetch('/api/rfa/request-supersede', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          docId: document.id,
+          comment: supersedeComment,
+          uploadedFiles: successfulUploads.map(f => f.uploadedData),
+          suspendOldDoc,
+        }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        setShowSupersedeModal(false);
+        setSupersedeComment('');
+        setSupersedeFiles([]);
+        const isBimDoc = result.data?.originalDocument?.isBimDocument;
+        if (isBimDoc) {
+          // BIM: ระบบส่ง Signal ไป BIM Tracking แล้ว ให้แสดง message รอ BIM มาส่งใหม่
+          showNotification('success', 'ส่งคำขอแก้ไขสำเร็จ', 'รอทาง BIM สร้าง Task ใหม่ใน BIM Tracking และส่งเอกสาร Rev. ใหม่');
+          onClose();
+        } else {
+          // Non-BIM: เปิดฟอร์มสร้าง Rev. ใหม่ทันที (Revision Flow)
+          showNotification('success', 'ส่งคำขอแก้ไขสำเร็จ', 'กรุณาแนบไฟล์เอกสาร Rev. ใหม่ด้านล่าง');
+          // Trigger revision creation form by refreshing document data
+          const token2 = await firebaseUser?.getIdToken();
+          const refreshed = await fetch(`/api/rfa/${document.id}`, { headers: { 'Authorization': `Bearer ${token2}` } });
+          const refreshedResult = await refreshed.json();
+          if (refreshedResult.success) setDocument(refreshedResult.document);
+        }
+      } else {
+        throw new Error(result.error || 'เกิดข้อผิดพลาด');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      showNotification('error', 'เกิดข้อผิดพลาด', message);
+    } finally {
+      setIsSupersedeSubmitting(false);
+    }
+  };
+
   const handleResubmitRevision = async () => {
     await handleAction('SUBMIT_REVISION');
   };
@@ -684,14 +839,30 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   return (
     <>
       <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${overlayClasses}`}>
-        <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+        <div className={`rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col transition-colors ${
+          document.supersededStatus === 'SUSPENDED' ? 'bg-red-50' 
+          : 'bg-white'
+        }`}>
           {/* Header */}
-          <div className="flex justify-between items-start p-4 border-b">
+          <div className="flex justify-between items-start p-4 border-b border-gray-200/50">
             <div>
-              <div className="flex items-baseline space-x-3">
+              <div className="flex items-center gap-2 flex-wrap mb-1">
                 <h3 className="text-lg font-bold text-blue-600">{document.documentNumber}</h3>
-                <h2 className="text-xl font-semibold text-gray-800">{document.title}</h2>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                  Rev.{String(document.revisionNumber || 0).padStart(2, '0')}
+                </span>
+                {document.supersededStatus === 'SUSPENDED' && (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-600 text-white flex-shrink-0">
+                    <Lock className="w-2.5 h-2.5 mr-0.5" />ห้ามใช้
+                  </span>
+                )}
+                {document.supersededStatus !== 'SUSPENDED' && !!document.supersededComment && (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-500 text-white flex-shrink-0">
+                    <AlertTriangle className="w-2.5 h-2.5 mr-0.5" />กำลังสร้าง Rev. ใหม่
+                  </span>
+                )}
               </div>
+              <h2 className="text-xl font-semibold text-gray-800">{document.title}</h2>
               <p className="text-xs text-gray-500 mt-1">{document.runningNumber || 'RFA Document'}</p>
             </div>
             <div className="flex items-center space-x-4">
@@ -699,7 +870,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 onClick={() => setShowHistory(true)}
                 className="flex items-center text-sm text-gray-500 hover:text-blue-600"
               >
-                <History size={16} className="mr-1" /> ดูประวัติ
+                <History size={16} className="mr-1" /> ดูประวัติการดำเนินงาน
               </button>
               <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
                 <X size={24} />
@@ -707,9 +878,11 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
             </div>
           </div>
 
-          {/* Main Content */}
-          <div className="p-6 overflow-y-auto space-y-6">
-            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+          {/* Scrollable Container for both Content and Action Panels */}
+          <div className="flex-1 overflow-y-auto min-h-0 w-full">
+            
+            <div className="p-6 space-y-6">
+              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                 <div>
                   <strong className="text-gray-700 font-semibold block mb-1">สถานะ:</strong>
@@ -739,6 +912,21 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
               )}
             </div>
 
+            {document.status === STATUSES.REJECTED && !document.isLatest && (
+              <div className="p-4 bg-red-50 text-red-800 rounded-lg flex items-center">
+                <AlertTriangle size={24} className="mr-3 flex-shrink-0 text-red-600" />
+                <div>
+                  <h4 className="font-bold">เอกสารฉบับนี้ถูกแทนที่แล้ว</h4>
+                  <p className="text-sm text-red-700">
+                    ได้มีการสร้างเอกสารฉบับใหม่ <strong>(Rev.{String((document.revisionNumber || 0) + 1).padStart(2, '0')})</strong> จากเอกสารฉบับนี้แล้ว
+                  </p>
+                </div>
+              </div>
+            )}
+
+
+            {/* Revision Visual Banner Removed As Per User Request */}
+
             <div>
               <h4 className="text-md font-semibold mb-2 flex items-center text-slate-800">
                 <Paperclip size={16} className="mr-2" /> ไฟล์แนบ (ฉบับล่าสุด)
@@ -747,22 +935,29 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 {latestFiles.length > 0 ? (
                   latestFiles.map((file, index) => {
                     const isPdf = file.contentType === 'application/pdf' || file.fileName.toLowerCase().endsWith('.pdf');
+                    const isSuspended = document.supersededStatus === 'SUSPENDED';
                     const FileContent = () => (
-                      <div className="flex items-center min-w-0">
-                        <FileText className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
+                      <div className={`flex items-center min-w-0 ${isSuspended ? 'text-red-600 font-medium' : ''}`}>
+                        {isSuspended ? (
+                          <Lock className="w-5 h-5 text-red-500 mr-3 flex-shrink-0" />
+                        ) : (
+                          <FileText className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
+                        )}
                         <div className="flex flex-col min-w-0">
-                          <span className="text-sm font-medium text-blue-600 group-hover:text-blue-800 group-hover:underline truncate">{file.fileName}</span>
+                          <span className={`text-sm font-medium truncate ${
+                            isSuspended ? 'text-red-500 group-hover:text-red-700 group-hover:underline' : 'text-blue-600 group-hover:text-blue-800 group-hover:underline'
+                          }`}>{file.fileName}</span>
                           <span className="text-xs text-gray-500">{formatFileSize(file.fileSize)}</span>
                         </div>
                       </div>
                     );
                     return (
-                      <li key={index} className="bg-slate-50 border border-slate-200 rounded-md">
+                      <li key={index} className={`border rounded-md ${isSuspended ? 'bg-red-50 border-red-200 hover:bg-red-100' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'}`}>
                         {isPdf ? (
                           <button
                             onClick={() => setPreviewFile(file)}
-                            className="w-full text-left p-2 rounded-md hover:bg-blue-100 group transition-colors duration-200"
-                            title={`ดูตัวอย่างไฟล์ ${file.fileName}`}
+                            className="w-full text-left p-2 rounded-md group transition-colors duration-200"
+                            title={isSuspended ? `[ระงับการใช้งาน] ดูตัวอย่างไฟล์ ${file.fileName}` : `ดูตัวอย่างไฟล์ ${file.fileName}`}
                           >
                             <FileContent />
                           </button>
@@ -772,14 +967,14 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                             download={file.fileName}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="w-full text-left p-2 rounded-md hover:bg-blue-100 group transition-colors duration-200 flex"
-                            title={`ดาวน์โหลด ${file.fileName}`}
+                            className="w-full text-left p-2 rounded-md group transition-colors duration-200 flex"
+                            title={isSuspended ? `[ระงับการใช้งาน] ดาวน์โหลด ${file.fileName}` : `ดาวน์โหลด ${file.fileName}`}
                           >
                             <FileContent />
                           </a>
                         )}
                       </li>
-                    )
+                    );
                   })
                 ) : (
                   <p className="text-sm text-slate-500">ไม่มีไฟล์แนบในฉบับล่าสุด</p>
@@ -789,7 +984,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
           </div>
 
           {/* Action Panels */}
-          <div className="p-4 border-t bg-slate-50">
+          <div className="p-6 border-t bg-slate-50 relative mt-auto">
 
             {/* 1. Site Review Panel */}
             {isSiteReviewing && (
@@ -831,7 +1026,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 </div>
                 <div>
                   <label className="text-sm font-medium text-gray-700 mb-1 block">แสดงความคิดเห็น (Optional)</label>
-                  <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น..." className="w-full p-2 border rounded-md text-sm bg-white text-gray-900" rows={2} />
+                  <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ (Optional)..." className="w-full p-2 border rounded-md text-sm bg-white text-gray-900" rows={2} />
                 </div>
                 <div className="flex flex-wrap justify-end gap-3">
                   <button
@@ -839,14 +1034,14 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                     disabled={isActionDisabled}
                     className="flex items-center px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 disabled:bg-slate-200 disabled:cursor-not-allowed"
                   >
-                    <Edit3 size={16} className="mr-2" /> ขอแก้ไข
+                    {loadingAction === 'REQUEST_REVISION' ? <Spinner className="w-4 h-4 mr-2" /> : <Edit3 size={16} className="mr-2" />} ขอแก้ไข
                   </button>
                   <button
                     onClick={() => handleAction('SEND_TO_CM')}
                     disabled={isActionDisabled || (needsDocNumber && !newDocumentNumberInput.trim())}
                     className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed"
                   >
-                    <Send size={16} className="mr-2" /> ส่งให้ CM
+                    {loadingAction === 'SEND_TO_CM' ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />} ส่งให้ CM
                   </button>
                 </div>
               </div>
@@ -855,7 +1050,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
             {/* 2. Resubmission Panel (Creator) */}
             {isResubmissionFlow && (
               <div className="space-y-4">
-                <h3 className="text-lg font-bold text-slate-800">ส่งเอกสารที่แก้ไข</h3>
+                <h3 className="text-lg font-bold text-slate-800">ส่งเอกสารฉบับแก้ไข</h3>
                 <div>
                   <label className="text-sm font-medium text-gray-700 mb-1 block">แนบไฟล์ที่แก้ไขแล้ว <span className="text-red-700">*</span></label>
                   <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
@@ -880,29 +1075,57 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                     disabled={isSubmitting || newFiles.filter(f => f.status === 'success').length === 0}
                     className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-300"
                   >
-                    {isSubmitting ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />}
-                    ส่งกลับไปตรวจสอบ
+                    {loadingAction === 'SUBMIT_REVISION' ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />}
+                    ส่งให้ Site ตรวจสอบอีกครั้ง
                   </button>
                 </div>
               </div>
             )}
 
-            {document.status === STATUSES.REJECTED && !document.isLatest && (
-              <div className="p-4 bg-red-50 text-red-800 rounded-lg flex items-center">
-                <AlertTriangle size={24} className="mr-3 flex-shrink-0 text-red-600" />
-                <div>
-                  <h4 className="font-bold">เอกสารฉบับนี้ถูกแทนที่แล้ว</h4>
-                  <p className="text-sm text-red-700">
-                    ได้มีการสร้างเอกสารฉบับใหม่ <strong>(REV-{String((document.revisionNumber || 0) + 1).padStart(2, '0')})</strong> จากเอกสารฉบับนี้แล้ว
-                  </p>
+            {/* ✅ Supersede Request Button (สำหรับ Approved Docที่ยังไม่มีคำสั่งแก้) */}
+            {(canRequestSupersede && !document.supersededComment) && (
+              <div className="flex justify-end mb-4">
+                <button
+                  onClick={() => setShowSupersedeModal(true)}
+                  className="flex items-center px-4 py-2 text-sm font-medium text-white bg-orange-600 rounded-lg hover:bg-orange-700 transition-colors"
+                >
+                  <RefreshCw size={16} className="mr-2" />
+                  ขอสร้าง Revision ใหม่
+                </button>
+              </div>
+            )}
+
+            {/* Warning Box (View Only) - สำหรับคนที่ไม่มีสิทธิ์สร้าง Rev ใหม่ แต่ต้องเห็นคำสั่ง */}
+            {!!document.supersededComment && !isRevisionFlow && (
+              <div className="bg-orange-50 p-6 rounded-lg border border-orange-200 shadow-sm space-y-4 mb-4">
+                <h3 className="text-lg font-bold text-orange-800 flex items-center border-b border-orange-200 pb-2">
+                  <AlertTriangle className="mr-2" size={20} />
+                  สิ่งที่ต้องแก้ไขใน Rev. ถัดไป
+                </h3>
+                <div className="bg-white p-4 rounded-md text-orange-900 border border-orange-100">
+                  <p className="whitespace-pre-wrap text-base font-medium">{document.supersededComment}</p>
                 </div>
               </div>
             )}
 
             {/* 3. Revision Creation Panel */}
             {isRevisionFlow && (
-              <div className="space-y-4">
-                <h3 className="text-lg font-bold text-slate-800 mb-4">สร้างเอกสารฉบับแก้ไข (Create New Revision)</h3>
+              <div className={`space-y-4 ${!!document.supersededComment ? 'bg-orange-50 p-6 rounded-lg border border-orange-200 shadow-sm mb-4' : ''}`}>
+                {!!document.supersededComment && (
+                  <>
+                    <h3 className="text-lg font-bold text-orange-800 flex items-center border-b border-orange-200 pb-2">
+                      <AlertTriangle className="mr-2" size={20} />
+                      สิ่งที่ต้องแก้ไขใน Rev. ถัดไป
+                    </h3>
+                    <div className="bg-white p-4 rounded-md text-orange-900 border border-orange-100 mb-6">
+                      <p className="whitespace-pre-wrap text-base font-medium">{document.supersededComment}</p>
+                    </div>
+                  </>
+                )}
+                
+                <h3 className={`text-lg font-bold mb-4 ${!!document.supersededComment ? 'text-slate-800 mt-6 pt-4 border-t border-orange-200' : 'text-slate-800'}`}>
+                  สร้างเอกสารฉบับแก้ไข
+                </h3>
 
                 {requiresBimVerification && (isVerifyingTask || verificationError) && (
                   <div className="mb-4 p-3 rounded-md text-sm font-medium flex items-center border bg-white">
@@ -913,7 +1136,15 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                       </>
                     )}
                     {verificationError && (
-                      <span className="text-red-600 font-semibold">{verificationError}</span>
+                      <div className="flex items-center justify-between w-full">
+                        <span className="text-red-600 font-semibold">{verificationError}</span>
+                        <button 
+                          onClick={verifyBimTask}
+                          className="ml-4 px-3 py-1 text-sm bg-red-100 hover:bg-red-200 text-red-700 rounded-md transition-colors font-medium flex-shrink-0 flex items-center"
+                        >
+                          <RefreshCw size={14} className="mr-1.5" /> ลองใหม่
+                        </button>
+                      </div>
                     )}
                   </div>
                 )}
@@ -948,14 +1179,18 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                         rows={2}
                       />
                     </div>
-                    <div className="flex justify-end">
+                    <div className="flex justify-end pt-4">
                       <button
                         onClick={handleCreateRevision}
                         disabled={isSubmitting || revisionFiles.filter(f => f.status === 'success').length === 0 || (requiresBimVerification && !isTaskVerified)}
-                        className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                        className={`flex items-center px-6 py-2.5 text-sm font-medium text-white rounded-lg transition-colors shadow-sm disabled:cursor-not-allowed ${
+                          !!document.supersededComment 
+                          ? 'bg-orange-600 hover:bg-orange-700 disabled:bg-orange-300' 
+                          : 'bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300'
+                        }`}
                       >
                         {isSubmitting ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />}
-                        ส่งเอกสารฉบับแก้ไข
+                        ส่งเอกสารฉบับแก้ไข (Rev.{String((document.revisionNumber || 0) + 1).padStart(2, '0')})
                       </button>
                     </div>
                   </div>
@@ -966,7 +1201,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
             {/* 4. Approval Panel (CM / Override User) */}
             {isApproving && (
               <div className="space-y-4">
-                <h3 className="text-lg font-bold text-slate-800">การอนุมัติ (Approval)</h3>
+                <h3 className="text-lg font-bold text-slate-800">การอนุมัติ</h3>
                 <div>
                   <label className="text-sm font-medium text-gray-700 mb-1 block">
                     แนบไฟล์ <span className="text-red-700">*</span>
@@ -988,41 +1223,47 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                   <label className="text-sm font-medium text-gray-700 mb-1 block">แสดงความคิดเห็น (Optional)</label>
                   <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..." className="w-full p-2 border rounded-md text-sm bg-white text-gray-900" rows={2} />
                 </div>
-                <div className="flex flex-wrap justify-end gap-3">
-                  {/* [FIXED] ใช้ isActionDisabled เพื่อป้องกันการกดถ้าไม่มีไฟล์ */}
+                {/* Approval buttons: REJECT separated left, Approve group on right */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200">
+                  {/* Left: Destructive action */}
                   <button
                     onClick={() => handleAction('REJECT')}
                     disabled={isActionDisabled}
                     className="flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
                   >
-                    <ThumbsDown size={16} className="mr-2" /> ไม่อนุมัติ
+                    {loadingAction === 'REJECT' ? <Spinner className="w-4 h-4 mr-2" /> : <ThumbsDown size={16} className="mr-2" />} ไม่อนุมัติ
                   </button>
-                  <button
-                    onClick={() => handleAction('APPROVE_REVISION_REQUIRED')}
-                    disabled={isActionDisabled}
-                    className="flex items-center px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-lg hover:bg-orange-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
-                  >
-                    <Edit3 size={16} className="mr-2" /> อนุมัติตามคอมเมนต์ (ต้องแก้ไข)
-                  </button>
-                  <button
-                    onClick={() => handleAction('APPROVE_WITH_COMMENTS')}
-                    disabled={isActionDisabled}
-                    className="flex items-center px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
-                  >
-                    <MessageSquare size={16} className="mr-2" /> อนุมัติตามคอมเมนต์ (ไม่แก้ไข)
-                  </button>
-                  <button
-                    onClick={() => handleAction('APPROVE')}
-                    disabled={isActionDisabled}
-                    className="flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
-                  >
-                    <ThumbsUp size={16} className="mr-2" /> อนุมัติ
-                  </button>
+
+                  {/* Right: Approve variants group */}
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      onClick={() => handleAction('APPROVE_REVISION_REQUIRED')}
+                      disabled={isActionDisabled}
+                      className="flex items-center px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-lg hover:bg-orange-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                    >
+                      {loadingAction === 'APPROVE_REVISION_REQUIRED' ? <Spinner className="w-4 h-4 mr-2" /> : <Edit3 size={16} className="mr-2" />} อนุมัติ (ต้องแก้ไข)
+                    </button>
+                    <button
+                      onClick={() => handleAction('APPROVE_WITH_COMMENTS')}
+                      disabled={isActionDisabled}
+                      className="flex items-center px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                    >
+                      {loadingAction === 'APPROVE_WITH_COMMENTS' ? <Spinner className="w-4 h-4 mr-2" /> : <MessageSquare size={16} className="mr-2" />} อนุมัติ (มีคอมเมนต์)
+                    </button>
+                    <button
+                      onClick={() => handleAction('APPROVE')}
+                      disabled={isActionDisabled}
+                      className="flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                    >
+                      {loadingAction === 'APPROVE' ? <Spinner className="w-4 h-4 mr-2" /> : <ThumbsUp size={16} className="mr-2" />} อนุมัติ
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
 
           </div>
+        </div>
         </div>
       </div>
       {showHistory && (
@@ -1033,6 +1274,123 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
           cmSystemType={document.site?.cmSystemType}
         />
       )}
+
+      {/* Modal #1: ขอแก้ไข Rev. ใหม่ */}
+      {showSupersedeModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg">
+            <div className="flex justify-between items-center p-4 border-b">
+              <h3 className="text-lg font-bold text-orange-700 flex items-center">
+                <RefreshCw size={18} className="mr-2" />
+                ขอแก้ไขเอกสาร (สร้าง Rev. ใหม่)
+              </h3>
+              <button onClick={() => setShowSupersedeModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X size={22} />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-800">
+                <strong>{document.documentNumber}</strong> Rev.{String(document.revisionNumber || 0).padStart(2, '0')} (อนุมัติ) จะถูกขอแก้ไข
+              </div>
+
+              {/* Comment — บังคับ */}
+              <div>
+                <label className="text-sm font-semibold text-gray-700 mb-1 block">
+                  เหตุผล / คำสั่งแก้ไข <span className="text-red-600">*</span>
+                </label>
+                <textarea
+                  value={supersedeComment}
+                  onChange={e => setSupersedeComment(e.target.value)}
+                  placeholder="ระบุเหตุผลหรือคำสั่งจาก CM / ผู้มีอำนาจ..."
+                  className="w-full p-2 border rounded-md text-sm bg-white text-gray-900"
+                  rows={3}
+                />
+              </div>
+
+              {/* File Upload — บังคับ */}
+              <div>
+                <label className="text-sm font-semibold text-gray-700 mb-1 block">
+                  แนบไฟล์หลักฐานคำสั่ง <span className="text-red-600">*</span>
+                </label>
+                <div className="border-2 border-dashed border-slate-300 rounded-lg p-3 text-center hover:border-orange-400 transition-colors">
+                  <input
+                    type="file"
+                    multiple
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files || []);
+                      if (!files.length) return;
+                      const fileObjs: UploadedFile[] = files.map(file => ({ id: `${file.name}-${Date.now()}`, file, status: 'pending', progress: 0 }));
+                      setSupersedeFiles(prev => [...prev, ...fileObjs]);
+                      fileObjs.forEach(fo => uploadTempFile(fo, 'supersede').catch(() => {
+                        setSupersedeFiles(prev => prev.map(f => f.id === fo.id ? { ...f, status: 'error' } : f));
+                      }));
+                      e.target.value = '';
+                    }}
+                    className="hidden"
+                    id="supersede-file-upload"
+                  />
+                  <label htmlFor="supersede-file-upload" className="cursor-pointer text-orange-600 hover:text-orange-800 font-medium flex items-center justify-center text-sm">
+                    <Upload size={14} className="mr-2" />
+                    คลิกเพื่อเลือกไฟล์
+                  </label>
+                </div>
+                {supersedeFiles.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {supersedeFiles.map((f, i) => (
+                      <div key={f.id} className="flex items-center text-xs text-gray-700 bg-slate-50 rounded p-1.5">
+                        {f.status === 'uploading' ? <Spinner className="w-3 h-3 mr-2 text-blue-500" /> :
+                          f.status === 'success' ? <Check className="w-3 h-3 mr-2 text-green-500" /> :
+                          f.status === 'error' ? <AlertTriangle className="w-3 h-3 mr-2 text-red-500" /> :
+                          <FileText className="w-3 h-3 mr-2 text-slate-500" />}
+                        <span className="flex-1 truncate">{f.file.name}</span>
+                        <button onClick={() => setSupersedeFiles(prev => prev.filter((_, idx) => idx !== i))} className="ml-2 text-gray-400 hover:text-red-500" type="button">
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Suspend Toggle */}
+              <div className="flex items-start space-x-3 p-3 bg-slate-50 rounded-md">
+                <input
+                  type="checkbox"
+                  id="suspend-toggle"
+                  checked={suspendOldDoc}
+                  onChange={e => setSuspendOldDoc(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-orange-600 cursor-pointer"
+                />
+                <label htmlFor="suspend-toggle" className="text-sm cursor-pointer">
+                  <span className="font-semibold text-gray-800">ระงับเอกสารฉบับเดิมสำหรับหน้างาน</span>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {suspendOldDoc
+                      ? '⛔ หน้างานจะไม่สามารถเปิด/ดาวน์โหลดไฟล์ฉบับเดิมได้ (ใช้เมื่อแบบเดิมมีข้อผิดพลาดร้ายแรง)'
+                      : '⚠️ หน้างานยังเปิดไฟล์เดิมได้ แต่จะเห็น badge แจ้งว่ากำลังมี Rev. ใหม่'}
+                  </p>
+                </label>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 p-4 border-t bg-slate-50">
+              <button
+                onClick={() => { setShowSupersedeModal(false); setSupersedeComment(''); setSupersedeFiles([]); }}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                ยกเลิก
+              </button>
+              <button
+                onClick={handleSupersedeRequest}
+                disabled={isSupersedeSubmitting || !supersedeComment.trim() || supersedeFiles.filter(f => f.status === 'success').length === 0}
+                className="flex items-center px-4 py-2 text-sm font-medium text-white bg-orange-600 rounded-lg hover:bg-orange-700 disabled:bg-orange-300 disabled:cursor-not-allowed"
+              >
+                {isSupersedeSubmitting ? <Spinner className="w-4 h-4 mr-2" /> : <RefreshCw size={16} className="mr-2" />}
+                ยืนยัน และสร้าง Rev. ใหม่
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <PDFPreviewModal
         isOpen={!!previewFile}
         file={previewFile}

@@ -35,6 +35,7 @@ export interface RFAWorkflowStep {
   comments?: string
   action?: string // <-- ✅ 3. เพิ่ม 'action' (เป็น optional)
   files?: RFAFile[];
+  revisionNumber?: number;
 }
 
 export interface RFAPermissions {
@@ -111,6 +112,17 @@ export interface RFADocument {
     [key: string]: any
   }
   usersInfo: Record<string, RFAUserInfo> // <-- ✅ 4. เพิ่ม usersInfo
+
+  // --- Supersede / Revision จากเอกสารที่ "อนุมัติ" ---
+  supersededStatus?: 'ACTIVE' | 'SUSPENDED' | 'SUPERSEDED';
+  // ACTIVE = แสดงปกติ, SUSPENDED = ระงับชั่วคราว (รอ Rev.ใหม่), SUPERSEDED = ถูกแทนที่แล้ว
+  supersededById?: string;         // docId ของ Rev. ใหม่ที่มาแทน
+  supersededByRevision?: number;   // Rev. Number ของเอกสารที่มาแทน
+  supersededAt?: string;
+  supersededComment?: string;      // คอมเมนต์คำสั่งจาก Approver
+  supersededFiles?: RFAFile[];     // ไฟล์หลักฐานคำสั่งแก้ไข
+  previousRevisionId?: string;     // docId ของ Rev. เก่า (สำหรับ Rev. ใหม่)
+  previousRevisionSuspended?: boolean; // true ถ้า Rev. เก่าถูก Suspend ไปแล้วก่อนสร้าง Rev. ใหม่
 }
 
 // (ส่วนที่เหลือของไฟล์ไม่ต้องแก้ไข)

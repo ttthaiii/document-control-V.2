@@ -90,6 +90,8 @@ async function syncRfaToBimTracking(docId: string, newData: any) {
   // Make sure rev is a string, padded if necessary
   const revString = String(newData.revisionNumber || 0).padStart(2, '0');
 
+
+
   // --- Prepare Timestamp Payload ---
   const timestampUpdates: { [key: string]: any } = {};
   let latestTimestamp: any = admin.firestore.Timestamp.now(); // Default to now
@@ -124,6 +126,8 @@ async function syncRfaToBimTracking(docId: string, newData: any) {
     documentNumber: newData.documentNumber,
     rev: revString,
     currentStep: newData.status,
+    supersededStatus: newData.supersededStatus || 'ACTIVE',
+    supersededComment: newData.supersededComment || '',
     lastUpdate: latestTimestamp, // Use the latest found confirmation time
     ...timestampUpdates // Spread the dynamic date fields
   };

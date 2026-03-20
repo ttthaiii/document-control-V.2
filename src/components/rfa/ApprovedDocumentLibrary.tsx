@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '@/lib/auth/useAuth'
 import { Site, Category, RFADocument, RFAFile } from '@/types/rfa'
-import { Search, Building, Tag, FileText, Calendar, Download, Eye, FileDigit } from 'lucide-react'
+import { Search, Building, Tag, FileText, Calendar, Download, Eye, FileDigit, AlertTriangle, Lock } from 'lucide-react'
 import Spinner from '@/components/shared/Spinner'
 import PDFPreviewModal from './PDFPreviewModal'
 
@@ -226,27 +226,53 @@ export default function ApprovedDocumentLibrary() {
             <div className="text-center py-16 border-2 border-dashed rounded-lg"><p className="text-gray-500">ไม่พบเอกสารที่อนุมัติแล้ว</p></div>
           ) : isMobile ? (
             <div className="space-y-3">
-              {filteredDocuments.map(doc => (
-                <div key={doc.id} className="bg-gray-50 border rounded-lg p-4 space-y-3">
+              {filteredDocuments.map(doc => {
+                const isSuspended = doc.supersededStatus === 'SUSPENDED';
+                const isRevisionRequested = !!doc.supersededComment; // ทั้ง SUSPENDED และ ACTIVE ที่ขอแก้ไขแล้ว
+                return (
+                <div key={doc.id} className={`border rounded-lg p-4 space-y-3 transition-all ${
+                  isSuspended ? 'bg-red-50 border-red-300'
+                  : 'bg-white'
+                }`}>
                   <div>
-                    <p className="font-semibold text-gray-800 truncate">{doc.documentNumber}</p>
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <p className="font-semibold text-gray-800 truncate">{doc.documentNumber}</p>
+                      <span className="inline-flex items-center px-1.5 py-0.5 bg-gray-200 text-gray-800 rounded-md text-[10px] font-bold">
+                        REV-{String(doc.revisionNumber || 0).padStart(2, '0')}
+                        {isRevisionRequested && (
+                          <span className="ml-1 text-[10px] text-orange-600 font-bold" title="ต้องการ Rev. ใหม่">⚠️</span>
+                        )}
+                      </span>
+                      {isSuspended && (
+                        <span className="flex-shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-600 text-white">
+                          <Lock className="w-2.5 h-2.5 mr-0.5" />ห้ามใช้
+                        </span>
+                      )}
+                    </div>
                     <p className="text-sm text-gray-600 line-clamp-2 mt-1">{doc.title}</p>
                   </div>
                   {doc.files && doc.files.length > 0 && (
-                    <button
-                      onClick={() => handleFileClick(doc.files[0])}
-                      className="w-full flex items-center justify-center text-sm bg-white border border-gray-300 rounded-md p-2 hover:bg-gray-100 transition-colors text-gray-700 font-medium"
-                    >
-                      {doc.files[0].fileName.toLowerCase().endsWith('.pdf') ? <Eye className="w-4 h-4 mr-2 text-red-500" /> : <Download className="w-4 h-4 mr-2 text-blue-500" />}
-                      <span className="truncate">{doc.files[0].fileName}</span>
-                    </button>
+                    isSuspended ? (
+                      <div className="w-full flex items-center justify-center text-sm bg-red-100 border border-red-300 rounded-md p-2 text-red-700 font-medium cursor-not-allowed">
+                        <Lock className="w-4 h-4 mr-2" />
+                        <span className="truncate">ห้ามเปิดไฟล์ — รอ Rev. ใหม่</span>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => handleFileClick(doc.files[0])}
+                        className="w-full flex items-center justify-center text-sm bg-white border border-gray-300 rounded-md p-2 hover:bg-gray-100 transition-colors text-gray-700 font-medium"
+                      >
+                        {doc.files[0].fileName.toLowerCase().endsWith('.pdf') ? <Eye className="w-4 h-4 mr-2 text-red-500" /> : <Download className="w-4 h-4 mr-2 text-blue-500" />}
+                        <span className="truncate">{doc.files[0].fileName}</span>
+                      </button>
+                    )
                   )}
                   <div className="flex justify-between items-center pt-2 border-t text-xs text-gray-500">
                     <span className="px-2 py-1 bg-green-100 text-green-800 rounded font-medium">{STATUS_LABELS[doc.status] || doc.status}</span>
                     <span>{formatDate(doc.updatedAt)}</span>
                   </div>
                 </div>
-              ))}
+              )})}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -261,30 +287,61 @@ export default function ApprovedDocumentLibrary() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {filteredDocuments.map(doc => (
-                    <tr key={doc.id}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-800">{doc.documentNumber}</td>
-                      <td className="px-6 py-4 text-sm text-gray-700">{doc.title}</td>
+                  {filteredDocuments.map(doc => {
+                    const isSuspended = doc.supersededStatus === 'SUSPENDED';
+                    const isRevisionRequested = !!doc.supersededComment;
+                    return (
+                    <tr key={doc.id} className={
+                      isSuspended ? 'bg-red-50'
+                      : 'bg-white'
+                    }>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-800">
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                          {doc.documentNumber}
+                          <span className="inline-flex items-center px-1.5 py-0.5 bg-gray-200 text-gray-800 rounded-md text-[10px] font-bold">
+                            REV-{String(doc.revisionNumber || 0).padStart(2, '0')}
+                            {isRevisionRequested && (
+                              <span className="ml-1 text-[10px] text-orange-600 font-bold" title="ต้องการ Rev. ใหม่">⚠️</span>
+                            )}
+                          </span>
+                          {isSuspended && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-600 text-white flex-shrink-0">
+                              <Lock className="w-2.5 h-2.5 mr-0.5" />ห้ามใช้
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-700">
+                        <p className="line-clamp-2">{doc.title}</p>
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
                         {doc.files && doc.files.length > 0 ? (
-                          <button
-                            onClick={() => handleFileClick(doc.files[0])}
-                            className="flex items-center text-blue-600 hover:text-blue-800 hover:underline"
-                            title={doc.files[0].fileName}
-                          >
-                            <FileText className="w-4 h-4 mr-2 flex-shrink-0" />
-                            <span className="truncate max-w-[250px]">{doc.files[0].fileName}</span>
-                          </button>
+                          isSuspended ? (
+                            <div className="flex items-center text-red-600 font-medium cursor-not-allowed" title="ไฟล์ถูกระงับ">
+                              <Lock className="w-4 h-4 mr-2 flex-shrink-0" />
+                              <span className="truncate max-w-[200px] line-through text-red-400">{doc.files[0].fileName}</span>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => handleFileClick(doc.files[0])}
+                              className="flex items-center text-blue-600 hover:text-blue-800 hover:underline"
+                              title={doc.files[0].fileName}
+                            >
+                              <FileText className="w-4 h-4 mr-2 flex-shrink-0" />
+                              <span className="truncate max-w-[250px]">{doc.files[0].fileName}</span>
+                            </button>
+                          )
                         ) : (
                           <span className="text-gray-400">-</span>
                         )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <span className="px-2 py-1 bg-green-100 text-green-800 rounded font-medium">{STATUS_LABELS[doc.status] || doc.status}</span>
+                        <span className="px-2 py-1 bg-green-100 text-green-800 rounded font-medium inline-block w-fit">{STATUS_LABELS[doc.status] || doc.status}</span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(doc.updatedAt)}</td>
                     </tr>
-                  ))}
+                  )})}
+
                 </tbody>
               </table>
             </div>
