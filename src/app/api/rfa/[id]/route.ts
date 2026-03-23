@@ -8,6 +8,7 @@ import { RFAFile } from '@/types/rfa';
 import { sendPushNotification } from '@/lib/utils/push-notification';
 import { PERMISSION_KEYS } from '@/lib/config/permissions';
 import { getFileUrl } from '@/lib/utils/storage';
+import { extractCadFiles } from '@/lib/utils/extractCadFiles';
 
 export const dynamic = 'force-dynamic';
 

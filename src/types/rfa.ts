@@ -123,6 +123,7 @@ export interface RFADocument {
   supersededFiles?: RFAFile[];     // ไฟล์หลักฐานคำสั่งแก้ไข
   previousRevisionId?: string;     // docId ของ Rev. เก่า (สำหรับ Rev. ใหม่)
   previousRevisionSuspended?: boolean; // true ถ้า Rev. เก่าถูก Suspend ไปแล้วก่อนสร้าง Rev. ใหม่
+  cadFiles?: RFAFile[];            // ไฟล์ CAD (.dwg) ที่ extract จาก ZIP/RAR อัตโนมัติเมื่ออนุมัติ
 }
 
 // (ส่วนที่เหลือของไฟล์ไม่ต้องแก้ไข)

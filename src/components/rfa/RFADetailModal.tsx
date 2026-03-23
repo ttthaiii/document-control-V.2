@@ -724,6 +724,17 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       const result = await response.json();
       if (result.success) {
         showNotification('success', 'ดำเนินการสำเร็จ!', result.message);
+
+        // Fire-and-forget: extract CAD files in background (ไม่รอ ไม่บล็อก UI)
+        const isFinalApprovalAction = ['APPROVE', 'APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED'].includes(action);
+        if (isFinalApprovalAction && result.newStatus && ['APPROVED', 'APPROVED_WITH_COMMENTS', 'APPROVED_REVISION_REQUIRED'].includes(result.newStatus)) {
+          fetch('/api/rfa/extract-cad', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ docId: document.id }),
+          }).catch(() => { /* silent fail — non-critical */ });
+        }
+
         onClose();
       } else {
         throw new Error(result.error || 'เกิดข้อผิดพลาด');

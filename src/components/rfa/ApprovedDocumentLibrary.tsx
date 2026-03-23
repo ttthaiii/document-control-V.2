@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '@/lib/auth/useAuth'
 import { Site, Category, RFADocument, RFAFile } from '@/types/rfa'
-import { Search, Building, Tag, FileText, Calendar, Download, Eye, FileDigit, AlertTriangle, Lock } from 'lucide-react'
+import { Search, Building, Tag, FileText, Calendar, Download, Eye, FileDigit, AlertTriangle, Lock, FolderOpen, ChevronDown, ChevronUp } from 'lucide-react'
 import Spinner from '@/components/shared/Spinner'
 import PDFPreviewModal from './PDFPreviewModal'
 
@@ -49,6 +49,15 @@ export default function ApprovedDocumentLibrary() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<RFAFile | null>(null);
+  const [expandedCadIds, setExpandedCadIds] = useState<Set<string>>(new Set());
+
+  const toggleCad = (docId: string) => {
+    setExpandedCadIds(prev => {
+      const next = new Set(prev);
+      next.has(docId) ? next.delete(docId) : next.add(docId);
+      return next;
+    });
+  };
 
   const resetFilters = () => {
     setSearchTerm('');
@@ -229,6 +238,11 @@ export default function ApprovedDocumentLibrary() {
               {filteredDocuments.map(doc => {
                 const isSuspended = doc.supersededStatus === 'SUSPENDED';
                 const isRevisionInProgress = doc.supersededStatus === 'ACTIVE' || isSuspended;
+
+                // 🟢 ค้นหาไฟล์หลักที่จะแสดง (เอา PDF ล่าสุด หรือไฟล์ล่าสุด) 
+                const mainFile = doc.files && doc.files.length > 0
+                  ? [...doc.files].reverse().find(f => f.contentType === 'application/pdf' || f.fileName.toLowerCase().endsWith('.pdf')) || doc.files[doc.files.length - 1]
+                  : null;
                 
                 let revisionComment = (doc as any).supersededComment;
                 if (!revisionComment && doc.workflow) {
@@ -277,7 +291,7 @@ export default function ApprovedDocumentLibrary() {
                       <span>เอกสารฉบับนี้กำลังอยู่ในระหว่างการแก้ไข Rev. ใหม่</span>
                     </div>
                   )}
-                  {doc.files && doc.files.length > 0 && (
+                  {mainFile && (
                     isSuspended ? (
                       <div className="w-full flex items-center justify-center text-sm bg-red-100 border border-red-300 rounded-md p-2 text-red-700 font-medium cursor-not-allowed">
                         <Lock className="w-4 h-4 mr-2" />
@@ -285,13 +299,45 @@ export default function ApprovedDocumentLibrary() {
                       </div>
                     ) : (
                       <button
-                        onClick={() => handleFileClick(doc.files[0])}
+                        onClick={() => handleFileClick(mainFile)}
                         className="w-full flex items-center justify-center text-sm bg-white border border-gray-300 rounded-md p-2 hover:bg-gray-100 transition-colors text-gray-700 font-medium"
                       >
-                        {doc.files[0].fileName.toLowerCase().endsWith('.pdf') ? <Eye className="w-4 h-4 mr-2 text-red-500" /> : <Download className="w-4 h-4 mr-2 text-blue-500" />}
-                        <span className="truncate">{doc.files[0].fileName}</span>
+                        {mainFile.fileName.toLowerCase().endsWith('.pdf') ? <Eye className="w-4 h-4 mr-2 text-red-500" /> : <Download className="w-4 h-4 mr-2 text-blue-500" />}
+                        <span className="truncate">{mainFile.fileName}</span>
                       </button>
                     )
+                  )}
+                  {/* CAD Files Section (Mobile) — Progressive Disclosure */}
+                  {!isSuspended && (doc as any).cadFiles && (doc as any).cadFiles.length > 0 && (
+                    <div>
+                      <button
+                        onClick={() => toggleCad(doc.id)}
+                        className="w-full flex items-center justify-between text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-md px-3 py-1.5 hover:bg-blue-100 transition-colors"
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <FolderOpen className="w-3.5 h-3.5" />
+                          ไฟล์ CAD ({(doc as any).cadFiles.length} ไฟล์)
+                        </span>
+                        {expandedCadIds.has(doc.id) ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                      </button>
+                      {expandedCadIds.has(doc.id) && (
+                        <div className="mt-1 space-y-1 pl-1">
+                          {(doc as any).cadFiles.map((cad: any, i: number) => (
+                            <a
+                              key={i}
+                              href={cad.fileUrl}
+                              download={cad.fileName}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 hover:underline py-0.5"
+                            >
+                              <Download className="w-3.5 h-3.5 flex-shrink-0" />
+                              <span className="truncate">{cad.fileName}</span>
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   )}
                   <div className="flex justify-between items-center pt-2 border-t text-xs text-gray-500">
                     <span className="px-2 py-1 bg-green-100 text-green-800 rounded font-medium">{STATUS_LABELS[doc.status] || doc.status}</span>
@@ -316,6 +362,11 @@ export default function ApprovedDocumentLibrary() {
                   {filteredDocuments.map(doc => {
                     const isSuspended = doc.supersededStatus === 'SUSPENDED';
                     const isRevisionInProgress = doc.supersededStatus === 'ACTIVE' || isSuspended;
+
+                    // 🟢 ค้นหาไฟล์หลักที่จะแสดง (เอา PDF ล่าสุด หรือไฟล์ล่าสุด) 
+                    const mainFile = doc.files && doc.files.length > 0
+                      ? [...doc.files].reverse().find(f => f.contentType === 'application/pdf' || f.fileName.toLowerCase().endsWith('.pdf')) || doc.files[doc.files.length - 1]
+                      : null;
 
                     let revisionComment = (doc as any).supersededComment;
                     if (!revisionComment && doc.workflow) {
@@ -364,21 +415,54 @@ export default function ApprovedDocumentLibrary() {
                         )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        {doc.files && doc.files.length > 0 ? (
+                        {mainFile ? (
                           isSuspended ? (
                             <div className="flex items-center text-red-600 font-medium cursor-not-allowed" title="ไฟล์ถูกระงับ">
                               <Lock className="w-4 h-4 mr-2 flex-shrink-0" />
-                              <span className="truncate max-w-[200px] line-through text-red-400">{doc.files[0].fileName}</span>
+                              <span className="truncate max-w-[200px] line-through text-red-400">{mainFile.fileName}</span>
                             </div>
                           ) : (
-                            <button
-                              onClick={() => handleFileClick(doc.files[0])}
-                              className="flex items-center text-blue-600 hover:text-blue-800 hover:underline"
-                              title={doc.files[0].fileName}
-                            >
-                              <FileText className="w-4 h-4 mr-2 flex-shrink-0" />
-                              <span className="truncate max-w-[250px]">{doc.files[0].fileName}</span>
-                            </button>
+                            <div className="space-y-1">
+                              <button
+                                onClick={() => handleFileClick(mainFile)}
+                                className="flex items-center text-blue-600 hover:text-blue-800 hover:underline"
+                                title={mainFile.fileName}
+                              >
+                                <FileText className="w-4 h-4 mr-2 flex-shrink-0" />
+                                <span className="truncate max-w-[250px]">{mainFile.fileName}</span>
+                              </button>
+                              {/* CAD Files (Desktop) — Progressive Disclosure */}
+                              {(doc as any).cadFiles && (doc as any).cadFiles.length > 0 && (
+                                <div className="mt-1.5">
+                                  <button
+                                    onClick={() => toggleCad(doc.id)}
+                                    className="flex items-center gap-1.5 text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-full px-2.5 py-0.5 hover:bg-blue-100 transition-colors"
+                                  >
+                                    <FolderOpen className="w-3 h-3" />
+                                    ไฟล์ CAD ({(doc as any).cadFiles.length})
+                                    {expandedCadIds.has(doc.id) ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                  </button>
+                                  {expandedCadIds.has(doc.id) && (
+                                    <div className="mt-1 space-y-0.5 pl-1">
+                                      {(doc as any).cadFiles.map((cad: any, i: number) => (
+                                        <a
+                                          key={i}
+                                          href={cad.fileUrl}
+                                          download={cad.fileName}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 hover:underline py-0.5"
+                                          title={cad.fileName}
+                                        >
+                                          <Download className="w-3 h-3 flex-shrink-0" />
+                                          <span className="truncate max-w-[200px]">{cad.fileName}</span>
+                                        </a>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                           )
                         ) : (
                           <span className="text-gray-400">-</span>

@@ -27,6 +27,7 @@
     "@opentelemetry/api": "^1.9.0",
     "@tabler/icons-react": "^3.34.1",
     "@types/uuid": "^10.0.0",
+    "adm-zip": "^0.5.16",
     "clsx": "^2.1.1",
     "csv-parser": "^3.2.0",
     "fabric": "^6.9.0",
@@ -37,6 +38,7 @@
     "lucide-react": "^0.541.0",
     "next": "14.2.32",
     "node-fetch": "^2.7.0",
+    "node-unrar-js": "^2.0.2",
     "nodemailer": "^7.0.10",
     "pdf-lib": "^1.17.1",
     "react": "^18",
@@ -50,6 +52,7 @@
     "zod": "^4.1.0"
   },
   "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
     "@types/node": "^20.19.25",
     "@types/node-fetch": "^2.6.13",
     "@types/nodemailer": "^7.0.4",
