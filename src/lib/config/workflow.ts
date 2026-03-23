@@ -59,6 +59,7 @@ export const STATUSES = {
   PENDING_FINAL_APPROVAL: 'PENDING_FINAL_APPROVAL',
   SUPERSEDED: 'SUPERSEDED',  // ถูกแทนที่โดย Rev. ใหม่
   SUSPENDED: 'SUSPENDED',    // รอ Rev. ใหม่ (ระงับชั่วคราว)
+  REVISION_REQUESTED: 'REVISION_REQUESTED', // ขอแก้ไขแบบ
 };
 
 export const WR_STATUSES = {
@@ -84,6 +85,7 @@ export const STATUS_LABELS: { [key: string]: string } = {
   [STATUSES.PENDING_FINAL_APPROVAL]: 'รอ SITE อนุมัติขั้นสุดท้าย',
   [STATUSES.SUPERSEDED]: 'ถูกแทนที่ (Rev. ใหม่อนุมัติแล้ว)',
   [STATUSES.SUSPENDED]: 'กำลังขอแก้ไข (รอ Rev. ใหม่)',
+  [STATUSES.REVISION_REQUESTED]: 'ขอแก้ไขเอกสาร',
   [WR_STATUSES.DRAFT]: 'รออนุมัติ (PM)',
   [WR_STATUSES.REJECTED_BY_PM]: 'ไม่อนุมัติ (PM)',
   [WR_STATUSES.PENDING_BIM]: 'รอ BIM รับงาน',
@@ -111,6 +113,7 @@ export const STATUS_COLORS: { [key: string]: string } = {
   [STATUSES.PENDING_FINAL_APPROVAL]: '#6366F1', // Indigo-500
   [STATUSES.SUSPENDED]: '#F97316',   // Orange-500 (กำลังขอแก้ไข)
   [STATUSES.SUPERSEDED]: '#9CA3AF', // Gray-400 (ถูกแทนที่แล้ว)
+  [STATUSES.REVISION_REQUESTED]: '#E11D48', // Rose-600
 
   // Work Request Colors (คงเดิมหรือปรับให้เข้าชุดกัน)
   [WR_STATUSES.DRAFT]: '#6B7280',

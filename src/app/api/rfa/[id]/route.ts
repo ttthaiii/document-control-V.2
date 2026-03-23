@@ -73,7 +73,7 @@ export async function GET(
 
         const categoryInfo = {
             id: rfaData.categoryId,
-            categoryCode: rfaData.taskData?.taskCategory || rfaData.categoryId || 'N/A'
+            categoryCode: (rfaData.categoryName || rfaData.taskData?.taskCategory || (rfaData.categoryId ? rfaData.categoryId.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ') : 'N/A')).trim()
         };
 
         // --- Logic การแสดงปุ่ม (Permissions) ---
@@ -289,26 +289,33 @@ export async function PUT(
             revisionNumber: docData.revisionNumber || 0,
         };
 
+        const isApprovalAction = ['APPROVE', 'APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED'].includes(action);
+        const isFinalApproval = (
+            cmSystemType === 'INTERNAL' ? docData.status === STATUSES.PENDING_FINAL_APPROVAL :
+            docData.status === STATUSES.PENDING_CM_APPROVAL
+        );
+
         const updates: { [key: string]: any } = {
             status: newStatus,
             currentStep: newStatus,
             workflow: FieldValue.arrayUnion(workflowEntry),
             updatedAt: FieldValue.serverTimestamp(),
+            isMigration: FieldValue.delete(), // ลบ flag migration ออกทันทีที่ user แตะเอกสาร เพื่อให้ LINE notification ทำงานได้ปกติ
         };
         if (documentNumber) {
             updates.documentNumber = documentNumber.trim().replace(/\s+/g, '-');
         }
         if (workflowFiles.length > 0) updates.files = finalDocFiles;
 
+        // Set isLatestApproved if this action completes the workflow
+        if (isApprovalAction && isFinalApproval) {
+            updates.isLatestApproved = true;
+        }
+
         await rfaDocRef.update(updates);
 
         // --- Auto-Supersede: ถ้าอนุมัติ Rev.ใหม่ ให้ Mark Rev.เก่าเป็น SUPERSEDED อัตโนมัติ ---
         // (ตามหลัก Document Control: Rev.ใหม่อนุมัติ = Rev.เก่า Obsolete ทันที ไม่ต้องถาม User)
-        const isApprovalAction = ['APPROVE', 'APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED'].includes(action);
-        const isFinalApproval = (
-            cmSystemType === 'INTERNAL' ? docData.status === STATUSES.PENDING_FINAL_APPROVAL :
-            docData.status === STATUSES.PENDING_CM_APPROVAL
-        );
         if (isApprovalAction && isFinalApproval && docData.previousRevisionId) {
             try {
                 const prevRef = adminDb.collection('rfaDocuments').doc(docData.previousRevisionId);
@@ -320,6 +327,7 @@ export async function PUT(
                         supersededByRevision: docData.revisionNumber || 1,
                         supersededAt: new Date().toISOString(),
                         updatedAt: FieldValue.serverTimestamp(),
+                        isLatestApproved: false
                     });
                 }
             } catch (supersedeErr) {

@@ -91,8 +91,14 @@ function RFAContent() {
         const categoriesQuery = query(collectionGroup(db, 'categories'), where('siteId', 'in', user.sites));
         const unsubscribeCategories = onSnapshot(categoriesQuery, (snapshot) => {
             const categoriesData: Category[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Category));
-            const uniqueCategories = Array.from(new Map(categoriesData.map(cat => [cat.id, cat])).values());
-            setCategories(uniqueCategories);
+            const uniqueCategoriesMap = new Map<string, Category>();
+            categoriesData.forEach(cat => {
+                const formattedName = (cat.categoryName || cat.categoryCode || (cat.id ? cat.id.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ') : 'N/A')).trim();
+                if (!uniqueCategoriesMap.has(formattedName)) {
+                    uniqueCategoriesMap.set(formattedName, { ...cat, categoryCode: formattedName });
+                }
+            });
+            setCategories(Array.from(uniqueCategoriesMap.values()).sort((a, b) => a.categoryCode.localeCompare(b.categoryCode)));
         });
 
         return () => {
@@ -154,8 +160,8 @@ function RFAContent() {
                     site: { id: data.siteId, name: data.siteName || 'N/A' },
                     category: {
                         id: data.categoryId,
-                        categoryCode: data.taskData?.taskCategory || data.categoryId || 'N/A',
-                        categoryName: ''
+                        categoryCode: (data.categoryName || data.taskData?.taskCategory || (data.categoryId ? data.categoryId.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ') : 'N/A')).trim(),
+                        categoryName: data.categoryName || ''
                     },
                     createdByInfo: {
                         email: data.workflow?.[0]?.userName || 'N/A',
@@ -360,9 +366,9 @@ function RFAContent() {
             docsToShow = docsToShow.filter(doc => doc.site.id === filters.siteId);
         }
 
-        // 5. กรอง Category
+        // 5. กรอง Category (using unified categoryCode)
         if (filters.categoryId !== 'ALL') {
-            docsToShow = docsToShow.filter(doc => doc.category?.id === filters.categoryId);
+            docsToShow = docsToShow.filter(doc => doc.category?.categoryCode === filters.categoryId);
         }
 
         // 6. กรอง Responsible Party

@@ -120,13 +120,28 @@ export async function POST(req: Request) {
     // --- Update document status ---
     const newSupersededStatus = suspendOldDoc ? 'SUSPENDED' : 'ACTIVE';
 
+    const timestampIso = new Date().toISOString();
+
     await adminDb.collection('rfaDocuments').doc(docId).update({
       supersededStatus: newSupersededStatus,
       supersededComment: comment.trim(),
       supersededFiles: finalFilesData,
       supersededRequestedBy: uid,
-      supersededRequestedAt: new Date().toISOString(),
+      supersededRequestedAt: timestampIso,
       updatedAt: FieldValue.serverTimestamp(),
+      workflow: FieldValue.arrayUnion({
+        step: STATUSES.REVISION_REQUESTED,
+        status: STATUSES.REVISION_REQUESTED,
+        action: 'REQUEST_REVISION',
+        userId: uid,
+        userName: userData.profile?.name || userData.email || 'Unknown User',
+        userRole: userRole,
+        role: userRole,
+        timestamp: timestampIso,
+        comments: comment.trim(),
+        files: finalFilesData,
+        revisionNumber: rfaData.revisionNumber
+      })
     });
 
     return NextResponse.json({

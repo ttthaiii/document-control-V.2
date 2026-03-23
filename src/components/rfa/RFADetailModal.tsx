@@ -66,7 +66,10 @@ const WorkflowHistoryModal = ({
             {filteredWorkflow.length > 0 ? (
               filteredWorkflow.map((item, index) => (
                 <div key={index} className="relative pl-6 pb-8 last:pb-0">
-                  <div className="absolute -left-[9px] top-1 w-4 h-4 bg-blue-500 rounded-full border-2 border-white"></div>
+                  <div 
+                    className="absolute -left-[9px] top-1 w-4 h-4 rounded-full border-2 border-white z-10" 
+                    style={{ backgroundColor: STATUS_COLORS[item.status] || '#3B82F6' }}
+                  ></div>
                   <p className="font-semibold text-gray-800">
                     {item.revisionNumber !== undefined && (
                       <span className="text-blue-600 mr-2 font-bold">[Rev.{item.revisionNumber}]</span>
@@ -163,6 +166,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const [revisionFiles, setRevisionFiles] = useState<UploadedFile[]>([]);
   const [resubmissionFiles, setResubmissionFiles] = useState<UploadedFile[]>([]);
   const [previewFile, setPreviewFile] = useState<RFAFile | null>(null);
+  const [suspendOldDocForRevision, setSuspendOldDocForRevision] = useState(false);
 
   // Supersede Modal States (Modal #1 — ขอแก้ไข)
   const [showSupersedeModal, setShowSupersedeModal] = useState(false);
@@ -295,15 +299,22 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const isBimUser = user?.role === 'BIM';
   const requiresBimVerification = isBimUser && isBimDocument;
 
-  // The revision flow should only be accessible to the original creator OR, 
-  // for BIM Tracking documents, any BIM user.
-  // Additionally, God Admins (ROLES.ADMIN) can revise any document.
-  const canRevise = isCreator || requiresBimVerification || user?.role === ROLES.ADMIN;
+  // การอนุญาตให้สร้าง Revision ใหม่ (Team-based permissions)
+  // 1. ถ้าเป็นเอกสาร BIM (requiresBimVerification = true) -> ทีม BIM ทุกคนสร้าง Rev ได้
+  // 2. ถ้าเป็นเอกสาร Non-BIM -> ทุกคนที่ไม่ใช่ BIM สามารถสร้าง Rev ได้
+  const canReviseBimDoc = requiresBimVerification;
+  const canReviseNonBimDoc = !isBimDocument && !isBimUser;
+
+  const canRevise = isCreator || user?.role === ROLES.ADMIN || canReviseBimDoc || canReviseNonBimDoc;
   const hasRequestedRevision = !!document?.supersededComment;
-  const isRevisionFlow = (document?.status === STATUSES.REJECTED || hasRequestedRevision) && canRevise && document?.isLatest;
+  const isRevisionFlow = (
+    document?.status === STATUSES.REJECTED || 
+    hasRequestedRevision || 
+    document?.status === STATUSES.APPROVED_REVISION_REQUIRED
+  ) && canRevise && document?.isLatest;
 
   // --- สิทธิ์ขอแก้ไข Rev. ใหม่จากเอกสาร "อนุมัติ" (Supersede Flow) ---
-  const APPROVED_STATUSES = [STATUSES.APPROVED, STATUSES.APPROVED_WITH_COMMENTS, STATUSES.APPROVED_REVISION_REQUIRED];
+  const APPROVED_STATUSES = [STATUSES.APPROVED, STATUSES.APPROVED_WITH_COMMENTS];
   const isApprovedStatus = document ? APPROVED_STATUSES.includes(document.status) : false;
   const isApprover = APPROVER_ROLES.includes(user?.role as Role);
   const isAdmin = user?.role === ROLES.ADMIN;
@@ -740,6 +751,9 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
         uploadedFiles: successfulUploads.map(f => f.uploadedData),
         comments: revisionComment,
         verifiedTaskId: verifiedTaskId,
+        suspendOldDoc: document.status === STATUSES.APPROVED_REVISION_REQUIRED 
+          ? suspendOldDocForRevision 
+          : document.supersededStatus === 'SUSPENDED',
       };
       const response = await fetch(`/api/rfa/create_revision`, {
         method: 'POST',
@@ -1179,6 +1193,27 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                         rows={2}
                       />
                     </div>
+
+                    {document.status === STATUSES.APPROVED_REVISION_REQUIRED && (
+                      <div className="flex items-start space-x-3 p-3 bg-slate-50 border border-slate-200 rounded-md">
+                        <input
+                          type="checkbox"
+                          id="suspend-rev-toggle"
+                          checked={suspendOldDocForRevision}
+                          onChange={e => setSuspendOldDocForRevision(e.target.checked)}
+                          className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                        />
+                        <label htmlFor="suspend-rev-toggle" className="text-sm cursor-pointer">
+                          <span className="font-semibold text-gray-800">ระงับเอกสารฉบับเดิมสำหรับหน้างานระหว่างรอดำเนินการ</span>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {suspendOldDocForRevision
+                              ? '⛔ ระงับ: หน้างานจะไม่สามารถเปิดดูไฟล์ของ Rev. เดิมได้ (ใช้ตัวเลือกนี้หากแบบเดิมมีความผิดพลาดรุนแรง)'
+                              : '🟢 ไม่ระงับ: หน้างานยังใช้ไฟล์เดิมอ้างอิงชั่วคราวได้ แต่จะมีป้ายแจ้งเตือนว่ามี Rev. ใหม่จ่อรออยู่'}
+                          </p>
+                        </label>
+                      </div>
+                    )}
+
                     <div className="flex justify-end pt-4">
                       <button
                         onClick={handleCreateRevision}

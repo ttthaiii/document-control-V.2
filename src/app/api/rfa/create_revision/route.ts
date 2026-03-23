@@ -27,7 +27,7 @@ export async function POST(req: Request) {
 
     try {
         // รับ verifiedTaskId และ comments จาก request body
-        const { originalDocId, uploadedFiles, verifiedTaskId, comments } = await req.json();
+        const { originalDocId, uploadedFiles, verifiedTaskId, comments, suspendOldDoc } = await req.json();
 
         const userDoc = await adminDb.collection('users').doc(uid).get();
         const userData = userDoc.data();
@@ -110,7 +110,7 @@ export async function POST(req: Request) {
                 updatedAt: FieldValue.serverTimestamp(),
                 files: finalFilesData,
                 // Reset supersede fields สำหรับ Rev. ใหม่
-                supersededStatus: 'ACTIVE',
+                supersededStatus: null,
                 supersededById: null,
                 supersededByRevision: null,
                 supersededAt: null,
@@ -144,6 +144,7 @@ export async function POST(req: Request) {
                 isLatest: false,
                 supersededById: newRfaRef.id,
                 supersededByRevision: newRevisionNumber,
+                supersededStatus: suspendOldDoc ? 'SUSPENDED' : 'ACTIVE',
                 updatedAt: FieldValue.serverTimestamp(),
             });
         });

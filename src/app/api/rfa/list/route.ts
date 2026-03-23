@@ -81,7 +81,10 @@ export async function GET(request: NextRequest) {
         updatedAt: documentData.updatedAt,
         rfaType: documentData.rfaType,
         site: { id: documentData.siteId, name: documentData.siteName || 'N/A' },
-        category: { id: documentData.categoryId, categoryCode: documentData.taskData?.taskCategory || documentData.categoryId || 'N/A' },
+        category: {
+            id: documentData.categoryId,
+            categoryCode: (documentData.categoryName || documentData.taskData?.taskCategory || (documentData.categoryId ? documentData.categoryId.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ') : 'N/A')).trim()
+        },
         files: documentData.files || [],
       });
     });

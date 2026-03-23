@@ -96,7 +96,7 @@ export default function ApprovedDocumentLibrary() {
         let q = query(
           collection(db, 'rfaDocuments'),
           where('siteId', 'in', user.sites),
-          where('isLatest', '==', true),
+          where('isLatestApproved', '==', true),
           where('status', 'in', [
             STATUSES.APPROVED,
             STATUSES.APPROVED_WITH_COMMENTS,
@@ -228,7 +228,14 @@ export default function ApprovedDocumentLibrary() {
             <div className="space-y-3">
               {filteredDocuments.map(doc => {
                 const isSuspended = doc.supersededStatus === 'SUSPENDED';
-                const isRevisionRequested = !!doc.supersededComment; // ทั้ง SUSPENDED และ ACTIVE ที่ขอแก้ไขแล้ว
+                const isRevisionInProgress = doc.supersededStatus === 'ACTIVE' || isSuspended;
+                
+                let revisionComment = (doc as any).supersededComment;
+                if (!revisionComment && doc.workflow) {
+                  const wfStep = [...doc.workflow].reverse().find(w => w.comments && (w.status === STATUSES.APPROVED_REVISION_REQUIRED || w.status === STATUSES.REJECTED));
+                  if (wfStep) revisionComment = wfStep.comments;
+                }
+                revisionComment = revisionComment || '';
                 return (
                 <div key={doc.id} className={`border rounded-lg p-4 space-y-3 transition-all ${
                   isSuspended ? 'bg-red-50 border-red-300'
@@ -239,7 +246,7 @@ export default function ApprovedDocumentLibrary() {
                       <p className="font-semibold text-gray-800 truncate">{doc.documentNumber}</p>
                       <span className="inline-flex items-center px-1.5 py-0.5 bg-gray-200 text-gray-800 rounded-md text-[10px] font-bold">
                         REV-{String(doc.revisionNumber || 0).padStart(2, '0')}
-                        {isRevisionRequested && (
+                        {isRevisionInProgress && (
                           <span className="ml-1 text-[10px] text-orange-600 font-bold" title="ต้องการ Rev. ใหม่">⚠️</span>
                         )}
                       </span>
@@ -251,6 +258,25 @@ export default function ApprovedDocumentLibrary() {
                     </div>
                     <p className="text-sm text-gray-600 line-clamp-2 mt-1">{doc.title}</p>
                   </div>
+                  {/* Revision / Suspension Remark Banner */}
+                  {isSuspended && revisionComment && (
+                    <div className="flex items-start gap-2 px-3 py-2 bg-red-100 border border-red-300 rounded-md text-xs text-red-700">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                      <span><span className="font-semibold">สาเหตุที่ระงับ: </span>{revisionComment}</span>
+                    </div>
+                  )}
+                  {!isSuspended && isRevisionInProgress && revisionComment && (
+                    <div className="flex items-start gap-2 px-3 py-2 bg-amber-50 border border-amber-300 rounded-md text-xs text-amber-800">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                      <span><span className="font-semibold">กำลังแก้ไข: </span>{revisionComment}</span>
+                    </div>
+                  )}
+                  {!isSuspended && isRevisionInProgress && !revisionComment && (
+                    <div className="flex items-start gap-2 px-3 py-2 bg-amber-50 border border-amber-300 rounded-md text-xs text-amber-800">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                      <span>เอกสารฉบับนี้กำลังอยู่ในระหว่างการแก้ไข Rev. ใหม่</span>
+                    </div>
+                  )}
                   {doc.files && doc.files.length > 0 && (
                     isSuspended ? (
                       <div className="w-full flex items-center justify-center text-sm bg-red-100 border border-red-300 rounded-md p-2 text-red-700 font-medium cursor-not-allowed">
@@ -289,7 +315,14 @@ export default function ApprovedDocumentLibrary() {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {filteredDocuments.map(doc => {
                     const isSuspended = doc.supersededStatus === 'SUSPENDED';
-                    const isRevisionRequested = !!doc.supersededComment;
+                    const isRevisionInProgress = doc.supersededStatus === 'ACTIVE' || isSuspended;
+
+                    let revisionComment = (doc as any).supersededComment;
+                    if (!revisionComment && doc.workflow) {
+                      const wfStep = [...doc.workflow].reverse().find(w => w.comments && (w.status === STATUSES.APPROVED_REVISION_REQUIRED || w.status === STATUSES.REJECTED));
+                      if (wfStep) revisionComment = wfStep.comments;
+                    }
+                    revisionComment = revisionComment || '';
                     return (
                     <tr key={doc.id} className={
                       isSuspended ? 'bg-red-50'
@@ -300,7 +333,7 @@ export default function ApprovedDocumentLibrary() {
                           {doc.documentNumber}
                           <span className="inline-flex items-center px-1.5 py-0.5 bg-gray-200 text-gray-800 rounded-md text-[10px] font-bold">
                             REV-{String(doc.revisionNumber || 0).padStart(2, '0')}
-                            {isRevisionRequested && (
+                            {isRevisionInProgress && (
                               <span className="ml-1 text-[10px] text-orange-600 font-bold" title="ต้องการ Rev. ใหม่">⚠️</span>
                             )}
                           </span>
@@ -313,6 +346,22 @@ export default function ApprovedDocumentLibrary() {
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-700">
                         <p className="line-clamp-2">{doc.title}</p>
+                        {/* Revision / Suspension Remark */}
+                        {isSuspended && revisionComment && (
+                          <div className="flex items-start gap-1.5 mt-1.5 text-xs text-red-700">
+                            <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+                            <span><span className="font-semibold">สาเหตุที่ระงับ: </span>{revisionComment}</span>
+                          </div>
+                        )}
+                        {!isSuspended && isRevisionInProgress && (
+                          <div className="flex items-start gap-1.5 mt-1.5 text-xs text-amber-700">
+                            <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+                            <span>
+                              <span className="font-semibold">กำลังแก้ไข: </span>
+                              {revisionComment || 'อยู่ในระหว่างการแก้ไข Rev. ใหม่'}
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
                         {doc.files && doc.files.length > 0 ? (

@@ -121,16 +121,21 @@ async function syncRfaToBimTracking(docId: string, newData: any) {
   }
 
   // Combine standard fields with dynamic timestamp fields
-  const updatePayload = {
+  const updatePayload: any = {
     link: rfaDocumentUrl,
     documentNumber: newData.documentNumber,
     rev: revString,
     currentStep: newData.status,
-    supersededStatus: newData.supersededStatus || 'ACTIVE',
-    supersededComment: newData.supersededComment || '',
     lastUpdate: latestTimestamp, // Use the latest found confirmation time
     ...timestampUpdates // Spread the dynamic date fields
   };
+
+  if (newData.supersededStatus !== undefined) {
+    updatePayload.supersededStatus = newData.supersededStatus;
+  }
+  if (newData.supersededComment !== undefined) {
+    updatePayload.supersededComment = newData.supersededComment;
+  }
 
   await taskRef.update(updatePayload);
 

@@ -124,7 +124,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
           >
             <option value="ALL">ทุกหมวดงาน</option>
             {categories.map(cat => (
-              <option key={cat.id} value={cat.id}>
+              <option key={cat.categoryCode} value={cat.categoryCode}>
                 {cat.categoryCode}
               </option>
             ))}

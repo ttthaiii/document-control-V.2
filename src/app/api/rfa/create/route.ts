@@ -192,7 +192,7 @@ export async function POST(req: Request) {
     docId = rfaRef.id;
 
     await rfaRef.set({
-      siteId, rfaType, categoryId: finalCategoryId, title, description: description || "",
+      siteId, rfaType, categoryId: finalCategoryId, categoryName: categoryId, title, description: description || "",
       taskData: taskData || null, documentNumber: documentNumber || "", status: initialStatus,
       currentStep: initialStatus, createdBy: uid,
       createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
@@ -206,6 +206,7 @@ export async function POST(req: Request) {
       runningNumber: runningNumber,
       revisionNumber: parseInt(revisionNumber, 10) || 0,
       isLatest: true,
+      isLatestApproved: false,
     });
 
     return NextResponse.json({ success: true, id: rfaRef.id, runningNumber: runningNumber }, { status: 201 });

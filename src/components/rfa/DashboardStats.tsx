@@ -39,28 +39,39 @@ const CustomTooltip = ({ active, payload }: any) => {
   return null;
 };
 
+// Golden Angle hue distribution + earthy/muted saturation (60-65%, lightness 38-46%)
+// เข้ากับ theme ของระบบ: stone blue, moss green, terracotta, slate
 const CATEGORY_COLORS = [
-  '#5D4037', // Dark Coffee (น้ำตาลเข้มกาแฟ)
-  '#7CB342', // Grass Green (เขียวหญ้า)
-  '#EF6C00', // Persimmon (ส้มลูกพลับ)
-  '#455A64', // Blue Grey (เทาอมฟ้าเข้ม)
-  '#C0CA33', // Muted Lime (เขียวมะนาวตุ่น)
-  '#8D6E63', // Taupe (น้ำตาลเทา)
-  '#00897B', // Teal (เขียวหัวเป็ด)
-  '#FBC02D', // Mustard (เหลืองมัสตาร์ด)
-  '#6D4C41', // Cocoa (น้ำตาลโกโก้)
-  '#2E7D32', // Forest Green (เขียวป่า)
-  '#D84315', // Burnt Sienna (ส้มอิฐไหม้)
-  '#546E7A', // Slate (เทาหินชนวน)
-  '#9E9D24', // Olive (เขียวมะกอก)
-  '#3E2723', // Espresso (น้ำตาลเข้มเกือบดำ)
-  '#FFB74D', // Apricot (ส้มอ่อน)
-  '#00695C', // Deep Teal (เขียวทะเลลึก)
-  '#AFB42B', // Olive Yellow (เหลืองอมเขียว)
-  '#795548', // Earth Brown (น้ำตาลดิน)
-  '#90A4AE', // Light Slate (เทาหินอ่อน)
-  '#A1887F', // Sand (สีทรายเข้ม)
+  '#B83232', // hue   0° – Muted Crimson    (แดงหม่น)
+  '#238C42', // hue 138° – Forest Green     (เขียวป่า)
+  '#7640A8', // hue 275° – Stone Violet     (ม่วงหิน)
+  '#A88C1A', // hue  52° – Warm Mustard     (เหลืองมัสตาร์ดอุ่น)
+  '#1779A0', // hue 190° – Steel Cerulean   (ฟ้าเหล็กกล้า)
+  '#A02868', // hue 328° – Dusty Rose       (กุหลาบฝุ่น)
+  '#3E8826', // hue 105° – Olive Green      (เขียวมะกอก)
+  '#3D44B0', // hue 242° – Denim Indigo     (ครามยีนส์)
+  '#B05618', // hue  20° – Sienna Brown     (น้ำตาลดินเผา)
+  '#1E8A60', // hue 157° – Jade             (หยก)
+  '#8C2EA0', // hue 295° – Deep Violet      (ม่วงลึก)
+  '#748C0A', // hue  72° – Olive Bark       (เปลือกต้นมะกอก)
+  '#1C6AAA', // hue 210° – River Blue       (ฟ้าแม่น้ำ)
+  '#A02030', // hue 347° – Claret           (แดงไวน์)
+  '#288A2D', // hue 125° – Meadow Green     (เขียวทุ่งหญ้า)
+  '#6248B0', // hue 263° – Slate Purple     (ม่วงหินชนวน)
+  '#A87612', // hue  40° – Burnished Gold   (ทองขัดเงา)
+  '#178580', // hue 178° – Patina Teal      (เขียวสนิม)
+  '#9C2480', // hue 315° – Mulberry         (หม่อน)
+  '#5A8A14', // hue  92° – Fern             (เฟิร์น)
 ];
+
+/** Hash ชื่อ category → index คงที่ ทำให้สีไม่เปลี่ยนเมื่อ filter */
+function getCategoryColor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  }
+  return CATEGORY_COLORS[hash % CATEGORY_COLORS.length];
+}
 
 // ✅ [แก้ไข 1] กำหนดสีแยกรายสถานะให้ชัดเจน (ไม่ Group รวมกันแล้ว)
 const STATUS_CHART_COLORS: { [key: string]: string } = {
@@ -93,12 +104,16 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
 
   const statsByStatus = useMemo(() => {
     const statusCounts: { [key: string]: number } = {};
-    const categoryCounts: { [key: string]: number } = {};
+    const categoryCounts: { [key: string]: { value: number, name: string } } = {};
     for (const doc of allDocuments) {
       statusCounts[doc.status] = (statusCounts[doc.status] || 0) + 1;
       const categoryId = doc.category?.id || 'N/A';
-      if (categoryId !== 'N/A') {
-        categoryCounts[categoryId] = (categoryCounts[categoryId] || 0) + 1;
+      const categoryName = doc.category?.categoryCode || categoryId;
+      if (categoryName !== 'N/A') {
+        if (!categoryCounts[categoryName]) {
+            categoryCounts[categoryName] = { value: 0, name: categoryName };
+        }
+        categoryCounts[categoryName].value += 1;
       }
     }
     return { statusCounts, categoryCounts };
@@ -122,15 +137,14 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
 
   const categoryData = useMemo(() => {
     if (!statsByStatus) return [];
-    const entries = Object.entries(statsByStatus.categoryCounts).sort((a, b) => b[1] - a[1]);
+    const entries = Object.entries(statsByStatus.categoryCounts).sort((a, b) => b[1].value - a[1].value);
 
-    return entries.map(([categoryId, value], index) => {
-      const categoryDetails = categories.find(c => c.id === categoryId);
+    return entries.map(([categoryId, { value, name }]) => {
       return {
         id: categoryId,
-        name: categoryDetails?.categoryCode || categoryId,
-        value: value as number,
-        color: CATEGORY_COLORS[index % CATEGORY_COLORS.length]
+        name: name,
+        value: value,
+        color: getCategoryColor(name)
       };
     })
       .filter(item => item.value > 0);
@@ -155,9 +169,9 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
   };
 
   const handleCategoryClick = (data: any) => {
-    const categoryId = data.payload?.id || data.id;
-    if (!categoryId) return;
-    onChartFilter('categoryId', activeFilters.categoryId === categoryId ? 'ALL' : categoryId);
+    const categoryName = data.payload?.name || data.name;
+    if (!categoryName) return;
+    onChartFilter('categoryId', activeFilters.categoryId === categoryName ? 'ALL' : categoryName);
   };
 
   const innerRadius = isSmallScreen ? 80 : 100;
@@ -247,7 +261,7 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
                       key={`cell-${entry.name}`}
                       fill={entry.color}
                       stroke="none"
-                      style={{ opacity: activeFilters.categoryId === 'ALL' || activeFilters.categoryId === entry.id ? 1 : 0.3 }}
+                      style={{ opacity: activeFilters.categoryId === 'ALL' || activeFilters.categoryId === entry.name ? 1 : 0.3 }}
                     />
                   ))}
                 </Pie>
