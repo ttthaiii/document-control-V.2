@@ -157,6 +157,19 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
+  const [isClosing, setIsClosing] = useState(false); // [NEW] สำหรับ Animate ตอนปิด Modal
+
+  // Modal Close Animation helper
+  const triggerClose = () => {
+    setIsClosing(true);
+    setTimeout(() => onClose(), 200); // รอ animation fade out จบ 200ms
+  };
+
+  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget && !isSubmitting && !isSupersedeSubmitting) {
+      triggerClose();
+    }
+  };
 
   // UI States
   const [showHistory, setShowHistory] = useState(false);
@@ -725,7 +738,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       if (result.success) {
         showNotification('success', 'ดำเนินการสำเร็จ!', result.message);
 
-        // Fire-and-forget: extract CAD files in background (ไม่รอ ไม่บล็อก UI)
+        // Fire-and-forget: extract CAD files in background
         const isFinalApprovalAction = ['APPROVE', 'APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED'].includes(action);
         if (isFinalApprovalAction && result.newStatus && ['APPROVED', 'APPROVED_WITH_COMMENTS', 'APPROVED_REVISION_REQUIRED'].includes(result.newStatus)) {
           fetch('/api/rfa/extract-cad', {
@@ -735,7 +748,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
           }).catch(() => { /* silent fail — non-critical */ });
         }
 
-        onClose();
+        triggerClose();
       } else {
         throw new Error(result.error || 'เกิดข้อผิดพลาด');
       }
@@ -774,7 +787,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       const result = await response.json();
       if (result.success) {
         showNotification('success', 'สร้าง Revision สำเร็จ!', `เอกสารฉบับใหม่ ${newDocumentNumber} ถูกสร้างแล้ว`);
-        onClose();
+        triggerClose();
       } else {
         throw new Error(result.error || 'เกิดข้อผิดพลาดในการสร้าง Revision');
       }
@@ -832,16 +845,11 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
         if (isBimDoc) {
           // BIM: ระบบส่ง Signal ไป BIM Tracking แล้ว ให้แสดง message รอ BIM มาส่งใหม่
           showNotification('success', 'ส่งคำขอแก้ไขสำเร็จ', 'รอทาง BIM สร้าง Task ใหม่ใน BIM Tracking และส่งเอกสาร Rev. ใหม่');
-          onClose();
         } else {
-          // Non-BIM: เปิดฟอร์มสร้าง Rev. ใหม่ทันที (Revision Flow)
-          showNotification('success', 'ส่งคำขอแก้ไขสำเร็จ', 'กรุณาแนบไฟล์เอกสาร Rev. ใหม่ด้านล่าง');
-          // Trigger revision creation form by refreshing document data
-          const token2 = await firebaseUser?.getIdToken();
-          const refreshed = await fetch(`/api/rfa/${document.id}`, { headers: { 'Authorization': `Bearer ${token2}` } });
-          const refreshedResult = await refreshed.json();
-          if (refreshedResult.success) setDocument(refreshedResult.document);
+          // Non-BIM: ให้ผู้ใช้กลับไปแนบ Rev ใหม่เองเมื่อพร้อม
+          showNotification('success', 'ส่งคำขอแก้ไขสำเร็จ', 'ตั้งสถานะเป็นรอแก้ไขแล้ว สามารถนำส่ง Rev. ใหม่ได้จากหน้ารายการ');
         }
+        triggerClose();
       } else {
         throw new Error(result.error || 'เกิดข้อผิดพลาด');
       }
@@ -863,11 +871,32 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
 
   return (
     <>
-      <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${overlayClasses}`}>
-        <div className={`rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col transition-colors ${
-          document.supersededStatus === 'SUSPENDED' ? 'bg-red-50' 
-          : 'bg-white'
-        }`}>
+      <div 
+        className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-opacity duration-200 ${
+          isClosing ? 'opacity-0' : 'opacity-100'
+        } ${overlayClasses}`}
+        onClick={handleBackdropClick}
+      >
+        <div 
+          className={`rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col transition-all duration-200 relative transform ${
+            isClosing ? 'scale-95 translate-y-2 opacity-0' : 'scale-100 translate-y-0 opacity-100'
+          } ${
+            document.supersededStatus === 'SUSPENDED' ? 'bg-red-50' : 'bg-white'
+          }`}
+          onClick={(e) => e.stopPropagation()} // ป้องกันการคลิกทะลุไปถึง backdrop
+        >
+          
+          {/* 🔒 Loading Overlay ตอนกด Submit เพื่อบังไม่ให้เห็น UI กระพริบตอน Firestore อัปเดต */}
+          {(isSubmitting || isSupersedeSubmitting) && (
+            <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] z-[100] flex items-center justify-center rounded-lg">
+              <div className="flex flex-col items-center bg-white p-6 rounded-xl shadow-lg border border-gray-100">
+                <Spinner className="w-10 h-10 text-blue-600 mb-4" />
+                <p className="text-gray-800 font-semibold text-lg">กำลังดำเนินการ...</p>
+                <p className="text-gray-500 text-sm mt-1">กรุณารอสักครู่ ระบบกำลังบันทึกข้อมูลและไฟล์</p>
+              </div>
+            </div>
+          )}
+
           {/* Header */}
           <div className="flex justify-between items-start p-4 border-b border-gray-200/50">
             <div>
@@ -897,7 +926,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
               >
                 <History size={16} className="mr-1" /> ดูประวัติการดำเนินงาน
               </button>
-              <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+              <button onClick={triggerClose} className="text-gray-400 hover:text-gray-600">
                 <X size={24} />
               </button>
             </div>

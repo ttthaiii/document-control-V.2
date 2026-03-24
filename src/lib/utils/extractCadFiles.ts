@@ -38,7 +38,8 @@ async function extractZip(buffer: Buffer, destBase: string): Promise<RFAFile[]> 
   for (const entry of zip.getEntries()) {
     if (!entry.isDirectory && isDwg(entry.entryName)) {
       const data = entry.getData();
-      const fileName = entry.name; // ชื่อไฟล์ อย่างเดียว (ไม่มี path)
+      const rawName = entry.name || entry.entryName;
+      const fileName = rawName.split(/[/\\]/).pop() || rawName; // ตัด path prefix ออก (รองรับทั้ง / และ \)
       const destPath = `${destBase}/${Date.now()}_${fileName}`;
       results.push(await uploadBuffer(data, destPath, fileName));
     }
@@ -65,17 +66,26 @@ async function extractRar(buffer: Buffer, destBase: string): Promise<RFAFile[]> 
     ) as ArrayBuffer;
     const extractor = await createExtractorFromData({ data, wasmBinary });
     const list = extractor.getFileList();
-    const headers = [...list.fileHeaders].filter(
+    const allHeaders = [...list.fileHeaders];
+    console.log(`[extractRar] Archive contains ${allHeaders.length} total entries.`);
+    // console.log(`[extractRar] Raw entries:`, allHeaders.map(h => h.name).join(', '));
+    
+    const headers = allHeaders.filter(
       h => !h.flags.directory && isDwg(h.name)
     );
-    if (headers.length === 0) return results;
+    console.log(`[extractRar] Found ${headers.length} .dwg entries inside RAR:`, headers.map(h => h.name));
+
+    if (headers.length === 0) {
+      console.log(`[extractRar] Skipping extraction since no .dwg files were matched.`);
+      return results;
+    }
 
     const extracted = extractor.extract({ files: headers.map(h => h.name) });
     for (const file of [...extracted.files]) {
       if (!file.extraction) continue;
       const fileBuffer = Buffer.from(file.extraction);
       const rawName = file.fileHeader.name;
-      const fileName = rawName.split('/').pop() || rawName; // ตัด path prefix ออก
+      const fileName = rawName.split(/[/\\]/).pop() || rawName; // ตัด path prefix ออก (รองรับทั้ง / และ \)
       const destPath = `${destBase}/${Date.now()}_${fileName}`;
       results.push(await uploadBuffer(fileBuffer, destPath, fileName));
     }
@@ -112,8 +122,11 @@ export async function extractCadFiles(
         const dwgs = await extractZip(buffer as Buffer, destBase);
         cadFiles.push(...dwgs);
       } else if (name.endsWith('.rar')) {
+        console.log(`[extractCadFiles] Downloading RAR: ${name}`);
         const [buffer] = await adminBucket.file(filePath).download();
+        console.log(`[extractCadFiles] RAR downloaded. Size: ${buffer.length} bytes. Initiating extractRar...`);
         const dwgs = await extractRar(buffer as Buffer, destBase);
+        console.log(`[extractCadFiles] extractRar returned ${dwgs.length} files.`);
         cadFiles.push(...dwgs);
       }
     } catch (err) {

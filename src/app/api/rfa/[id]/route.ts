@@ -245,7 +245,17 @@ export async function PUT(
         switch (action) {
             case 'SEND_TO_CM': newStatus = STATUSES.PENDING_CM_APPROVAL; break;
             case 'REQUEST_REVISION': newStatus = STATUSES.REVISION_REQUIRED; break;
-            case 'SUBMIT_REVISION': newStatus = STATUSES.PENDING_REVIEW; break;
+            case 'SUBMIT_REVISION':
+                // ตรวจสอบว่าใครเป็นคนส่ง ถ้าเป็น Site (ไม่ใช่ BIM) ให้ข้าม Review ไปรอ CM อนุมัติเลย
+                const isMEorSN = userRole === 'ME' || userRole === 'SN';
+                if (docData.rfaType === 'RFA-SHOP' && isMEorSN) {
+                    newStatus = STATUSES.PENDING_CM_APPROVAL;
+                } else if (isReviewer && ['RFA-MAT', 'RFA-GEN', 'RFA-SHOP'].includes(docData.rfaType)) {
+                    newStatus = STATUSES.PENDING_CM_APPROVAL;
+                } else {
+                    newStatus = STATUSES.PENDING_REVIEW;
+                }
+                break;
             case 'REJECT': newStatus = STATUSES.REJECTED; break;
             case 'APPROVE_REVISION_REQUIRED': newStatus = STATUSES.APPROVED_REVISION_REQUIRED; break;
 
@@ -311,6 +321,12 @@ export async function PUT(
         // Set isLatestApproved if this action completes the workflow
         if (isApprovalAction && isFinalApproval) {
             updates.isLatestApproved = true;
+        }
+
+        // 🟢 ล้างไฟล์ CAD เก่าทิ้งเมื่อมีการขอแก้ไขหรือส่งแก้ไขใหม่
+        // เพื่อให้ตอนอนุมัติ Rev. ใหม่ ระบบจะดึงไฟล์จาก Rev. ใหม่ไป extract
+        if (['SUBMIT_REVISION', 'REQUEST_REVISION', 'REJECT'].includes(action)) {
+            updates.cadFiles = FieldValue.delete();
         }
 
         await rfaDocRef.update(updates);

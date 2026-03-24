@@ -33,10 +33,10 @@ export async function POST(req: Request) {
         const userData = userDoc.data();
         if (!userData) return NextResponse.json({ error: 'User not found' }, { status: 403 });
 
-        const isManualFlow = userData.role === 'ME' || userData.role === 'SN';
+        const isBimUser = userData.role === 'BIM';
 
-        if (!originalDocId || !uploadedFiles || uploadedFiles.length === 0 || (!isManualFlow && !verifiedTaskId)) {
-            return NextResponse.json({ error: "Missing required fields (originalDocId, uploadedFiles, and verifiedTaskId for non-manual flow)" }, { status: 400 });
+        if (!originalDocId || !uploadedFiles || uploadedFiles.length === 0) {
+            return NextResponse.json({ error: "Missing required fields (originalDocId, uploadedFiles)" }, { status: 400 });
         }
 
         const originalRfaRef = adminDb.collection("rfaDocuments").doc(originalDocId);
@@ -92,11 +92,27 @@ export async function POST(req: Request) {
 
             const newRfaRef = adminDb.collection("rfaDocuments").doc();
             newDocId = newRfaRef.id;
-            const newStatus = STATUSES.PENDING_REVIEW;
+            let newStatus = STATUSES.PENDING_REVIEW;
+            let initialAction = "CREATE_REVISION";
+
+            // ใช้ Role จาก userData เพื่อกำหนดว่าจะข้ามการตรวจสอบของ Site หรือไม่
+            const isReviewer = ['ADMIN', 'CM', 'OE', 'PE', 'SA', 'SE', 'FM'].includes(userData.role);
+            const isEngineer = userData.role === 'ME' || userData.role === 'SN';
+
+            if (originalData.rfaType === 'RFA-SHOP' && isEngineer) {
+                newStatus = STATUSES.PENDING_CM_APPROVAL;
+                initialAction = "CREATE_REVISION_AND_SUBMIT_TO_CM";
+            } else if (isReviewer && ['RFA-MAT', 'RFA-GEN', 'RFA-SHOP'].includes(originalData.rfaType)) {
+                newStatus = STATUSES.PENDING_CM_APPROVAL;
+                initialAction = "CREATE_REVISION_AND_SUBMIT";
+            }
+
+            // ตัด cadFiles ของเอกสารเก่าออก เพื่อให้ Rev. ใหม่สามารถแตกไฟล์ตั้งต้นใหม่ได้
+            const { cadFiles: _oldCadFiles, ...copiedOriginalData } = originalData;
 
             // สร้างเอกสาร Rev. ใหม่
             transaction.set(newRfaRef, {
-                ...originalData,
+                ...copiedOriginalData,
                 taskData: newTaskData,
                 revisionNumber: newRevisionNumber,
                 documentNumber: newDocumentNumber,
@@ -126,7 +142,7 @@ export async function POST(req: Request) {
                         revisionNumber: w.revisionNumber ?? (originalData.revisionNumber || 0)
                     }))),
                     {
-                        action: "CREATE_REVISION",
+                        action: initialAction,
                         status: newStatus,
                         userId: uid,
                         userName: userData.email,

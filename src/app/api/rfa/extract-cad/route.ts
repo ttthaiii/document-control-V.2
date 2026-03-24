@@ -38,12 +38,25 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ success: true, message: 'CAD files already extracted', count: docData.cadFiles.length });
         }
 
-        const originalFiles: RFAFile[] = docData.workflow?.[0]?.files || [];
+        const workflow = docData.workflow || [];
+        // หา step ล่าสุดที่เป็นการส่งเอกสาร (เพื่อดึงไฟล์แนบล่าสุดในกรณี Rev.1, Rev.2...)
+        const submissionStatuses = ['PENDING_REVIEW', 'PENDING_CM_APPROVAL', 'DRAFT'];
+        const latestSubmissionStep = [...workflow].reverse().find(
+            w => w.files && w.files.length > 0 && submissionStatuses.includes(w.status)
+        );
+        
+        const originalFiles: RFAFile[] = latestSubmissionStep?.files || workflow[0]?.files || [];
+        
+        console.log(`[extract-cad] Processing doc: ${docId}`);
+        console.log(`[extract-cad] Found ${originalFiles.length} original files to scan. Names:`, originalFiles.map(f => f.fileName));
+
         const cadFiles = await extractCadFiles(originalFiles, docData.siteId, docId);
+
+        console.log(`[extract-cad] Resulting CAD files count: ${cadFiles.length}`);
 
         if (cadFiles.length > 0) {
             await rfaDocRef.update({ cadFiles });
-            console.log(`[extract-cad] Extracted ${cadFiles.length} CAD file(s) for doc ${docId}`);
+            console.log(`[extract-cad] Saved ${cadFiles.length} CAD file(s) for doc ${docId} to Firestore.`);
         }
 
         return NextResponse.json({ success: true, count: cadFiles.length });
