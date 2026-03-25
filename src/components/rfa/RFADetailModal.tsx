@@ -299,7 +299,11 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
 
   const latestCommentItem = useMemo(() => {
     if (!document?.workflow || document.workflow.length === 0) return null;
-    return [...document.workflow].reverse().find(step => step.comments && step.comments.trim() !== '');
+    // Only look at the LAST workflow step — if it has no comment, return null.
+    // We intentionally do NOT scan older steps to avoid surfacing stale comments.
+    const lastStep = document.workflow[document.workflow.length - 1];
+    if (lastStep?.comments && lastStep.comments.trim() !== '') return lastStep;
+    return null;
   }, [document?.workflow]);
 
   // --- Logic สิทธิ์การแก้ไข PDF & Revision ---

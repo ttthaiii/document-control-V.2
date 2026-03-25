@@ -40,7 +40,7 @@ export default function ApprovedDocumentLibrary() {
   const isMobile = useIsMobile();
 
   const [sites, setSites] = useState<Site[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSite, setSelectedSite] = useState('ALL');
   const [selectedCategory, setSelectedCategory] = useState('ALL');
@@ -67,30 +67,26 @@ export default function ApprovedDocumentLibrary() {
   };
 
   useEffect(() => {
-    const fetchFilterData = async () => {
+    const fetchSites = async () => {
       if (!firebaseUser) return;
       try {
         const token = await firebaseUser.getIdToken();
-        const [sitesResponse, categoriesResponse] = await Promise.all([
-          fetch('/api/sites', { headers: { 'Authorization': `Bearer ${token}` } }),
-          fetch('/api/rfa/categories?rfaType=ALL', { headers: { 'Authorization': `Bearer ${token}` } })
-        ]);
-
-        if (!sitesResponse.ok || !categoriesResponse.ok) throw new Error('Failed to fetch filter data');
-
+        const sitesResponse = await fetch('/api/sites', { headers: { 'Authorization': `Bearer ${token}` } });
+        if (!sitesResponse.ok) throw new Error('Failed to fetch sites');
         const sitesData = await sitesResponse.json();
-        const categoriesData = await categoriesResponse.json();
-
         setSites(sitesData.sites || []);
-        const uniqueCategories = Array.from(new Map(categoriesData.categories.map((cat: Category) => [cat.categoryCode, cat])).values());
-        setCategories(uniqueCategories as Category[]);
       } catch (err) {
         setError('ไม่สามารถโหลดข้อมูล Filter ได้');
         console.error(err);
       }
     };
-    fetchFilterData();
+    fetchSites();
   }, [firebaseUser]);
+
+  // Reset category เมื่อเปลี่ยน RFA Type หรือโครงการ
+  useEffect(() => {
+    setSelectedCategory('ALL');
+  }, [selectedRfaType, selectedSite]);
 
   useEffect(() => {
     const fetchDocuments = async () => {
@@ -98,6 +94,7 @@ export default function ApprovedDocumentLibrary() {
         setIsLoading(false);
         return;
       }
+      setDocuments([]); // เคลียร์ทันที เพื่อให้ availableCategories reset ก่อน fetch ใหม่
       setIsLoading(true);
       setError(null);
 
@@ -117,15 +114,11 @@ export default function ApprovedDocumentLibrary() {
         if (selectedSite !== 'ALL') {
           q = query(q, where('siteId', '==', selectedSite));
         }
-        if (selectedCategory !== 'ALL') {
-          q = query(q, where('categoryId', '==', selectedCategory));
-        }
         if (selectedRfaType !== 'ALL') {
           q = query(q, where('rfaType', '==', selectedRfaType));
         }
 
         const querySnapshot = await getDocs(q);
-
         const docsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as RFADocument));
         setDocuments(docsData);
 
@@ -138,16 +131,56 @@ export default function ApprovedDocumentLibrary() {
     };
 
     fetchDocuments();
-  }, [user, selectedSite, selectedCategory, selectedRfaType]);
+  }, [user, selectedSite, selectedRfaType]);
+
+  // Helper: แปลง raw Firestore fields เป็น { key (categoryId), display code } แบบ consistent
+  // ใช้ categoryId เป็น stable key เสมอ — ป้องกัน duplicate จากชื่อที่ format ต่างกัน
+  const resolveCategory = (doc: any): { key: string; code: string } | null => {
+    const catId: string | undefined = doc.categoryId || doc.category?.id;
+    if (!catId || catId === 'N/A') return null;
+
+    // Display: ถ้า categoryName เป็น human-readable (มี space หรือ lowercase) → ใช้เลย
+    // ถ้าไม่ใช่ (ALL_CAPS หรือ SNAKE_CASE) → แปลงจาก categoryId
+    const rawName: string = (doc.categoryName || doc.taskData?.taskCategory || '').trim();
+    const isHumanReadable = rawName && rawName !== catId && /[a-z ]/.test(rawName);
+    const displayCode = isHumanReadable
+      ? rawName
+      : catId.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+
+    return { key: catId, code: displayCode };
+  };
+
+  const availableCategories = useMemo(() => {
+    const map = new Map<string, Category>(); // keyed by categoryId (stable)
+    documents.forEach(doc => {
+      const resolved = resolveCategory(doc as any);
+      if (resolved && !map.has(resolved.key)) {
+        map.set(resolved.key, {
+          id: resolved.key,
+          siteId: (doc as any).siteId || '',
+          categoryCode: resolved.code,  // display label
+          categoryName: resolved.code,
+        });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.categoryCode.localeCompare(b.categoryCode));
+  }, [documents]);
 
   const filteredDocuments = useMemo(() => {
-    if (!searchTerm) return documents;
+    let result = documents;
+    if (selectedCategory !== 'ALL') {
+      result = result.filter(doc => {
+        const resolved = resolveCategory(doc as any);
+        return resolved?.code === selectedCategory;
+      });
+    }
+    if (!searchTerm) return result;
     const lowercasedFilter = searchTerm.toLowerCase();
-    return documents.filter(doc =>
+    return result.filter(doc =>
       doc.title.toLowerCase().includes(lowercasedFilter) ||
       (doc.documentNumber && doc.documentNumber.toLowerCase().includes(lowercasedFilter))
     );
-  }, [searchTerm, documents]);
+  }, [searchTerm, selectedCategory, documents]);
 
   const handleFileClick = (file: RFAFile) => {
     const isPdf = file.contentType === 'application/pdf' || file.fileName.toLowerCase().endsWith('.pdf');
@@ -200,7 +233,7 @@ export default function ApprovedDocumentLibrary() {
                 onChange={(e) => setSelectedCategory(e.target.value)}
               >
                 <option value="ALL">ทุกหมวดงาน</option>
-                {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.categoryCode}</option>)}
+                {availableCategories.map((cat: Category) => <option key={cat.id} value={cat.categoryCode}>{cat.categoryCode}</option>)}
               </select>
             </div>
             <div className="relative md:col-span-1">

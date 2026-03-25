@@ -42,8 +42,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, data: { tasks: [] } });
     }
 
+    const REV_PATTERN = /[\s_]+REV\.\d+$/i;
+
     const tasks = tasksSnapshot.docs
       .filter(doc => !doc.data().link)
+      .filter(doc => !REV_PATTERN.test(doc.data().taskName || ''))
       .map(doc => {
         const data = doc.data();
         return {

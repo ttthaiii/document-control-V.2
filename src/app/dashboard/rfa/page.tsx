@@ -46,7 +46,7 @@ function RFAContent() {
     const [loading, setLoading] = useState(true)
     const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('')
-    const [categories, setCategories] = useState<Category[]>([]);
+
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [sites, setSites] = useState<Site[]>([]);
     const [filters, setFilters] = useState<Filters>({
@@ -75,7 +75,6 @@ function RFAContent() {
     useEffect(() => {
         if (!user?.sites || user.sites.length === 0) {
             setSites([]);
-            setCategories([]);
             return;
         }
 
@@ -88,22 +87,8 @@ function RFAContent() {
             setSites(sitesData);
         });
 
-        const categoriesQuery = query(collectionGroup(db, 'categories'), where('siteId', 'in', user.sites));
-        const unsubscribeCategories = onSnapshot(categoriesQuery, (snapshot) => {
-            const categoriesData: Category[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Category));
-            const uniqueCategoriesMap = new Map<string, Category>();
-            categoriesData.forEach(cat => {
-                const formattedName = (cat.categoryName || cat.categoryCode || (cat.id ? cat.id.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ') : 'N/A')).trim();
-                if (!uniqueCategoriesMap.has(formattedName)) {
-                    uniqueCategoriesMap.set(formattedName, { ...cat, categoryCode: formattedName });
-                }
-            });
-            setCategories(Array.from(uniqueCategoriesMap.values()).sort((a, b) => a.categoryCode.localeCompare(b.categoryCode)));
-        });
-
         return () => {
             unsubscribeSites();
-            unsubscribeCategories();
         };
     }, [user]);
 
@@ -206,6 +191,11 @@ function RFAContent() {
         setFilters(prev => {
             const nextFilters = { ...prev, [key]: value };
 
+            // Reset category when rfaType or siteId changes
+            if (key === 'rfaType' || key === 'siteId') {
+                nextFilters.categoryId = 'ALL';
+            }
+
             // Auto-sync: Responsible Party -> Status
             if (key === 'responsibleParty') {
                 if (value === 'ALL') {
@@ -215,12 +205,8 @@ function RFAContent() {
                 } else if (value === 'REJECTED') {
                     nextFilters.status = STATUSES.REJECTED;
                 } else if (value === 'SITE' && isExternalCM) {
-                    // For external CM, SITE party only has one status
                     nextFilters.status = STATUSES.PENDING_REVIEW;
                 } else {
-                    // For SITE (internal), BIM, APPROVED, there are multiple statuses, so we reset to ALL 
-                    // or let the user choose from the constrained list (handled by availableStatuses)
-                    // If the current status doesn't belong to the new party, reset it
                     const currentPartyOfStatus = getPartyForStatus(prev.status);
                     if (currentPartyOfStatus !== value) {
                         nextFilters.status = 'ALL';
@@ -336,6 +322,30 @@ function RFAContent() {
                 return 'bg-gray-50 text-gray-600 border border-gray-200';
         }
     };
+    // ✅ Derive availableCategories จาก allDocuments กรองตาม rfaType + siteId (เหมือน Chart)
+    const availableCategories = useMemo(() => {
+        let docs = allDocuments;
+        if (filters.rfaType !== 'ALL') {
+            docs = docs.filter(d => d.rfaType === filters.rfaType);
+        }
+        if (filters.siteId !== 'ALL') {
+            docs = docs.filter(d => d.site?.id === filters.siteId);
+        }
+        const map = new Map<string, Category>();
+        docs.forEach(doc => {
+            const code = doc.category?.categoryCode;
+            if (code && code !== 'N/A' && !map.has(code)) {
+                map.set(code, {
+                    id: doc.category?.id || code,
+                    siteId: doc.site?.id || '',
+                    categoryCode: code,
+                    categoryName: code,
+                });
+            }
+        });
+        return Array.from(map.values()).sort((a, b) => a.categoryCode.localeCompare(b.categoryCode));
+    }, [allDocuments, filters.rfaType, filters.siteId]);
+
     // ✅ ย้าย useMemo ขึ้นมาไว้ก่อน if (!user) return null
     const filteredDocuments = useMemo(() => {
         const sitesMap = new Map(sites.map(s => [s.id, s.name]));
@@ -435,14 +445,14 @@ function RFAContent() {
                     allDocuments={filteredDocuments}
                     onChartFilter={handleChartFilter}
                     activeFilters={filters}
-                    categories={categories}
+                    categories={availableCategories}
                     availableStatuses={availableStatuses}
                 />
 
                 <div className='mb-6'>
                     <FilterBar
                         filters={filters} handleFilterChange={handleFilterChange} searchTerm={searchTerm} setSearchTerm={setSearchTerm} resetFilters={resetFilters}
-                        sites={sites} categories={categories} availableStatuses={availableStatuses} availableResponsibleParties={availableResponsibleParties}
+                        sites={sites} categories={availableCategories} availableStatuses={availableStatuses} availableResponsibleParties={availableResponsibleParties}
                     />
                 </div>
 

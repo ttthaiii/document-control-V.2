@@ -39,16 +39,39 @@ export async function POST(request: NextRequest) {
         }
 
         const workflow = docData.workflow || [];
-        // หา step ล่าสุดที่เป็นการส่งเอกสาร (เพื่อดึงไฟล์แนบล่าสุดในกรณี Rev.1, Rev.2...)
+
+        // หา step ล่าสุดที่:
+        //   1. เป็น submission status (PENDING_REVIEW / PENDING_CM_APPROVAL / DRAFT)
+        //   2. มีไฟล์ที่เป็น CAD (.dwg / .zip / .rar) อยู่ด้วย
+        //
+        // เหตุผลที่ต้องเช็ค CAD extension ก่อน:
+        //   - BIM flow: PENDING_REVIEW [dwg, pdf] → PENDING_CM_APPROVAL [pdf เท่านั้น → Site Admin forward]
+        //     → ถ้าหา "step ล่าสุดที่มีไฟล์" จะเจอ PENDING_CM_APPROVAL ซึ่งไม่มี DWG
+        //     → ต้องข้ามไปหา PENDING_REVIEW ที่มี DWG
+        //   - Resubmission flow: PENDING_REVIEW [old_dwg] → REVISION_REQUIRED → PENDING_REVIEW [new_dwg]
+        //     → ต้องได้ new_dwg ไม่ใช่ old_dwg
+        const CAD_EXTENSIONS = ['.dwg', '.zip', '.rar'];
         const submissionStatuses = ['PENDING_REVIEW', 'PENDING_CM_APPROVAL', 'DRAFT'];
-        const latestSubmissionStep = [...workflow].reverse().find(
-            w => w.files && w.files.length > 0 && submissionStatuses.includes(w.status)
+
+        const hasCadFile = (files: RFAFile[]) =>
+            files.some(f => CAD_EXTENSIONS.some(ext => f.fileName.toLowerCase().endsWith(ext)));
+
+        // Pass 1: หา step ล่าสุดที่มีไฟล์ CAD โดยตรง
+        const latestCadStep = [...workflow].reverse().find(
+            w => w.files?.length > 0 &&
+                 submissionStatuses.includes(w.status) &&
+                 hasCadFile(w.files)
         );
-        
-        const originalFiles: RFAFile[] = latestSubmissionStep?.files || workflow[0]?.files || [];
-        
+
+        // Pass 2: fallback → หา step ล่าสุดที่มีไฟล์ใดก็ได้ (กรณี site ส่งแค่ PDF ไม่มี DWG)
+        const latestAnyStep = latestCadStep ?? [...workflow].reverse().find(
+            w => w.files?.length > 0 && submissionStatuses.includes(w.status)
+        );
+
+        const originalFiles: RFAFile[] = latestAnyStep?.files ?? workflow[0]?.files ?? [];
+
         console.log(`[extract-cad] Processing doc: ${docId}`);
-        console.log(`[extract-cad] Found ${originalFiles.length} original files to scan. Names:`, originalFiles.map(f => f.fileName));
+        console.log(`[extract-cad] Using step status: "${latestAnyStep?.status ?? 'none'}" | Found ${originalFiles.length} file(s):`, originalFiles.map(f => f.fileName));
 
         const cadFiles = await extractCadFiles(originalFiles, docData.siteId, docId);
 

@@ -99,6 +99,33 @@ export default function CreateRFAForm({
     return true;
   }, [userProp, formData.rfaType]);
 
+  // Bug 1 Fix: Lock body scroll when this modal is open (same pattern as RFADetailModal)
+  useEffect(() => {
+    const scrollY = window.scrollY;
+    const body = window.document.body;
+    const scrollbarWidth = window.innerWidth - window.document.documentElement.clientWidth;
+    const originalStyle = {
+      position: body.style.position,
+      top: body.style.top,
+      width: body.style.width,
+      overflow: body.style.overflow,
+      paddingRight: body.style.paddingRight,
+    };
+    body.style.position = 'fixed';
+    body.style.top = `-${scrollY}px`;
+    body.style.width = '100%';
+    body.style.overflow = 'hidden';
+    body.style.paddingRight = `${scrollbarWidth}px`;
+    return () => {
+      body.style.position = originalStyle.position;
+      body.style.top = originalStyle.top;
+      body.style.width = originalStyle.width;
+      body.style.overflow = originalStyle.overflow;
+      body.style.paddingRight = originalStyle.paddingRight;
+      window.scrollTo(0, scrollY);
+    };
+  }, []);
+
   // v 2. เปลี่ยนจากการเรียก API มาใช้ getDocs เพื่อดึงข้อมูล Site
   useEffect(() => {
     const loadSites = async () => {
@@ -485,7 +512,7 @@ export default function CreateRFAForm({
 
   // ... (ส่วน JSX ที่เหลือทั้งหมดเหมือนเดิม ไม่ต้องแก้ไข) ...
   return (
-    <div className={`${isModal ? 'max-w-4xl w-full mx-auto' : ''} bg-white rounded-lg shadow-xl flex flex-col h-full max-h-[95vh]`}>
+    <div className={`${isModal ? 'max-w-4xl w-full mx-auto' : ''} bg-white rounded-lg shadow-xl flex flex-col h-full max-h-[95vh] relative`}>
       <div className="flex items-center justify-between p-6 border-b bg-gray-50 rounded-t-lg">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">
@@ -497,6 +524,17 @@ export default function CreateRFAForm({
         </div>
         {onClose && <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X /></button>}
       </div>
+
+      {/* Bug 3 Fix: Loading overlay during form submission */}
+      {isSubmitting && (
+        <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] z-[100] flex items-center justify-center rounded-lg">
+          <div className="flex flex-col items-center bg-white p-6 rounded-xl shadow-lg border border-gray-100">
+            <Spinner className="w-10 h-10 text-blue-600 mb-4" />
+            <p className="text-gray-800 font-semibold text-lg">กำลังสร้างเอกสาร...</p>
+            <p className="text-gray-500 text-sm mt-1">กรุณารอสักครู่ ระบบกำลังบันทึกข้อมูล</p>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 p-4 sm:p-6 overflow-y-auto bg-slate-50 space-y-6">
 

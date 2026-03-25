@@ -15,9 +15,15 @@ interface NotificationModalProps {
 }
 
 const ICONS = {
-  success: <CheckCircle className="h-12 w-12 text-green-500" />,
-  error: <XCircle className="h-12 w-12 text-red-500" />,
-  warning: <AlertTriangle className="h-12 w-12 text-yellow-500" />,
+  success: <CheckCircle className="h-14 w-14 text-green-500" />,
+  error: <XCircle className="h-14 w-14 text-red-500" />,
+  warning: <AlertTriangle className="h-14 w-14 text-yellow-500" />,
+};
+
+const ICON_BG = {
+  success: 'bg-green-50',
+  error: 'bg-red-50',
+  warning: 'bg-yellow-50',
 };
 
 const BUTTON_STYLES = {
@@ -31,20 +37,26 @@ const NotificationModal: React.FC<NotificationModalProps> = ({ isOpen, type, tit
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 z-[100] flex items-center justify-center p-4">
-      <div className="relative bg-white rounded-lg shadow-xl w-full max-w-sm mx-auto p-6 text-center">
-        <div className="flex justify-center mb-4">
-          {ICONS[type]}
+      <div className="relative bg-white rounded-xl shadow-2xl border border-gray-200 w-full max-w-md mx-auto overflow-hidden">
+        {/* Colored accent header */}
+        <div className={`${ICON_BG[type]} px-6 pt-8 pb-6 flex flex-col items-center`}>
+          <div className="flex justify-center mb-4">
+            {ICONS[type]}
+          </div>
+          <h3 className="text-xl font-bold text-gray-900 text-center">{title}</h3>
         </div>
-        <h3 className="text-xl font-semibold text-gray-800 mb-2">{title}</h3>
-        {message && (
-          <p className="text-gray-600 text-sm mb-6 whitespace-pre-wrap">{message}</p>
-        )}
-        <button
-          onClick={onClose}
-          className={`w-full px-4 py-2 text-white font-semibold rounded-lg transition-colors ${BUTTON_STYLES[type]}`}
-        >
-          ตกลง
-        </button>
+        {/* Body */}
+        <div className="px-6 py-5">
+          {message && (
+            <p className="text-gray-600 text-sm mb-5 whitespace-pre-wrap text-center">{message}</p>
+          )}
+          <button
+            onClick={onClose}
+            className={`w-full px-4 py-2.5 text-white font-semibold rounded-lg transition-colors text-sm ${BUTTON_STYLES[type]}`}
+          >
+            ตกลง
+          </button>
+        </div>
       </div>
     </div>
   );
