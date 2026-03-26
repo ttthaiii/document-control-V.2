@@ -160,7 +160,7 @@ export async function POST(req: Request) {
                 isLatest: false,
                 supersededById: newRfaRef.id,
                 supersededByRevision: newRevisionNumber,
-                supersededStatus: suspendOldDoc ? 'SUSPENDED' : 'ACTIVE',
+                supersededStatus: originalData.status === STATUSES.APPROVED_REVISION_REQUIRED ? 'ACTIVE' : (suspendOldDoc ? 'SUSPENDED' : 'ACTIVE'),
                 updatedAt: FieldValue.serverTimestamp(),
             });
         });

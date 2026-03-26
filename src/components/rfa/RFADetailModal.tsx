@@ -9,6 +9,7 @@ import { useAuth } from '@/lib/auth/useAuth'
 import { Role, STATUS_LABELS, STATUSES, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUS_COLORS, ROLES } from '@/lib/config/workflow'
 import PDFPreviewModal from './PDFPreviewModal'
 import { useNotification } from '@/lib/context/NotificationContext';
+import { useLogActivity } from '@/lib/hooks/useLogActivity';
 import { storage } from '@/lib/firebase/client';
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { getFileUrl } from '@/lib/utils/storage';
@@ -31,13 +32,22 @@ const WorkflowHistoryModal = ({
   workflow,
   onClose,
   userRole,
-  cmSystemType = 'INTERNAL' // Default as internal
+  cmSystemType = 'INTERNAL', // Default as internal
+  docId,
+  docNumber,
+  siteId,
+  siteName
 }: {
   workflow: RFAWorkflowStep[],
   onClose: () => void,
   userRole?: string,
-  cmSystemType?: 'INTERNAL' | 'EXTERNAL'
+  cmSystemType?: 'INTERNAL' | 'EXTERNAL',
+  docId?: string,
+  docNumber?: string,
+  siteId?: string,
+  siteName?: string
 }) => {
+  const { logActivity } = useLogActivity();
   const filteredWorkflow = useMemo(() => {
     // Hide internal drafting steps ONLY for CM, and ONLY if it's an INTERNAL system type.
     // PMs and all Reviewers (Site Admin, PE, OE) should see everything.
@@ -96,6 +106,19 @@ const WorkflowHistoryModal = ({
                               rel="noopener noreferrer"
                               className="truncate hover:underline"
                               title={file.fileName}
+                              onClick={() => {
+                                const isPdf = file.contentType === 'application/pdf' || file.fileName.toLowerCase().endsWith('.pdf');
+                                logActivity({
+                                  action: isPdf ? 'PREVIEW_FILE' : 'DOWNLOAD_FILE',
+                                  resourceType: 'RFA',
+                                  resourceId: docId,
+                                  resourceName: docNumber,
+                                  siteId: siteId,
+                                  siteName: siteName,
+                                  description: `${isPdf ? 'เปิดดูไฟล์' : 'ดาวน์โหลดไฟล์'} "${file.fileName}" (จากประวัติ)`,
+                                  metadata: { revisionNumber: item.revisionNumber }
+                                });
+                              }}
                             >
                               {file.fileName}
                             </a>
@@ -152,6 +175,7 @@ const renameFileObj = (file: File, newName: string) => {
 export default function RFADetailModal({ document: initialDoc, onClose, onUpdate, showOverlay = true }: RFADetailModalProps) {
   const { user, firebaseUser } = useAuth();
   const { showNotification } = useNotification();
+  const { logActivity } = useLogActivity();
 
   const [document, setDocument] = useState<FullRFADocument | null>(initialDoc as FullRFADocument);
   const [isLoading, setIsLoading] = useState(true);
@@ -185,8 +209,11 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const [showSupersedeModal, setShowSupersedeModal] = useState(false);
   const [supersedeComment, setSupersedeComment] = useState('');
   const [supersedeFiles, setSupersedeFiles] = useState<UploadedFile[]>([]);
-  const [suspendOldDoc, setSuspendOldDoc] = useState(true); // default = ระงับ
+  const [suspendOldDoc, setSuspendOldDoc] = useState(false); // default = ไม่ระงับ
   const [isSupersedeSubmitting, setIsSupersedeSubmitting] = useState(false);
+  
+  // Pending Review States (Site Review)
+  const [suspendPreviousRevision, setSuspendPreviousRevision] = useState(false);
 
   // SupersedeComplete Modal States removed: auto-supersede is now done by the backend on approval
 
@@ -340,8 +367,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     document?.supersededStatus !== 'SUSPENDED' && // ยังไม่ได้ขอแก้ไขอยู่
     (
       isAdmin ||
-      isApprover ||
-      (isBimDocument && isBimUser)
+      isApprover
     );
 
   const canEditPDF = useMemo(() => {
@@ -723,10 +749,12 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
         comments: string;
         newFiles: any[];
         documentNumber?: string;
+        suspendPreviousRevision?: boolean;
       } = {
         action,
         comments: comment,
-        newFiles: newFiles.filter(f => f.status === 'success').map(f => f.uploadedData)
+        newFiles: newFiles.filter(f => f.status === 'success').map(f => f.uploadedData),
+        suspendPreviousRevision
       };
 
       if (needsDocNumber && newDocumentNumberInput.trim()) {
@@ -1013,7 +1041,18 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                       <li key={index} className={`border rounded-md ${isSuspended ? 'bg-red-50 border-red-200 hover:bg-red-100' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'}`}>
                         {isPdf ? (
                           <button
-                            onClick={() => setPreviewFile(file)}
+                            onClick={() => {
+                              logActivity({
+                                action: 'PREVIEW_FILE',
+                                resourceType: 'RFA',
+                                resourceId: document.id,
+                                resourceName: document.documentNumber || document.runningNumber,
+                                siteId: document.site.id,
+                                siteName: document.site.name,
+                                description: `เปิดดูไฟล์เอกสาร "${file.fileName}"`
+                              });
+                              setPreviewFile(file);
+                            }}
                             className="w-full text-left p-2 rounded-md group transition-colors duration-200"
                             title={isSuspended ? `[ระงับการใช้งาน] ดูตัวอย่างไฟล์ ${file.fileName}` : `ดูตัวอย่างไฟล์ ${file.fileName}`}
                           >
@@ -1025,6 +1064,17 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                             download={file.fileName}
                             target="_blank"
                             rel="noopener noreferrer"
+                            onClick={() => {
+                              logActivity({
+                                action: 'DOWNLOAD_FILE',
+                                resourceType: 'RFA',
+                                resourceId: document.id,
+                                resourceName: document.documentNumber || document.runningNumber,
+                                siteId: document.site.id,
+                                siteName: document.site.name,
+                                description: `ดาวน์โหลดไฟล์เอกสาร "${file.fileName}"`
+                              });
+                            }}
                             className="w-full text-left p-2 rounded-md group transition-colors duration-200 flex"
                             title={isSuspended ? `[ระงับการใช้งาน] ดาวน์โหลด ${file.fileName}` : `ดาวน์โหลด ${file.fileName}`}
                           >
@@ -1082,6 +1132,51 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                   {renderFileList(newFiles, 'action')}
 
                 </div>
+
+                {document.previousRevisionId && (
+                  <div className="space-y-2 mt-4 mb-4">
+                    <div className="flex items-start gap-2 p-2.5 bg-blue-50 border border-blue-200 rounded-md">
+                      <span className="text-blue-500 text-sm flex-shrink-0">ℹ️</span>
+                      <p className="text-xs text-blue-700">
+                        เอกสาร <span className="font-semibold">{document?.documentNumber}</span> เป็นฉบับแก้ไขจากฉบับเดิมที่เคยอนุมัติแล้ว และกำลังเผยแพร่ให้ใช้งานอยู่ในขณะนี้
+                      </p>
+                    </div>
+                    <p className="text-sm font-semibold text-gray-700">
+                      กรุณาเลือกสถานะของเอกสาร (ฉบับเดิม) ในระหว่างดำเนินการตรวจสอบ
+                    </p>
+
+                    {/* Option 1: ยังใช้งานได้ */}
+                    <label className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${!suspendPreviousRevision ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
+                      <input
+                        type="radio"
+                        name="suspend-prev-rev-option"
+                        checked={!suspendPreviousRevision}
+                        onChange={() => setSuspendPreviousRevision(false)}
+                        className="mt-0.5 h-4 w-4 text-green-600 cursor-pointer flex-shrink-0"
+                      />
+                      <div>
+                        <p className="text-sm font-semibold text-gray-800">✅ ยังให้ใช้งานฉบับเดิมได้ตามปกติ</p>
+                        <p className="text-xs text-gray-500 mt-0.5">หน้างานยังดาวน์โหลดและใช้อ้างอิงฉบับเดิมได้ระหว่างรอฉบับแก้ไขนี้อนุมัติ</p>
+                      </div>
+                    </label>
+
+                    {/* Option 2: ระงับทันที */}
+                    <label className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${suspendPreviousRevision ? 'border-red-400 bg-red-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
+                      <input
+                        type="radio"
+                        name="suspend-prev-rev-option"
+                        checked={suspendPreviousRevision}
+                        onChange={() => setSuspendPreviousRevision(true)}
+                        className="mt-0.5 h-4 w-4 text-red-600 cursor-pointer flex-shrink-0"
+                      />
+                      <div>
+                        <p className="text-sm font-semibold text-gray-800">⛔ ระงับการใช้งานฉบับเดิมทันที</p>
+                        <p className="text-xs text-gray-500 mt-0.5">หน้างานจะเปิดหรือดาวน์โหลดฉบับเดิมไม่ได้อีกต่อไป — ใช้เมื่อฉบับเดิมมีข้อผิดพลาดร้ายแรงและห้ามนำไปใช้งานต่อ</p>
+                      </div>
+                    </label>
+                  </div>
+                )}
+
                 <div>
                   <label className="text-sm font-medium text-gray-700 mb-1 block">แสดงความคิดเห็น (Optional)</label>
                   <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ (Optional)..." className="w-full p-2 border rounded-md text-sm bg-white text-gray-900" rows={2} />
@@ -1238,25 +1333,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                       />
                     </div>
 
-                    {document.status === STATUSES.APPROVED_REVISION_REQUIRED && (
-                      <div className="flex items-start space-x-3 p-3 bg-slate-50 border border-slate-200 rounded-md">
-                        <input
-                          type="checkbox"
-                          id="suspend-rev-toggle"
-                          checked={suspendOldDocForRevision}
-                          onChange={e => setSuspendOldDocForRevision(e.target.checked)}
-                          className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                        />
-                        <label htmlFor="suspend-rev-toggle" className="text-sm cursor-pointer">
-                          <span className="font-semibold text-gray-800">ระงับเอกสารฉบับเดิมสำหรับหน้างานระหว่างรอดำเนินการ</span>
-                          <p className="text-xs text-gray-500 mt-0.5">
-                            {suspendOldDocForRevision
-                              ? '⛔ ระงับ: หน้างานจะไม่สามารถเปิดดูไฟล์ของ Rev. เดิมได้ (ใช้ตัวเลือกนี้หากแบบเดิมมีความผิดพลาดรุนแรง)'
-                              : '🟢 ไม่ระงับ: หน้างานยังใช้ไฟล์เดิมอ้างอิงชั่วคราวได้ แต่จะมีป้ายแจ้งเตือนว่ามี Rev. ใหม่จ่อรออยู่'}
-                          </p>
-                        </label>
-                      </div>
-                    )}
 
                     <div className="flex justify-end pt-4">
                       <button
@@ -1351,6 +1427,10 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
           onClose={() => setShowHistory(false)}
           userRole={user?.role}
           cmSystemType={document.site?.cmSystemType}
+          docId={document.id}
+          docNumber={document.documentNumber || document.runningNumber}
+          siteId={document.site.id}
+          siteName={document.site.name}
         />
       )}
 
@@ -1431,24 +1511,50 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 )}
               </div>
 
-              {/* Suspend Toggle */}
-              <div className="flex items-start space-x-3 p-3 bg-slate-50 rounded-md">
-                <input
-                  type="checkbox"
-                  id="suspend-toggle"
-                  checked={suspendOldDoc}
-                  onChange={e => setSuspendOldDoc(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-orange-600 cursor-pointer"
-                />
-                <label htmlFor="suspend-toggle" className="text-sm cursor-pointer">
-                  <span className="font-semibold text-gray-800">ระงับเอกสารฉบับเดิมสำหรับหน้างาน</span>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    {suspendOldDoc
-                      ? '⛔ หน้างานจะไม่สามารถเปิด/ดาวน์โหลดไฟล์ฉบับเดิมได้ (ใช้เมื่อแบบเดิมมีข้อผิดพลาดร้ายแรง)'
-                      : '⚠️ หน้างานยังเปิดไฟล์เดิมได้ แต่จะเห็น badge แจ้งว่ากำลังมี Rev. ใหม่'}
+              {/* Suspend Option — Radio Buttons */}
+              <div className="space-y-2">
+                {/* Info Banner */}
+                <div className="flex items-start gap-2 p-2.5 bg-amber-50 border border-amber-200 rounded-md">
+                  <span className="text-amber-500 text-sm flex-shrink-0">⚠️</span>
+                  <p className="text-xs text-amber-700">
+                    เอกสาร <span className="font-semibold">{document?.documentNumber}</span> ได้รับการอนุมัติและกำลังเผยแพร่ให้ใช้งานในโครงการอยู่ อาจมีผู้ใช้งานอ้างอิงฉบับนี้อยู่ในขณะนี้
                   </p>
+                </div>
+                <p className="text-sm font-semibold text-gray-700">
+                  กรุณาเลือกสถานะของเอกสาร <span className="text-orange-600">{document?.documentNumber}</span> ในระหว่างดำเนินการขอแก้ไข
+                </p>
+
+                {/* Option 1: ยังใช้งานได้ */}
+                <label className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${!suspendOldDoc ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
+                  <input
+                    type="radio"
+                    name="suspend-option"
+                    checked={!suspendOldDoc}
+                    onChange={() => setSuspendOldDoc(false)}
+                    className="mt-0.5 h-4 w-4 text-green-600 cursor-pointer flex-shrink-0"
+                  />
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800">✅ ยังให้ใช้งานได้ตามปกติ</p>
+                    <p className="text-xs text-gray-500 mt-0.5">หน้างานยังดาวน์โหลดและใช้เอกสารฉบับนี้ได้ระหว่างรอฉบับแก้ไข</p>
+                  </div>
+                </label>
+
+                {/* Option 2: ระงับทันที */}
+                <label className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${suspendOldDoc ? 'border-red-400 bg-red-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
+                  <input
+                    type="radio"
+                    name="suspend-option"
+                    checked={suspendOldDoc}
+                    onChange={() => setSuspendOldDoc(true)}
+                    className="mt-0.5 h-4 w-4 text-red-600 cursor-pointer flex-shrink-0"
+                  />
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800">⛔ ระงับการใช้งานทันที</p>
+                    <p className="text-xs text-gray-500 mt-0.5">หน้างานจะเปิดหรือดาวน์โหลดเอกสารฉบับนี้ไม่ได้ — ใช้เมื่อเอกสารมีข้อผิดพลาดร้ายแรงและห้ามนำไปใช้งานต่อ</p>
+                  </div>
                 </label>
               </div>
+
             </div>
             <div className="flex justify-end gap-3 p-4 border-t bg-slate-50">
               <button
@@ -1476,6 +1582,17 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
         onClose={() => setPreviewFile(null)}
         allowEdit={canEditPDF}
         onSave={handleAnnotateSave}
+        onDownload={() => {
+          logActivity({
+            action: 'DOWNLOAD_FILE',
+            resourceType: 'RFA',
+            resourceId: document.id,
+            resourceName: document.documentNumber || document.runningNumber,
+            siteId: document.site?.id,
+            siteName: document.site?.name,
+            description: `ดาวน์โหลดไฟล์เอกสาร "${previewFile?.fileName}"`
+          });
+        }}
       />
     </>
   )

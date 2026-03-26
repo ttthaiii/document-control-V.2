@@ -248,7 +248,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               }
 
               // [DEBUG] Log user sites
-              setUser({
+              const appUserData = {
                 id: fbUser.uid,
                 email: fbUser.email || '',
                 role: userData.role,
@@ -257,8 +257,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 createdFromInvitation: userData.createdFromInvitation,
                 createdAt: userData.createdAt?.toDate?.() || userData.createdAt,
                 acceptedAt: userData.acceptedAt?.toDate?.() || userData.acceptedAt,
-              });
+              };
+              setUser(appUserData);
               setError(null);
+
+              // --- Activity Log: บันทึก LOGIN ---
+              // ป้องกันการ log ซ้ำเมื่อ refresh หน้าจอด้วย sessionStorage
+              const sessionKey = `login_logged_${fbUser.uid}`;
+              if (!sessionStorage.getItem(sessionKey)) {
+                sessionStorage.setItem(sessionKey, 'true');
+                fbUser.getIdToken().then(token => {
+                  fetch('/api/activity-logs', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                    body: JSON.stringify({
+                      action: 'LOGIN',
+                      description: 'เข้าสู่ระบบ',
+                    }),
+                  }).catch(() => {}); // silent fail
+                }).catch(() => {});
+              }
             } else {
               console.warn("⚠️ User document does not exist");
               setUser(null);
@@ -303,6 +321,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       if (user?.id) {
         await handleFCMToken(user.id, 'REMOVE');
+        sessionStorage.removeItem(`login_logged_${user.id}`);
       }
       await signOut(auth);
       setUser(null);

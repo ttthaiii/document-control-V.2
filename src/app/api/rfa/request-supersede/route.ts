@@ -62,24 +62,22 @@ export async function POST(req: Request) {
     const userRole = userData.role as Role;
 
     // --- Permission Check ---
-    // เอกสาร BIM: BIM + APPROVER_ROLES + Admin
-    // เอกสาร Site/อื่นๆ: APPROVER_ROLES + Admin เท่านั้น
+    // เฉพาะ Site (Approver roles) และ Admin เท่านั้นที่ขอแก้ไขเอกสารที่อนุมัติแล้วได้
+    // BIM ไม่มีสิทธิ์ ไม่ว่าเอกสารนั้นจะสร้างโดย BIM หรือไม่
     const isBimDocument =
       rfaData.workflow?.[0]?.role === ROLES.BIM ||
       rfaData.createdByInfo?.role === ROLES.BIM;
 
     const isAdmin = userRole === ROLES.ADMIN;
     const isApprover = (APPROVER_ROLES as readonly string[]).includes(userRole);
-    const isBimUser = userRole === ROLES.BIM;
 
     const hasPermission =
       isAdmin ||
-      isApprover ||
-      (isBimDocument && isBimUser);
+      isApprover;
 
     if (!hasPermission) {
       return NextResponse.json(
-        { error: 'คุณไม่มีสิทธิ์ขอแก้ไขเอกสารนี้' },
+        { error: 'เฉพาะทีม Site เท่านั้นที่มีสิทธิ์ขอแก้ไขเอกสารที่อนุมัติแล้ว' },
         { status: 403 }
       );
     }

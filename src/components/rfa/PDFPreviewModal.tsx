@@ -19,6 +19,7 @@ interface PDFPreviewModalProps {
   onClose: () => void;
   onSave?: (editedFile: File) => void | Promise<void>;
   allowEdit?: boolean;
+  onDownload?: () => void;
 }
 
 const PRESET_COLORS = ['#000000', '#DC2626', '#2563EB', '#16A34A', '#EA580C'];
@@ -29,7 +30,7 @@ const PRESET_COLORS = ['#000000', '#DC2626', '#2563EB', '#16A34A', '#EA580C'];
 const MAX_RENDER_DIMENSION = 8192;
 
 export default function PDFPreviewModal({
-  isOpen, file, onClose, onSave, allowEdit = true
+  isOpen, file, onClose, onSave, allowEdit = true, onDownload
 }: PDFPreviewModalProps) {
   const { showNotification } = useNotification();
 
@@ -361,6 +362,7 @@ export default function PDFPreviewModal({
 
   const handleDownload = async () => {
     if (!file) return;
+    if (onDownload) onDownload();
     try {
       const targetUrl = managedFileUrl || file.fileUrl;
       const response = await fetch(targetUrl);

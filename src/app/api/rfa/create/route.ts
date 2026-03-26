@@ -1,12 +1,11 @@
 // src/app/api/rfa/create/route.ts
 import { NextResponse } from "next/server";
-// 🔽 1. Import adminAuth เข้ามาด้วย 🔽
 import { adminDb, adminBucket, adminAuth } from "@/lib/firebase/admin";
-// 🗑️ 2. ลบ getAuth ที่ไม่ได้ใช้แล้วออกไป 🗑️
-// import { getAuth } from "firebase-admin/auth";
 import { FieldValue } from 'firebase-admin/firestore';
 import { ROLES, REVIEWER_ROLES, STATUSES, Role } from '@/lib/config/workflow';
 import { getFileUrl } from '@/lib/utils/storage';
+import { logActivity, buildDescription } from '@/lib/utils/activityLogger';
+
 
 export const dynamic = 'force-dynamic';
 
@@ -207,6 +206,23 @@ export async function POST(req: Request) {
       revisionNumber: parseInt(revisionNumber, 10) || 0,
       isLatest: true,
       isLatestApproved: false,
+    });
+
+    // กดเพิ่มใน RFA สำเร็จ => สร้าง Activity Log
+    const siteDoc = await adminDb.collection('sites').doc(siteId).get();
+    const siteName = siteDoc.data()?.name || '';
+    logActivity({
+      userId: uid,
+      userEmail: userData?.email || '',
+      userRole,
+      siteId,
+      siteName,
+      action: 'CREATE_DOCUMENT',
+      resourceType: 'RFA',
+      resourceId: rfaRef.id,
+      resourceName: documentNumber || runningNumber,
+      description: buildDescription('CREATE_DOCUMENT', documentNumber || runningNumber),
+      metadata: { rfaType, initialStatus },
     });
 
     return NextResponse.json({ success: true, id: rfaRef.id, runningNumber: runningNumber }, { status: 201 });

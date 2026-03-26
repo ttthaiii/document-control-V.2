@@ -9,6 +9,8 @@ import { sendPushNotification } from '@/lib/utils/push-notification';
 import { PERMISSION_KEYS } from '@/lib/config/permissions';
 import { getFileUrl } from '@/lib/utils/storage';
 import { extractCadFiles } from '@/lib/utils/extractCadFiles';
+import { logActivity, buildDescription } from '@/lib/utils/activityLogger';
+
 
 export const dynamic = 'force-dynamic';
 
@@ -148,7 +150,7 @@ export async function PUT(
         const userData = userDoc.data()!;
         const userRole = userData.role;
         const body = await request.json();
-        const { action, comments, newFiles, documentNumber, supersededAt } = body;
+        const { action, comments, newFiles, documentNumber, supersededAt, suspendPreviousRevision } = body;
 
         if (!action) return NextResponse.json({ error: 'Action is required' }, { status: 400 });
 
@@ -330,6 +332,46 @@ export async function PUT(
         }
 
         await rfaDocRef.update(updates);
+
+        // --- Suspend Previous Revision from PENDING_REVIEW (Site) ---
+        if (['SEND_TO_CM', 'REQUEST_REVISION'].includes(action) && docData.previousRevisionId && suspendPreviousRevision === true) {
+            try {
+                await adminDb.collection('rfaDocuments').doc(docData.previousRevisionId).update({
+                    supersededStatus: 'SUSPENDED',
+                    updatedAt: FieldValue.serverTimestamp(),
+                });
+            } catch (err) {
+                console.error('[PUT] Failed to suspend previous revision:', err);
+            }
+        }
+
+        // --- Activity Log ---
+        const docNumber = documentNumber || docData.documentNumber || '';
+        const logActionMap: Record<string, any> = {
+          'APPROVE': 'APPROVE_DOCUMENT',
+          'APPROVE_WITH_COMMENTS': 'APPROVE_DOCUMENT',
+          'APPROVE_REVISION_REQUIRED': 'APPROVE_DOCUMENT',
+          'REJECT': 'REJECT_DOCUMENT',
+          'REQUEST_REVISION': 'REQUEST_REVISION',
+          'SEND_TO_CM': 'SUBMIT_DOCUMENT',
+          'SUBMIT_REVISION': 'SUBMIT_DOCUMENT',
+        };
+        const mappedLogAction = logActionMap[action];
+        if (mappedLogAction) {
+          logActivity({
+            userId,
+            userEmail: userData.email,
+            userRole,
+            siteId: docData.siteId,
+            siteName,
+            action: mappedLogAction,
+            resourceType: 'RFA',
+            resourceId: params.id,
+            resourceName: docNumber,
+            description: buildDescription(mappedLogAction, docNumber),
+            metadata: { rfaType: docData.rfaType, newStatus, comments: comments || '' },
+          });
+        }
 
         // --- Auto-Supersede: ถ้าอนุมัติ Rev.ใหม่ ให้ Mark Rev.เก่าเป็น SUPERSEDED อัตโนมัติ ---
         // (ตามหลัก Document Control: Rev.ใหม่อนุมัติ = Rev.เก่า Obsolete ทันที ไม่ต้องถาม User)

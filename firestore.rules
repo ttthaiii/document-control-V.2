@@ -85,6 +85,15 @@ service cloud.firestore {
       allow list, write: if isAdmin();
     }
     
+    // ✅ 5. Activity Logs (เอามาไว้ตรงนี้)
+    match /activityLogs/{logId} {
+      allow read: if isAuthenticated() && (
+        getUserData().get('role', '') in ['Admin', 'PM', 'PD']
+      );
+      allow write: if false; 
+    }
+    
+    // ❌ บรรทัดนี้ควรอยู่ล่างสุดเสมอ
     match /{document=**} {
       allow read, write: if false;
     }

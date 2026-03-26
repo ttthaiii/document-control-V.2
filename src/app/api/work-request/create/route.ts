@@ -3,6 +3,8 @@ import { adminDb, adminBucket, adminAuth } from "@/lib/firebase/admin";
 import { FieldValue } from 'firebase-admin/firestore';
 import { WR_STATUSES, WR_CREATOR_ROLES } from '@/lib/config/workflow';
 import { getFileUrl } from '@/lib/utils/storage';
+import { logActivity, buildDescription } from '@/lib/utils/activityLogger';
+
 
 export const dynamic = 'force-dynamic';
 
@@ -130,11 +132,28 @@ export async function POST(req: NextRequest) {
             usersInfo: { [uid]: { email: userData.email, role: userData.role } }
         });
 
+        // สร้าง Work Request สำเร็จ => สร้าง Activity Log
+        const siteDoc = await adminDb.collection('sites').doc(siteId).get();
+        const siteName = siteDoc.data()?.name || '';
+        logActivity({
+          userId: uid,
+          userEmail: userData.email,
+          userRole: userData.role,
+          siteId,
+          siteName,
+          action: 'CREATE_WORK_REQUEST',
+          resourceType: 'WORK_REQUEST',
+          resourceId: newWorkRequestRef.id,
+          resourceName: documentNumber,
+          description: buildDescription('CREATE_WORK_REQUEST', documentNumber),
+        });
+
         return NextResponse.json({
             success: true,
             id: newWorkRequestRef.id,
             documentNumber: documentNumber
         }, { status: 201 });
+
 
     } catch (err: any) {
         console.error("Work Request Create Error:", err);

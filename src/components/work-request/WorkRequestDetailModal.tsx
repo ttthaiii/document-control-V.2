@@ -1,7 +1,7 @@
 // src/components/work-request/WorkRequestDetailModal.tsx
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '@/lib/auth/useAuth';
 import { WorkRequest, WorkRequestWorkflowStep } from '@/types/work-request';
 import { WorkRequestStatus } from '@/lib/config/workflow';
@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'; // ✅ ใช้ Edit2 แทน Pencil, เพิ่ม Trash2
 import { ROLES, REVIEWER_ROLES, WR_STATUSES, WR_APPROVER_ROLES, STATUS_LABELS, STATUS_COLORS } from '@/lib/config/workflow';
 import { useNotification } from '@/lib/context/NotificationContext';
+import { useLogActivity } from '@/lib/hooks/useLogActivity';
 import PDFPreviewModal from '@/components/rfa/PDFPreviewModal';
 import { storage } from '@/lib/firebase/client';
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
@@ -123,6 +124,8 @@ interface WorkRequestDetailModalProps {
 export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }: WorkRequestDetailModalProps) {
     const { user, firebaseUser } = useAuth();
     const { showNotification } = useNotification();
+    const { logActivity } = useLogActivity();
+    const hasLoggedViewRef = useRef<string | null>(null);
     const [document, setDocument] = useState<WorkRequest | null>(null);
     const [loading, setLoading] = useState(true);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -182,7 +185,22 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                     headers: { 'Authorization': `Bearer ${token}` },
                 });
                 const result = await response.json();
-                if (result.success) setDocument(result.document);
+                if (result.success) {
+                    setDocument(result.document);
+                    // Log View Detail
+                    if (hasLoggedViewRef.current !== result.document.id) {
+                        logActivity({
+                            action: 'VIEW_DETAIL',
+                            resourceType: 'WORK_REQUEST',
+                            resourceId: result.document.id,
+                            resourceName: result.document.documentNumber,
+                            siteId: result.document.site?.id,
+                            siteName: result.document.site?.name,
+                            description: `เข้าดูรายละเอียด Work Request: ${result.document.documentNumber}`
+                        });
+                        hasLoggedViewRef.current = result.document.id;
+                    }
+                }
                 else throw new Error(result.error);
             } catch (error) {
                 showNotification('error', 'เกิดข้อผิดพลาด', 'ไม่สามารถโหลดข้อมูลเอกสารได้');
@@ -337,8 +355,26 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                 uploadedAt: new Date().toISOString(),
                 uploadedBy: user?.id || ''
             };
+            logActivity({
+                action: 'PREVIEW_FILE',
+                resourceType: 'WORK_REQUEST',
+                resourceId: document?.id,
+                resourceName: document?.documentNumber,
+                siteId: document?.site?.id,
+                siteName: document?.site?.name,
+                description: `เปิดดูตัวอย่างไฟล์ (Local): ${mockFile.fileName}`
+            });
             setPdfFile(mockFile);
         } else {
+            logActivity({
+                action: 'DOWNLOAD_FILE',
+                resourceType: 'WORK_REQUEST',
+                resourceId: document?.id,
+                resourceName: document?.documentNumber,
+                siteId: document?.site?.id,
+                siteName: document?.site?.name,
+                description: `เปิดดู/ดาวน์โหลดไฟล์ (Local): ${fileObj.customName || fileObj.uploadedData?.fileName || fileObj.file.name}`
+            });
             window.open(objectUrl, '_blank');
         }
     };
@@ -666,7 +702,31 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                                     return (
                                         <li key={index}>
                                             <div className="flex items-center justify-between p-2 bg-slate-100 border border-slate-200 rounded-md hover:bg-slate-200 transition-colors group">
-                                                <div className="flex items-center min-w-0 flex-1 cursor-pointer" onClick={() => isPdf ? setPdfFile(file) : window.open(file.fileUrl)}>
+                                                <div className="flex items-center min-w-0 flex-1 cursor-pointer" onClick={() => {
+                                                    if (isPdf) {
+                                                        logActivity({
+                                                            action: 'PREVIEW_FILE',
+                                                            resourceType: 'WORK_REQUEST',
+                                                            resourceId: document.id,
+                                                            resourceName: document.documentNumber,
+                                                            siteId: document.site?.id,
+                                                            siteName: document.site?.name,
+                                                            description: `เปิดดูไฟล์ผลงาน: ${file.fileName}`
+                                                        });
+                                                        setPdfFile(file);
+                                                    } else {
+                                                        logActivity({
+                                                            action: 'DOWNLOAD_FILE',
+                                                            resourceType: 'WORK_REQUEST',
+                                                            resourceId: document.id,
+                                                            resourceName: document.documentNumber,
+                                                            siteId: document.site?.id,
+                                                            siteName: document.site?.name,
+                                                            description: `ดาวน์โหลดไฟล์ผลงาน: ${file.fileName}`
+                                                        });
+                                                        window.open(file.fileUrl);
+                                                    }
+                                                }}>
                                                     <FileText className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
                                                     <div className="flex flex-col min-w-0">
                                                         <span className="text-sm font-medium text-blue-600 group-hover:underline truncate">{file.fileName}</span>
@@ -677,7 +737,18 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                                                 <div className="flex items-center space-x-2 ml-2">
                                                     {isPdf && (
                                                         <button
-                                                            onClick={() => setPdfFile(file)}
+                                                            onClick={() => {
+                                                                logActivity({
+                                                                    action: 'PREVIEW_FILE',
+                                                                    resourceType: 'WORK_REQUEST',
+                                                                    resourceId: document.id,
+                                                                    resourceName: document.documentNumber,
+                                                                    siteId: document.site?.id,
+                                                                    siteName: document.site?.name,
+                                                                    description: `เปิดดูไฟล์ผลงาน: ${file.fileName}`
+                                                                });
+                                                                setPdfFile(file)
+                                                            }}
                                                             className="p-1 text-gray-400 hover:text-blue-600"
                                                             title="ดู/แก้ไข PDF"
                                                         >
@@ -685,7 +756,23 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                                                         </button>
                                                     )}
                                                     {!isPdf && (
-                                                        <a href={file.fileUrl} target="_blank" rel="noopener noreferrer" className="p-1 text-gray-400 hover:text-gray-600">
+                                                        <a 
+                                                            href={file.fileUrl} 
+                                                            target="_blank" 
+                                                            rel="noopener noreferrer" 
+                                                            className="p-1 text-gray-400 hover:text-gray-600"
+                                                            onClick={() => {
+                                                                logActivity({
+                                                                    action: 'DOWNLOAD_FILE',
+                                                                    resourceType: 'WORK_REQUEST',
+                                                                    resourceId: document.id,
+                                                                    resourceName: document.documentNumber,
+                                                                    siteId: document.site?.id,
+                                                                    siteName: document.site?.name,
+                                                                    description: `ดาวน์โหลดไฟล์ผลงาน: ${file.fileName}`
+                                                                });
+                                                            }}
+                                                        >
                                                             <Download size={18} />
                                                         </a>
                                                     )}
@@ -844,6 +931,17 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                 allowEdit={canSiteReview || canSubmitWork || isRevisionFlow}
                 onClose={() => setPdfFile(null)}
                 onSave={handleAnnotateSave}
+                onDownload={() => {
+                    logActivity({
+                        action: 'DOWNLOAD_FILE',
+                        resourceType: 'WORK_REQUEST',
+                        resourceId: document?.id,
+                        resourceName: document?.documentNumber,
+                        siteId: document?.site?.id,
+                        siteName: document?.site?.name,
+                        description: `ดาวน์โหลดไฟล์ผลงาน: ${pdfFile?.fileName}`
+                    });
+                }}
             />
         </>
     );
