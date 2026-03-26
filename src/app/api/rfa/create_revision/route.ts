@@ -136,6 +136,7 @@ export async function POST(req: Request) {
                 supersededRequestedAt: null,
                 // ✅ track whether the previous revision was already suspended before this revision was created
                 previousRevisionSuspended: originalData.supersededStatus === 'SUSPENDED',
+                isFromSupersedeRequest: !!originalData.supersededRequestedBy,
                 workflow: [
                     ...((originalData.workflow || []).map((w: any) => ({
                         ...w,
@@ -160,7 +161,7 @@ export async function POST(req: Request) {
                 isLatest: false,
                 supersededById: newRfaRef.id,
                 supersededByRevision: newRevisionNumber,
-                supersededStatus: originalData.status === STATUSES.APPROVED_REVISION_REQUIRED ? 'ACTIVE' : (suspendOldDoc ? 'SUSPENDED' : 'ACTIVE'),
+                supersededStatus: originalData.supersededRequestedBy ? (originalData.supersededStatus || 'ACTIVE') : 'ACTIVE',
                 updatedAt: FieldValue.serverTimestamp(),
             });
         });

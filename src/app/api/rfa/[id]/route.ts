@@ -120,9 +120,21 @@ export async function GET(
             canDownloadFiles: true
         };
 
+        let isFromSupersedeRequest = rfaData.isFromSupersedeRequest || false;
+        
+        // Backwards compatibility for old documents missing the flag
+        if (typeof rfaData.isFromSupersedeRequest === 'undefined' && rfaData.previousRevisionId) {
+            const hasSupersedeWorkflow = (rfaData.workflow || []).some(
+                (w: any) => w.step === STATUSES.REVISION_REQUESTED || w.status === STATUSES.REVISION_REQUESTED
+            );
+            if (hasSupersedeWorkflow) {
+                isFromSupersedeRequest = true;
+            }
+        }
+
         return NextResponse.json({
             success: true, document: {
-                id: rfaDoc.id, ...rfaData, site: siteInfo, category: categoryInfo, permissions
+                id: rfaDoc.id, ...rfaData, isFromSupersedeRequest, site: siteInfo, category: categoryInfo, permissions
             }
         });
 
@@ -333,15 +345,28 @@ export async function PUT(
 
         await rfaDocRef.update(updates);
 
-        // --- Suspend Previous Revision from PENDING_REVIEW (Site) ---
-        if (['SEND_TO_CM', 'REQUEST_REVISION'].includes(action) && docData.previousRevisionId && suspendPreviousRevision === true) {
+        // --- Sync Comment & Suspend Status to Previous Revision from PENDING_REVIEW (Site) ---
+        if (['SEND_TO_CM', 'REQUEST_REVISION'].includes(action) && docData.previousRevisionId) {
             try {
-                await adminDb.collection('rfaDocuments').doc(docData.previousRevisionId).update({
-                    supersededStatus: 'SUSPENDED',
+                const prevUpdate: any = {
                     updatedAt: FieldValue.serverTimestamp(),
-                });
+                };
+                
+                // ถ้าระบุว่าให้ระงับ ก็บันทึกสถานะระงับ
+                if (suspendPreviousRevision === true) {
+                    prevUpdate.supersededStatus = 'SUSPENDED';
+                }
+                
+                // ถ้ามีคอมเมนต์พิมพ์มา ให้บันทึกเป็น supersededComment ในเอกสารเก่าด้วย
+                if (comments && comments.trim() !== '') {
+                    prevUpdate.supersededComment = comments.trim();
+                }
+
+                if (Object.keys(prevUpdate).length > 1) { // More than just updatedAt
+                    await adminDb.collection('rfaDocuments').doc(docData.previousRevisionId).update(prevUpdate);
+                }
             } catch (err) {
-                console.error('[PUT] Failed to suspend previous revision:', err);
+                console.error('[PUT] Failed to update previous revision:', err);
             }
         }
 

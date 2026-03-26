@@ -158,6 +158,7 @@ interface SiteWithSystemType extends RFASite {
   cmSystemType?: 'INTERNAL' | 'EXTERNAL';
 }
 interface FullRFADocument extends RFADocument {
+  isFromSupersedeRequest?: boolean;
   site: SiteWithSystemType;
   creatorRole?: 'BIM' | 'ME' | 'SN'; // Note: Usually fallback to document.createdByInfo?.role
   taskData?: {
@@ -1096,11 +1097,14 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
 
             {/* 1. Site Review Panel */}
             {isSiteReviewing && (
-              <div className="space-y-4">
-                <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (Site)</h3>
+              <div className="space-y-6">
+                <div className="pb-3 border-b border-slate-200">
+                  <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (Site)</h3>
+                  <p className="text-sm text-slate-500 mt-1">กรุณาดำเนินการตามขั้นตอนด้านล่างเพื่อตรวจสอบและส่งงานต่อ</p>
+                </div>
 
                 {needsDocNumber && (
-                  <div className="p-4 bg-yellow-50 border-l-4 border-yellow-400">
+                  <div className="p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded-r-md">
                     <label className="text-sm font-bold text-yellow-800 mb-2 block">
                       <AlertTriangle size={16} className="inline mr-2" />
                       กรุณาระบุเลขที่เอกสาร (Required)
@@ -1116,7 +1120,13 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                   </div>
                 )}
 
-                <div>
+                {/* Step 1: File Upload */}
+                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                  <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+                    <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">1</span>
+                    <h4 className="font-semibold text-slate-800 text-base">แนบไฟล์ประกอบการพิจารณา</h4>
+                  </div>
+                  <div>
                   <label className="text-sm font-medium text-gray-700 mb-1 block">
                     แนบไฟล์ <span className="text-red-700">*</span>
                   </label>
@@ -1128,22 +1138,29 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                     </label>
                   </div>
 
-                  {/* [UPDATED] ใช้ renderFileList เพื่อแสดงรายการไฟล์แบบใหม่ */}
                   {renderFileList(newFiles, 'action')}
 
+                  </div>
                 </div>
 
-                {document.previousRevisionId && (
-                  <div className="space-y-2 mt-4 mb-4">
-                    <div className="flex items-start gap-2 p-2.5 bg-blue-50 border border-blue-200 rounded-md">
-                      <span className="text-blue-500 text-sm flex-shrink-0">ℹ️</span>
-                      <p className="text-xs text-blue-700">
-                        เอกสาร <span className="font-semibold">{document?.documentNumber}</span> เป็นฉบับแก้ไขจากฉบับเดิมที่เคยอนุมัติแล้ว และกำลังเผยแพร่ให้ใช้งานอยู่ในขณะนี้
-                      </p>
+                {/* Step 2 (Optional): Suspend Old Document */}
+                {document.previousRevisionId && !document.isFromSupersedeRequest && (
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                    <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+                      <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">2</span>
+                      <h4 className="font-semibold text-slate-800 text-base">จัดการเอกสารฉบับเดิม</h4>
                     </div>
-                    <p className="text-sm font-semibold text-gray-700">
-                      กรุณาเลือกสถานะของเอกสาร (ฉบับเดิม) ในระหว่างดำเนินการตรวจสอบ
-                    </p>
+                    
+                    <div className="space-y-3">
+                      <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                        <span className="text-blue-500 text-sm flex-shrink-0">ℹ️</span>
+                        <p className="text-xs text-blue-700 leading-relaxed">
+                          เอกสาร <span className="font-semibold">{document?.documentNumber}</span> เป็นฉบับแก้ไขจากฉบับเดิมที่เคยอนุมัติแล้ว และกำลังเผยแพร่ให้ใช้งานอยู่ในขณะนี้
+                        </p>
+                      </div>
+                      <p className="text-sm font-semibold text-gray-700">
+                        กรุณาเลือกสถานะของเอกสาร (ฉบับเดิม) ในระหว่างดำเนินการตรวจสอบ
+                      </p>
 
                     {/* Option 1: ยังใช้งานได้ */}
                     <label className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${!suspendPreviousRevision ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
@@ -1174,13 +1191,23 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                         <p className="text-xs text-gray-500 mt-0.5">หน้างานจะเปิดหรือดาวน์โหลดฉบับเดิมไม่ได้อีกต่อไป — ใช้เมื่อฉบับเดิมมีข้อผิดพลาดร้ายแรงและห้ามนำไปใช้งานต่อ</p>
                       </div>
                     </label>
+                    </div>
                   </div>
                 )}
 
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-1 block">แสดงความคิดเห็น (Optional)</label>
-                  <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ (Optional)..." className="w-full p-2 border rounded-md text-sm bg-white text-gray-900" rows={2} />
-                </div>
+                {/* Step 3: Comments & Action */}
+                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                  <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+                    <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">
+                      {(document.previousRevisionId && !document.isFromSupersedeRequest) ? '3' : '2'}
+                    </span>
+                    <h4 className="font-semibold text-slate-800 text-base">ความคิดเห็น & ตัดสินใจ</h4>
+                  </div>
+                  
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 mb-1.5 block">แสดงความคิดเห็น (Optional)</label>
+                    <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ (Optional)..." className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white text-gray-900 focus:ring-blue-500 focus:border-blue-500 transition-colors" rows={3} />
+                  </div>
                 <div className="flex flex-wrap justify-end gap-3">
                   <button
                     onClick={() => handleAction('REQUEST_REVISION')}
@@ -1198,7 +1225,8 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                   </button>
                 </div>
               </div>
-            )}
+            </div>
+          )}
 
             {/* 2. Resubmission Panel (Creator) */}
             {isResubmissionFlow && (
