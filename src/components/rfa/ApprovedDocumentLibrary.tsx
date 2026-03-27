@@ -1,526 +1,638 @@
-// src/components/rfa/ApprovedDocumentLibrary.tsx (โค้ดฉบับสมบูรณ์)
+// src/components/rfa/ApprovedDocumentLibrary.tsx
 'use client'
 
 import React, { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '@/lib/auth/useAuth'
 import { Site, Category, RFADocument, RFAFile } from '@/types/rfa'
-import { Search, Building, Tag, FileText, Calendar, Download, Eye, FileDigit, AlertTriangle, Lock, FolderOpen, ChevronDown, ChevronUp } from 'lucide-react'
+import {
+  Search, Building, Calendar, Download, Eye, ChevronDown,
+  FileText, FileDigit, Filter, AlertTriangle, CheckCircle2,
+  FolderOpen, DownloadCloud, Lock, ChevronRight,
+} from 'lucide-react'
 import Spinner from '@/components/shared/Spinner'
 import PDFPreviewModal from './PDFPreviewModal'
-
-// v 1. Import สิ่งที่จำเป็นจาก Firestore SDK และ workflow config
 import { db } from '@/lib/firebase/client'
 import { collection, query, where, getDocs, orderBy } from 'firebase/firestore'
-import { STATUSES, STATUS_LABELS } from '@/lib/config/workflow' // <--- เพิ่ม STATUS_LABELS ที่นี่
+import { STATUSES, STATUS_LABELS } from '@/lib/config/workflow'
 
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
 const formatDate = (date: any): string => {
-  if (!date) return 'N/A';
-  if (date.seconds) {
-    return new Date(date.seconds * 1000).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' });
-  }
+  if (!date) return '—';
+  if (date.seconds) return new Date(date.seconds * 1000).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' });
   const d = new Date(date);
-  if (isNaN(d.getTime())) return 'Invalid Date';
-  return d.toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' });
+  return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' });
 };
 
-const useIsMobile = () => {
-  const [isMobile, setIsMobile] = useState(false);
-  useEffect(() => {
-    const checkScreenSize = () => setIsMobile(window.innerWidth < 768);
-    checkScreenSize();
-    window.addEventListener('resize', checkScreenSize);
-    return () => window.removeEventListener('resize', checkScreenSize);
-  }, []);
-  return isMobile;
+const getPdfFiles = (doc: RFADocument): RFAFile[] =>
+  (doc.files || []).filter(f => f.contentType === 'application/pdf' || f.fileName.toLowerCase().endsWith('.pdf'));
+
+const resolveCategory = (doc: any): string => {
+  const catId: string | undefined = doc.categoryId || doc.category?.id;
+  if (!catId || catId === 'N/A') return '—';
+  const rawName: string = (doc.categoryName || doc.taskData?.taskCategory || '').trim();
+  if (rawName && rawName !== catId && /[a-z ]/.test(rawName)) return rawName;
+  return catId.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
 };
+
+const resolveCategoryKey = (doc: any): string =>
+  doc.categoryId || doc.category?.id || '';
+
+// ─── Component ──────────────────────────────────────────────────────────────
 
 export default function ApprovedDocumentLibrary() {
   const { user, firebaseUser } = useAuth();
-  const isMobile = useIsMobile();
 
   const [sites, setSites] = useState<Site[]>([]);
-
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedSite, setSelectedSite] = useState('ALL');
-  const [selectedCategory, setSelectedCategory] = useState('ALL');
-  const [selectedRfaType, setSelectedRfaType] = useState('ALL');
   const [documents, setDocuments] = useState<RFADocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [selectedSite, setSelectedSite] = useState('ALL');
+  const [selectedCategory, setSelectedCategory] = useState('ALL');
+  const [selectedRfaType, setSelectedRfaType] = useState('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
+
   const [previewFile, setPreviewFile] = useState<RFAFile | null>(null);
-  const [expandedCadIds, setExpandedCadIds] = useState<Set<string>>(new Set());
+  // openDrawers: Set of 'docId-pdf' | 'docId-cad'
+  const [openDrawers, setOpenDrawers] = useState<Set<string>>(new Set());
 
-  const toggleCad = (docId: string) => {
-    setExpandedCadIds(prev => {
-      const next = new Set(prev);
-      next.has(docId) ? next.delete(docId) : next.add(docId);
-      return next;
-    });
-  };
+  // Sorting state
+  type SortKey = 'documentNumber' | 'updatedAt';
+  type SortDir = 'asc' | 'desc';
+  const [sortConfig, setSortConfig] = useState<{ key: SortKey; dir: SortDir }>({ key: 'updatedAt', dir: 'desc' });
 
-  const resetFilters = () => {
-    setSearchTerm('');
-    setSelectedSite('ALL');
-    setSelectedCategory('ALL');
-    setSelectedRfaType('ALL');
-  };
-
+  // ── Fetch ─────────────────────────────────────────────────────────
   useEffect(() => {
-    const fetchSites = async () => {
+    const run = async () => {
       if (!firebaseUser) return;
       try {
         const token = await firebaseUser.getIdToken();
-        const sitesResponse = await fetch('/api/sites', { headers: { 'Authorization': `Bearer ${token}` } });
-        if (!sitesResponse.ok) throw new Error('Failed to fetch sites');
-        const sitesData = await sitesResponse.json();
-        setSites(sitesData.sites || []);
-      } catch (err) {
-        setError('ไม่สามารถโหลดข้อมูล Filter ได้');
-        console.error(err);
-      }
+        const res = await fetch('/api/sites', { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok) setSites((await res.json()).sites || []);
+      } catch {}
     };
-    fetchSites();
+    run();
   }, [firebaseUser]);
 
-  // Reset category เมื่อเปลี่ยน RFA Type หรือโครงการ
   useEffect(() => {
-    setSelectedCategory('ALL');
-  }, [selectedRfaType, selectedSite]);
-
-  useEffect(() => {
-    const fetchDocuments = async () => {
-      if (!user?.sites || user.sites.length === 0) {
-        setIsLoading(false);
-        return;
-      }
-      setDocuments([]); // เคลียร์ทันที เพื่อให้ availableCategories reset ก่อน fetch ใหม่
-      setIsLoading(true);
-      setError(null);
-
+    const run = async () => {
+      if (!user?.sites?.length) { setIsLoading(false); return; }
+      setIsLoading(true); setError(null);
       try {
-        let q = query(
+        const snap = await getDocs(query(
           collection(db, 'rfaDocuments'),
           where('siteId', 'in', user.sites),
           where('isLatestApproved', '==', true),
-          where('status', 'in', [
-            STATUSES.APPROVED,
-            STATUSES.APPROVED_WITH_COMMENTS,
-            STATUSES.APPROVED_REVISION_REQUIRED
-          ]),
+          where('status', 'in', [STATUSES.APPROVED, STATUSES.APPROVED_WITH_COMMENTS, STATUSES.APPROVED_REVISION_REQUIRED]),
           orderBy('updatedAt', 'desc')
-        );
-
-        if (selectedSite !== 'ALL') {
-          q = query(q, where('siteId', '==', selectedSite));
-        }
-        if (selectedRfaType !== 'ALL') {
-          q = query(q, where('rfaType', '==', selectedRfaType));
-        }
-
-        const querySnapshot = await getDocs(q);
-        const docsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as RFADocument));
-        setDocuments(docsData);
-
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'ไม่สามารถโหลดข้อมูลเอกสารได้');
-        console.error(err);
-      } finally {
-        setIsLoading(false);
-      }
+        ));
+        setDocuments(snap.docs.map(d => ({ id: d.id, ...d.data() } as RFADocument)));
+      } catch (e: any) { setError(e.message || 'โหลดข้อมูลไม่สำเร็จ'); }
+      finally { setIsLoading(false); }
     };
+    run();
+  }, [user]);
 
-    fetchDocuments();
-  }, [user, selectedSite, selectedRfaType]);
+  useEffect(() => { setSelectedCategory('ALL'); }, [selectedSite, selectedRfaType]);
 
-  // Helper: แปลง raw Firestore fields เป็น { key (categoryId), display code } แบบ consistent
-  // ใช้ categoryId เป็น stable key เสมอ — ป้องกัน duplicate จากชื่อที่ format ต่างกัน
-  const resolveCategory = (doc: any): { key: string; code: string } | null => {
-    const catId: string | undefined = doc.categoryId || doc.category?.id;
-    if (!catId || catId === 'N/A') return null;
-
-    // Display: ถ้า categoryName เป็น human-readable (มี space หรือ lowercase) → ใช้เลย
-    // ถ้าไม่ใช่ (ALL_CAPS หรือ SNAKE_CASE) → แปลงจาก categoryId
-    const rawName: string = (doc.categoryName || doc.taskData?.taskCategory || '').trim();
-    const isHumanReadable = rawName && rawName !== catId && /[a-z ]/.test(rawName);
-    const displayCode = isHumanReadable
-      ? rawName
-      : catId.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
-
-    return { key: catId, code: displayCode };
-  };
-
-  const availableCategories = useMemo(() => {
-    const map = new Map<string, Category>(); // keyed by categoryId (stable)
+  // ── Derived ───────────────────────────────────────────────────────
+  const availableCategoryKeys = useMemo(() => {
+    const map = new Map<string, string>();
     documents.forEach(doc => {
-      const resolved = resolveCategory(doc as any);
-      if (resolved && !map.has(resolved.key)) {
-        map.set(resolved.key, {
-          id: resolved.key,
-          siteId: (doc as any).siteId || '',
-          categoryCode: resolved.code,  // display label
-          categoryName: resolved.code,
-        });
-      }
+      const key = resolveCategoryKey(doc as any);
+      if (key && key !== 'N/A' && !map.has(key)) map.set(key, resolveCategory(doc as any));
     });
-    return Array.from(map.values()).sort((a, b) => a.categoryCode.localeCompare(b.categoryCode));
+    return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]));
   }, [documents]);
 
-  const filteredDocuments = useMemo(() => {
-    let result = documents;
-    if (selectedCategory !== 'ALL') {
-      result = result.filter(doc => {
-        const resolved = resolveCategory(doc as any);
-        return resolved?.code === selectedCategory;
-      });
+  const filteredDocs = useMemo(() => documents.filter(doc => {
+    const a = doc as any;
+    if (selectedSite !== 'ALL' && a.siteId !== selectedSite) return false;
+    if (selectedRfaType !== 'ALL' && doc.rfaType !== selectedRfaType) return false;
+    if (selectedCategory !== 'ALL' && resolveCategoryKey(a) !== selectedCategory) return false;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      if (!doc.documentNumber?.toLowerCase().includes(q) && !doc.title?.toLowerCase().includes(q)) return false;
     }
-    if (!searchTerm) return result;
-    const lowercasedFilter = searchTerm.toLowerCase();
-    return result.filter(doc =>
-      doc.title.toLowerCase().includes(lowercasedFilter) ||
-      (doc.documentNumber && doc.documentNumber.toLowerCase().includes(lowercasedFilter))
-    );
-  }, [searchTerm, selectedCategory, documents]);
+    return true;
+  }), [documents, selectedSite, selectedRfaType, selectedCategory, searchQuery]);
 
-  const handleFileClick = (file: RFAFile) => {
-    const isPdf = file.contentType === 'application/pdf' || file.fileName.toLowerCase().endsWith('.pdf');
-    if (isPdf) {
-      setPreviewFile(file);
-    } else {
-      window.open(file.fileUrl, '_blank');
-    }
+  // Helper: extract numeric suffix from a string (e.g., "AR-005" -> 5)
+  const getNumericSuffix = (str: string): number => {
+    if (!str) return 0;
+    const match = str.match(/\d+$/);
+    return match ? parseInt(match[0], 10) : 0;
   };
 
+  const sortedDocs = useMemo(() => {
+    const sortable = [...filteredDocs];
+    sortable.sort((a, b) => {
+      let aVal: any = 0;
+      let bVal: any = 0;
+
+      if (sortConfig.key === 'documentNumber') {
+        const aNum = getNumericSuffix(a.documentNumber || '');
+        const bNum = getNumericSuffix(b.documentNumber || '');
+        // If both have trailing numbers, sort numerically. Otherwise fallback to string localeCompare.
+        if (aNum !== 0 && bNum !== 0) {
+          aVal = aNum;
+          bVal = bNum;
+        } else {
+          aVal = (a.documentNumber || '').toLowerCase();
+          bVal = (b.documentNumber || '').toLowerCase();
+        }
+      } else if (sortConfig.key === 'updatedAt') {
+        aVal = a.updatedAt?.seconds || new Date(a.updatedAt).getTime() || 0;
+        bVal = b.updatedAt?.seconds || new Date(b.updatedAt).getTime() || 0;
+      }
+
+      if (aVal < bVal) return sortConfig.dir === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortConfig.dir === 'asc' ? 1 : -1;
+      return 0;
+    });
+    return sortable;
+  }, [filteredDocs, sortConfig]);
+
+  // ── Handlers ──────────────────────────────────────────────────────
+  const requestSort = (key: SortKey) => {
+    setSortConfig(prev => ({
+      key,
+      dir: prev.key === key && prev.dir === 'desc' ? 'asc' : 'desc'
+    }));
+  };
+
+  const SortIcon = ({ columnKey }: { columnKey: SortKey }) => {
+    if (sortConfig.key !== columnKey) return null;
+    return (
+      <ChevronDown
+        className={`w-3 h-3 transition-transform ${sortConfig.dir === 'asc' ? 'rotate-180' : ''}`}
+      />
+    );
+  };
+
+  const toggleDrawer = (docId: string, type: 'pdf' | 'cad') => {
+    const key = `${docId}-${type}`;
+    setOpenDrawers(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+  };
+
+  // ── Status helpers ────────────────────────────────────────────────
+  const statusConfig = (status: string, isSuspended: boolean) => {
+    if (isSuspended) return { dot: 'bg-red-500', text: 'text-red-700', bg: 'bg-red-50', label: 'ระงับชั่วคราว', icon: <Lock className="w-3 h-3" /> };
+    if (status === STATUSES.APPROVED) return { dot: 'bg-emerald-500', text: 'text-emerald-700', bg: 'bg-emerald-50', label: STATUS_LABELS[status] || status, icon: <CheckCircle2 className="w-3 h-3" /> };
+    return { dot: 'bg-amber-500', text: 'text-amber-700', bg: 'bg-amber-50', label: STATUS_LABELS[status] || status, icon: <AlertTriangle className="w-3 h-3" /> };
+  };
+
+  // ── Loading / Error ───────────────────────────────────────────────
+  if (isLoading) return <div className="flex items-center justify-center py-32"><Spinner /></div>;
+  if (error) return (
+    <div className="max-w-lg mx-auto mt-12 p-6 bg-red-50 rounded-2xl border border-red-100 text-center">
+      <AlertTriangle className="w-8 h-8 mx-auto mb-2 text-red-400" />
+      <p className="text-sm font-semibold text-red-700">{error}</p>
+    </div>
+  );
+
+  // ─────────────────────────────────────────────────────────────────
   return (
-    <>
-      {/* 1. ให้ Container หลักสูงเต็มพื้นที่ และเป็น Flexbox แนวตั้ง */}
-      <div className="bg-white rounded-lg shadow flex flex-col h-full">
-        {/* --- ส่วน Filter (ไม่ Scroll) --- */}
-        <div className="p-4 border-b">
-          <h2 className="text-xl font-bold text-gray-800 mb-4">
-            📚 คลังเอกสารอนุมัติ (Approved Document Library)
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
-            <div className="relative md:col-span-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <input
-                type="text"
-                placeholder="ค้นหา..."
-                // 🟢 แก้ไข: เติม bg-white text-gray-900
-                className="w-full h-10 pl-10 pr-4 border rounded-lg bg-white text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-blue-500 outline-none"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-            <div className="relative md:col-span-1">
-              <Building className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <select
-                // 🟢 แก้ไข: เติม bg-white text-gray-900
-                className="w-full h-10 pl-10 pr-4 border rounded-lg appearance-none truncate bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none"
-                value={selectedSite}
-                onChange={(e) => setSelectedSite(e.target.value)}
-              >
-                <option value="ALL">ทุกโครงการ</option>
-                {sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
-              </select>
-            </div>
-            <div className="relative md:col-span-1">
-              <Tag className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <select
-                // 🟢 แก้ไข: เติม bg-white text-gray-900
-                className="w-full h-10 pl-10 pr-4 border rounded-lg appearance-none bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none truncate"
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-              >
-                <option value="ALL">ทุกหมวดงาน</option>
-                {availableCategories.map((cat: Category) => <option key={cat.id} value={cat.categoryCode}>{cat.categoryCode}</option>)}
-              </select>
-            </div>
-            <div className="relative md:col-span-1">
-              <FileDigit className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <select
-                className="w-full h-10 pl-10 pr-4 border rounded-lg appearance-none bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none truncate"
-                value={selectedRfaType}
-                onChange={(e) => setSelectedRfaType(e.target.value)}
-              >
-                <option value="ALL">ทุกประเภท</option>
-                <option value="RFA-SHOP">Shop Drawing</option>
-                <option value="RFA-MAT">Material</option>
-                <option value="RFA-GEN">General</option>
-              </select>
-            </div>
-            <div className="md:col-span-1">
-              <button
-                onClick={resetFilters}
-                className="w-full h-10 px-4 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors font-medium"
-              >
-                รีเซ็ต
-              </button>
-            </div>
+    <div className="bg-slate-50 min-h-screen font-sans antialiased">
+
+      {/* ── Sticky Toolbar ── */}
+      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm border-b border-slate-200">
+        <div className="max-w-screen-xl mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center gap-3">
+
+          {/* Title (desktop) */}
+          <div className="hidden lg:flex items-center gap-2.5 mr-4 flex-shrink-0">
+            <FolderOpen className="w-5 h-5 text-blue-600" />
+            <span className="text-base font-bold text-gray-800 tracking-tight">คลังเอกสารอนุมัติ</span>
+            <span className="text-sm text-slate-400 font-medium">({filteredDocs.length} รายการ)</span>
           </div>
-          {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
-        </div>
 
-        <div className="p-4 flex-1 min-h-0 overflow-y-auto">
-          {isLoading ? (
-            <div className="text-center py-16"><Spinner /></div>
-          ) : filteredDocuments.length === 0 ? (
-            <div className="text-center py-16 border-2 border-dashed rounded-lg"><p className="text-gray-500">ไม่พบเอกสารที่อนุมัติแล้ว</p></div>
-          ) : isMobile ? (
-            <div className="space-y-3">
-              {filteredDocuments.map(doc => {
-                const isSuspended = doc.supersededStatus === 'SUSPENDED';
-                const isRevisionInProgress = doc.supersededStatus === 'ACTIVE' || isSuspended;
+          {/* Divider */}
+          <div className="hidden lg:block w-px h-6 bg-slate-200 flex-shrink-0" />
 
-                // 🟢 ค้นหาไฟล์หลักที่จะแสดง (เอา PDF ล่าสุด หรือไฟล์ล่าสุด) 
-                const mainFile = doc.files && doc.files.length > 0
-                  ? [...doc.files].reverse().find(f => f.contentType === 'application/pdf' || f.fileName.toLowerCase().endsWith('.pdf')) || doc.files[doc.files.length - 1]
-                  : null;
-                
-                let revisionComment = (doc as any).supersededComment;
-                if (!revisionComment && doc.workflow) {
-                  const wfStep = [...doc.workflow].reverse().find(w => w.comments && (w.status === STATUSES.APPROVED_REVISION_REQUIRED || w.status === STATUSES.REJECTED));
-                  if (wfStep) revisionComment = wfStep.comments;
-                }
-                revisionComment = revisionComment || '';
-                return (
-                <div key={doc.id} className={`border rounded-lg p-4 space-y-3 transition-all ${
-                  isSuspended ? 'bg-red-50 border-red-300'
-                  : 'bg-white'
-                }`}>
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <p className="font-semibold text-gray-800 truncate">{doc.documentNumber}</p>
-                      <span className="inline-flex items-center px-1.5 py-0.5 bg-gray-200 text-gray-800 rounded-md text-[10px] font-bold">
-                        REV-{String(doc.revisionNumber || 0).padStart(2, '0')}
-                        {isRevisionInProgress && (
-                          <span className="ml-1 text-[10px] text-orange-600 font-bold" title="ต้องการ Rev. ใหม่">⚠️</span>
-                        )}
-                      </span>
-                      {isSuspended && (
-                        <span className="flex-shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-600 text-white">
-                          <Lock className="w-2.5 h-2.5 mr-0.5" />ห้ามใช้
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-gray-600 line-clamp-2 mt-1">{doc.title}</p>
-                  </div>
-                  {/* Revision / Suspension Remark Banner */}
-                  {isSuspended && revisionComment && (
-                    <div className="flex items-start gap-2 px-3 py-2 bg-red-100 border border-red-300 rounded-md text-xs text-red-700">
-                      <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                      <span><span className="font-semibold">สาเหตุที่ระงับ: </span>{revisionComment}</span>
-                    </div>
-                  )}
-                  {!isSuspended && isRevisionInProgress && revisionComment && (
-                    <div className="flex items-start gap-2 px-3 py-2 bg-amber-50 border border-amber-300 rounded-md text-xs text-amber-800">
-                      <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                      <span><span className="font-semibold">กำลังแก้ไข: </span>{revisionComment}</span>
-                    </div>
-                  )}
-                  {!isSuspended && isRevisionInProgress && !revisionComment && (
-                    <div className="flex items-start gap-2 px-3 py-2 bg-amber-50 border border-amber-300 rounded-md text-xs text-amber-800">
-                      <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                      <span>เอกสารฉบับนี้กำลังอยู่ในระหว่างการแก้ไข Rev. ใหม่</span>
-                    </div>
-                  )}
-                  {mainFile && (
-                    isSuspended ? (
-                      <div className="w-full flex items-center justify-center text-sm bg-red-100 border border-red-300 rounded-md p-2 text-red-700 font-medium cursor-not-allowed">
-                        <Lock className="w-4 h-4 mr-2" />
-                        <span className="truncate">ห้ามเปิดไฟล์ — รอ Rev. ใหม่</span>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => handleFileClick(mainFile)}
-                        className="w-full flex items-center justify-center text-sm bg-white border border-gray-300 rounded-md p-2 hover:bg-gray-100 transition-colors text-gray-700 font-medium"
-                      >
-                        {mainFile.fileName.toLowerCase().endsWith('.pdf') ? <Eye className="w-4 h-4 mr-2 text-red-500" /> : <Download className="w-4 h-4 mr-2 text-blue-500" />}
-                        <span className="truncate">{mainFile.fileName}</span>
-                      </button>
-                    )
-                  )}
-                  {/* CAD Files Section (Mobile) — Progressive Disclosure */}
-                  {!isSuspended && (doc as any).cadFiles && (doc as any).cadFiles.length > 0 && (
-                    <div>
-                      <button
-                        onClick={() => toggleCad(doc.id)}
-                        className="w-full flex items-center justify-between text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-md px-3 py-1.5 hover:bg-blue-100 transition-colors"
-                      >
-                        <span className="flex items-center gap-1.5">
-                          <FolderOpen className="w-3.5 h-3.5" />
-                          ไฟล์ CAD ({(doc as any).cadFiles.length} ไฟล์)
-                        </span>
-                        {expandedCadIds.has(doc.id) ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                      </button>
-                      {expandedCadIds.has(doc.id) && (
-                        <div className="mt-1 space-y-1 pl-1">
-                          {(doc as any).cadFiles.map((cad: any, i: number) => (
-                            <a
-                              key={i}
-                              href={cad.fileUrl}
-                              download={cad.fileName}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 hover:underline py-0.5"
-                            >
-                              <Download className="w-3.5 h-3.5 flex-shrink-0" />
-                              <span className="truncate">{cad.fileName}</span>
-                            </a>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  <div className="flex justify-between items-center pt-2 border-t text-xs text-gray-500">
-                    <span className="px-2 py-1 bg-green-100 text-green-800 rounded font-medium">{STATUS_LABELS[doc.status] || doc.status}</span>
-                    <span>{formatDate(doc.updatedAt)}</span>
-                  </div>
-                </div>
-              )})}
+          {/* Search */}
+          <div className="relative flex-1 min-w-0">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="ค้นหาเลขเอกสาร หรือชื่องาน..."
+              className="w-full pl-10 pr-4 py-2.5 text-sm bg-white border border-slate-300 rounded-lg ring-1 ring-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-400 outline-none transition-all placeholder:text-slate-400 text-gray-800"
+            />
+          </div>
+
+          {/* Filters */}
+          <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
+            {/* Site */}
+            <div className="relative">
+              <Building className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+              <select value={selectedSite} onChange={e => setSelectedSite(e.target.value)}
+                className="pl-9 pr-8 py-2.5 text-sm font-medium bg-white border border-slate-300 text-slate-700 rounded-lg appearance-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400 outline-none cursor-pointer hover:border-slate-400 transition-colors">
+                <option value="ALL">ทุกโครงการ</option>
+                {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
             </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">เลขที่เอกสาร</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">หัวข้อเรื่อง</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ไฟล์แนบ</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">สถานะ</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">วันที่อนุมัติ</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {filteredDocuments.map(doc => {
-                    const isSuspended = doc.supersededStatus === 'SUSPENDED';
-                    const isRevisionInProgress = doc.supersededStatus === 'ACTIVE' || isSuspended;
 
-                    // 🟢 ค้นหาไฟล์หลักที่จะแสดง (เอา PDF ล่าสุด หรือไฟล์ล่าสุด) 
-                    const mainFile = doc.files && doc.files.length > 0
-                      ? [...doc.files].reverse().find(f => f.contentType === 'application/pdf' || f.fileName.toLowerCase().endsWith('.pdf')) || doc.files[doc.files.length - 1]
-                      : null;
-
-                    let revisionComment = (doc as any).supersededComment;
-                    if (!revisionComment && doc.workflow) {
-                      const wfStep = [...doc.workflow].reverse().find(w => w.comments && (w.status === STATUSES.APPROVED_REVISION_REQUIRED || w.status === STATUSES.REJECTED));
-                      if (wfStep) revisionComment = wfStep.comments;
-                    }
-                    revisionComment = revisionComment || '';
-                    return (
-                    <tr key={doc.id} className={
-                      isSuspended ? 'bg-red-50'
-                      : 'bg-white'
-                    }>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-800">
-                        <div className="flex items-center gap-2 flex-wrap mb-1">
-                          {doc.documentNumber}
-                          <span className="inline-flex items-center px-1.5 py-0.5 bg-gray-200 text-gray-800 rounded-md text-[10px] font-bold">
-                            REV-{String(doc.revisionNumber || 0).padStart(2, '0')}
-                            {isRevisionInProgress && (
-                              <span className="ml-1 text-[10px] text-orange-600 font-bold" title="ต้องการ Rev. ใหม่">⚠️</span>
-                            )}
-                          </span>
-                          {isSuspended && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-600 text-white flex-shrink-0">
-                              <Lock className="w-2.5 h-2.5 mr-0.5" />ห้ามใช้
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-700">
-                        <p className="line-clamp-2">{doc.title}</p>
-                        {/* Revision / Suspension Remark */}
-                        {isSuspended && revisionComment && (
-                          <div className="flex items-start gap-1.5 mt-1.5 text-xs text-red-700">
-                            <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
-                            <span><span className="font-semibold">สาเหตุที่ระงับ: </span>{revisionComment}</span>
-                          </div>
-                        )}
-                        {!isSuspended && isRevisionInProgress && (
-                          <div className="flex items-start gap-1.5 mt-1.5 text-xs text-amber-700">
-                            <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
-                            <span>
-                              <span className="font-semibold">กำลังแก้ไข: </span>
-                              {revisionComment || 'อยู่ในระหว่างการแก้ไข Rev. ใหม่'}
-                            </span>
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        {mainFile ? (
-                          isSuspended ? (
-                            <div className="flex items-center text-red-600 font-medium cursor-not-allowed" title="ไฟล์ถูกระงับ">
-                              <Lock className="w-4 h-4 mr-2 flex-shrink-0" />
-                              <span className="truncate max-w-[200px] line-through text-red-400">{mainFile.fileName}</span>
-                            </div>
-                          ) : (
-                            <div className="space-y-1">
-                              <button
-                                onClick={() => handleFileClick(mainFile)}
-                                className="flex items-center text-blue-600 hover:text-blue-800 hover:underline"
-                                title={mainFile.fileName}
-                              >
-                                <FileText className="w-4 h-4 mr-2 flex-shrink-0" />
-                                <span className="truncate max-w-[250px]">{mainFile.fileName}</span>
-                              </button>
-                              {/* CAD Files (Desktop) — Progressive Disclosure */}
-                              {(doc as any).cadFiles && (doc as any).cadFiles.length > 0 && (
-                                <div className="mt-1.5">
-                                  <button
-                                    onClick={() => toggleCad(doc.id)}
-                                    className="flex items-center gap-1.5 text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-full px-2.5 py-0.5 hover:bg-blue-100 transition-colors"
-                                  >
-                                    <FolderOpen className="w-3 h-3" />
-                                    ไฟล์ CAD ({(doc as any).cadFiles.length})
-                                    {expandedCadIds.has(doc.id) ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                                  </button>
-                                  {expandedCadIds.has(doc.id) && (
-                                    <div className="mt-1 space-y-0.5 pl-1">
-                                      {(doc as any).cadFiles.map((cad: any, i: number) => (
-                                        <a
-                                          key={i}
-                                          href={cad.fileUrl}
-                                          download={cad.fileName}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 hover:underline py-0.5"
-                                          title={cad.fileName}
-                                        >
-                                          <Download className="w-3 h-3 flex-shrink-0" />
-                                          <span className="truncate max-w-[200px]">{cad.fileName}</span>
-                                        </a>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          )
-                        ) : (
-                          <span className="text-gray-400">-</span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <span className="px-2 py-1 bg-green-100 text-green-800 rounded font-medium inline-block w-fit">{STATUS_LABELS[doc.status] || doc.status}</span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(doc.updatedAt)}</td>
-                    </tr>
-                  )})}
-
-                </tbody>
-              </table>
+            {/* RFA Type — ก่อนหมวดงาน */}
+            <div className="relative">
+              <select value={selectedRfaType} onChange={e => setSelectedRfaType(e.target.value)}
+                className="px-4 pr-9 py-2.5 text-sm font-medium bg-white border border-slate-300 text-slate-700 rounded-lg appearance-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400 outline-none cursor-pointer hover:border-slate-400 transition-colors">
+                <option value="ALL">ทุกประเภท</option>
+                <option value="RFA-SHOP">SHOP</option>
+                <option value="RFA-MAT">MAT</option>
+                <option value="RFA-GEN">GEN</option>
+              </select>
+              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
             </div>
-          )}
+
+            {/* Category */}
+            <div className="relative">
+              <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+              <select value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)}
+                className="pl-9 pr-8 py-2.5 text-sm font-medium bg-white border border-slate-300 text-slate-700 rounded-lg appearance-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400 outline-none cursor-pointer hover:border-slate-400 transition-colors">
+                <option value="ALL">ทุกหมวดงาน</option>
+                {availableCategoryKeys.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+              </select>
+              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+            </div>
+
+            {/* Reset button — แสดงเมื่อมี filter active */}
+            {(selectedSite !== 'ALL' || selectedRfaType !== 'ALL' || selectedCategory !== 'ALL' || searchQuery !== '') && (
+              <button
+                onClick={() => { setSelectedSite('ALL'); setSelectedRfaType('ALL'); setSelectedCategory('ALL'); setSearchQuery(''); }}
+                className="flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium text-red-600 border border-red-200 bg-red-50 rounded-lg hover:bg-red-100 hover:border-red-300 transition-all"
+              >
+                ✕ ล้างตัวกรอง
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      <PDFPreviewModal
-        isOpen={!!previewFile}
-        file={previewFile}
-        onClose={() => setPreviewFile(null)}
-        allowEdit={false}
-      />
-    </>
+
+      {/* ── Main Content ── */}
+      <div className="">
+
+        {filteredDocs.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-24 text-slate-400">
+            <FolderOpen className="w-14 h-14 mb-4 text-slate-300" />
+            <p className="text-base font-semibold text-slate-600">ไม่พบเอกสาร</p>
+            <p className="text-sm mt-1">ลองเปลี่ยนตัวกรองหรือคำค้นหาดูนะครับ</p>
+          </div>
+        ) : (
+          <>
+            {/* ── Desktop: Dense Data Table ───────────────────────────────── */}
+            <div className="hidden md:block">
+              <div className="bg-white border-t border-b border-slate-200 overflow-hidden">
+
+                {/* Table Header */}
+                <div className="grid items-center px-6 py-3 bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider select-none"
+                  style={{ gridTemplateColumns: '2fr 1.2fr 1fr 0.7fr auto' }}>
+                  <button onClick={() => requestSort('documentNumber')} className="pl-3 flex items-center gap-1.5 hover:text-slate-800 transition-colors w-fit">
+                    เอกสาร / ชื่องาน <SortIcon columnKey="documentNumber" />
+                  </button>
+                  <div>หมวดงาน / โครงการ</div>
+                  <div>สถานะ</div>
+                  <button onClick={() => requestSort('updatedAt')} className="flex items-center justify-center gap-1.5 hover:text-slate-800 transition-colors mx-auto">
+                    อัปเดต <SortIcon columnKey="updatedAt" />
+                  </button>
+                  <div className="w-52 text-center">ไฟล์แนบ</div>
+                </div>
+
+                {/* Table Rows */}
+                <div className="divide-y divide-slate-100">
+                  {sortedDocs.map(doc => {
+                    const a = doc as any;
+                    const isSuspended = doc.supersededStatus === 'SUSPENDED';
+                    const isActive = doc.supersededStatus === 'ACTIVE';
+                    const sc = statusConfig(doc.status, isSuspended);
+                    const pdfFiles = getPdfFiles(doc);
+                    const cadFiles: RFAFile[] = a.cadFiles || [];
+                    const isPdfOpen = openDrawers.has(`${doc.id}-pdf`);
+                    const isCadOpen = openDrawers.has(`${doc.id}-cad`);
+                    const siteName = sites.find(s => s.id === a.siteId)?.name || '—';
+                    const catLabel = resolveCategory(a);
+
+                    // revision comment
+                    let revisionComment: string = a.supersededComment || '';
+                    if (!revisionComment && doc.workflow) {
+                      const wf = [...doc.workflow].reverse().find(w => w.comments && (w.status === STATUSES.APPROVED_REVISION_REQUIRED || w.status === STATUSES.REJECTED));
+                      if (wf) revisionComment = wf.comments || '';
+                    }
+
+                    return (
+                      <div key={doc.id} className={`group relative ${isSuspended ? 'bg-red-50/40' : 'hover:bg-slate-50/80'} transition-colors duration-100`}>
+
+                        {/* Status left accent line */}
+                        <div className={`absolute left-0 top-0 bottom-0 w-0.5 ${sc.dot}`} />
+
+                        {/* Main row */}
+                        <div className="grid items-center px-6 py-5"
+                          style={{ gridTemplateColumns: '2fr 1.2fr 1fr 0.7fr auto' }}>
+
+                          {/* Col 1: Doc number + title */}
+                          <div className="pl-3 min-w-0 pr-4">
+                            <div className="flex items-center gap-2 mb-1.5">
+                              <span className="text-lg font-bold text-slate-900 tracking-tight">{doc.documentNumber}</span>
+                              <span className="text-xs font-semibold text-slate-500 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 flex-shrink-0">
+                                Rev.{String(doc.revisionNumber || 0).padStart(2, '0')}
+                              </span>
+                              {doc.rfaType && (
+                                <span className="text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-100 rounded px-1.5 py-0.5 flex-shrink-0">
+                                  {doc.rfaType.replace('RFA-', '')}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-base text-slate-500 truncate" title={doc.title}>{doc.title}</p>
+                            {/* Inline revision banner */}
+                            {(isSuspended || isActive) && (
+                              <p className={`text-sm mt-1.5 ${isSuspended ? 'text-red-600' : 'text-amber-700'} flex items-center gap-1`}>
+                                <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                                {isSuspended ? 'ระงับชั่วคราว' : 'กำลังแก้ไข'}{revisionComment ? `: ${revisionComment}` : ''}
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Col 2: Category (primary) / Site (secondary) */}
+                          <div className="min-w-0 pr-3">
+                            <p className="text-base font-medium text-slate-700 truncate" title={catLabel}>{catLabel}</p>
+                            <p className="text-sm text-slate-400 truncate mt-0.5" title={siteName}>{siteName}</p>
+                          </div>
+
+                          {/* Col 3: Status badge */}
+                          <div>
+                            <span className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold ${sc.bg} ${sc.text}`}>
+                              {sc.icon}
+                              {sc.label}
+                            </span>
+                          </div>
+
+                          {/* Col 4: Date */}
+                          <div className="text-center">
+                            <span className="text-base text-slate-500">{formatDate(doc.updatedAt)}</span>
+                          </div>
+
+                          {/* Col 5: File buttons */}
+                          <div className="w-52 flex items-center justify-center gap-2">
+                            <button
+                              onClick={() => !isSuspended && toggleDrawer(doc.id, 'pdf')}
+                              disabled={pdfFiles.length === 0 || isSuspended}
+                              aria-label={`เปิดไฟล์ PDF (${pdfFiles.length})`}
+                              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-all border ${
+                                pdfFiles.length === 0 || isSuspended
+                                  ? 'text-slate-300 border-slate-100 cursor-not-allowed'
+                                  : isPdfOpen
+                                    ? 'bg-red-600 text-white border-red-600 shadow-sm'
+                                    : 'text-slate-600 border-slate-200 hover:border-red-300 hover:text-red-600 hover:bg-red-50'
+                              }`}
+                            >
+                              <FileText className="w-4 h-4" />
+                              PDF
+                              <span className="opacity-60">({pdfFiles.length})</span>
+                            </button>
+                            <button
+                              onClick={() => !isSuspended && toggleDrawer(doc.id, 'cad')}
+                              disabled={cadFiles.length === 0 || isSuspended}
+                              aria-label={`ดาวน์โหลด CAD (${cadFiles.length})`}
+                              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-all border ${
+                                cadFiles.length === 0 || isSuspended
+                                  ? 'text-slate-300 border-slate-100 cursor-not-allowed'
+                                  : isCadOpen
+                                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                                    : 'text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50'
+                              }`}
+                            >
+                              <FileDigit className="w-4 h-4" />
+                              CAD
+                              <span className="opacity-60">({cadFiles.length})</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* ── PDF Drawer ── */}
+                        {isPdfOpen && pdfFiles.length > 0 && (
+                          <div className="border-t border-slate-100 bg-slate-50/80 px-4 py-3 pl-8">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">ไฟล์ PDF</p>
+                            <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
+                              {pdfFiles.map((pdf, idx) => (
+                                <button key={`${pdf.fileName}-${idx}`} onClick={() => setPreviewFile(pdf)}
+                                  className="flex items-center gap-2.5 p-2.5 bg-white rounded-lg border border-slate-200 hover:border-red-300 hover:shadow-sm group transition-all text-left">
+                                  <div className="w-8 h-8 rounded-md bg-red-50 text-red-500 flex items-center justify-center flex-shrink-0 group-hover:bg-red-500 group-hover:text-white transition-colors">
+                                    <FileText className="w-4 h-4" />
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-xs font-medium text-slate-700 truncate group-hover:text-red-700 transition-colors" title={pdf.fileName}>{pdf.fileName}</p>
+                                    <p className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5"><Eye className="w-3 h-3" /> พรีวิว</p>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* ── CAD Drawer ── */}
+                        {isCadOpen && cadFiles.length > 0 && (
+                          <div className="border-t border-slate-100 bg-slate-50/80 px-4 py-3 pl-8">
+                            <div className="flex items-center justify-between mb-2">
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">ไฟล์ต้นฉบับ (CAD)</p>
+                              {cadFiles.length > 1 && (
+                                <button onClick={() => cadFiles.forEach(f => f.fileUrl && window.open(f.fileUrl, '_blank'))}
+                                  className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 font-semibold transition-colors">
+                                  <DownloadCloud className="w-3.5 h-3.5" /> โหลดทั้งหมด
+                                </button>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
+                              {cadFiles.map((cad, idx) => (
+                                <button key={`${cad.fileName}-${idx}`} onClick={() => cad.fileUrl && window.open(cad.fileUrl, '_blank')}
+                                  className="flex items-center gap-2.5 p-2.5 bg-white rounded-lg border border-slate-200 hover:border-blue-300 hover:shadow-sm group transition-all text-left">
+                                  <div className="w-8 h-8 rounded-md bg-blue-50 text-blue-500 flex items-center justify-center flex-shrink-0 group-hover:bg-blue-500 group-hover:text-white transition-colors">
+                                    <FileDigit className="w-4 h-4" />
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-xs font-medium text-slate-700 truncate group-hover:text-blue-700 transition-colors" title={cad.fileName}>{cad.fileName}</p>
+                                    <p className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5"><Download className="w-3 h-3" /> ดาวน์โหลด</p>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Table Footer */}
+                <div className="px-6 py-2.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+                  <p className="text-[11px] text-slate-400">แสดง <span className="font-semibold text-slate-600">{filteredDocs.length}</span> จาก <span className="font-semibold text-slate-600">{documents.length}</span> รายการ</p>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Mobile: Card Stack ─────────────────────────────────────── */}
+            <div className="md:hidden flex flex-col gap-3">
+              {/* Mobile sorting controls */}
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs text-slate-500">เรียงตาม:</span>
+                <button onClick={() => requestSort('documentNumber')} className={`text-xs px-2.5 py-1.5 rounded-md border flex items-center gap-1 transition-colors ${sortConfig.key === 'documentNumber' ? 'bg-slate-100 border-slate-300 text-slate-800' : 'bg-white border-slate-200 text-slate-500'}`}>
+                  ชื่อเอกสาร <SortIcon columnKey="documentNumber" />
+                </button>
+                <button onClick={() => requestSort('updatedAt')} className={`text-xs px-2.5 py-1.5 rounded-md border flex items-center gap-1 transition-colors ${sortConfig.key === 'updatedAt' ? 'bg-slate-100 border-slate-300 text-slate-800' : 'bg-white border-slate-200 text-slate-500'}`}>
+                  อัปเดตล่าสุด <SortIcon columnKey="updatedAt" />
+                </button>
+              </div>
+
+              {sortedDocs.map(doc => {
+                const a = doc as any;
+                const isSuspended = doc.supersededStatus === 'SUSPENDED';
+                const isActive = doc.supersededStatus === 'ACTIVE';
+                const sc = statusConfig(doc.status, isSuspended);
+                const pdfFiles = getPdfFiles(doc);
+                const cadFiles: RFAFile[] = a.cadFiles || [];
+                const isPdfOpen = openDrawers.has(`${doc.id}-pdf`);
+                const isCadOpen = openDrawers.has(`${doc.id}-cad`);
+                const siteName = sites.find(s => s.id === a.siteId)?.name || '—';
+                const catLabel = resolveCategory(a);
+
+                let revisionComment: string = a.supersededComment || '';
+                if (!revisionComment && doc.workflow) {
+                  const wf = [...doc.workflow].reverse().find(w => w.comments && (w.status === STATUSES.APPROVED_REVISION_REQUIRED || w.status === STATUSES.REJECTED));
+                  if (wf) revisionComment = wf.comments || '';
+                }
+
+                return (
+                  <div key={doc.id} className={`bg-white rounded-xl border overflow-hidden ${isSuspended ? 'border-red-200' : 'border-slate-200'} shadow-sm`}>
+
+                    {/* Card color accent top bar */}
+                    <div className={`h-1 w-full ${sc.dot}`} />
+
+                    <div className="p-4">
+                      {/* Doc number row */}
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-base font-bold text-slate-900">{doc.documentNumber}</span>
+                            <span className="text-[10px] font-bold text-slate-500 bg-slate-100 rounded px-1.5 py-0.5">
+                              Rev.{String(doc.revisionNumber || 0).padStart(2, '0')}
+                            </span>
+                          </div>
+                          <p className="text-sm text-slate-500 mt-1 line-clamp-2">{doc.title}</p>
+                        </div>
+                        <span className={`flex-shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold ${sc.bg} ${sc.text}`}>
+                          {sc.icon} {sc.label}
+                        </span>
+                      </div>
+
+                      {/* Revision banner */}
+                      {(isSuspended || isActive) && (
+                        <div className={`flex items-start gap-1.5 text-xs rounded-md px-3 py-2 mb-3 ${isSuspended ? 'bg-red-50 text-red-700 border border-red-100' : 'bg-amber-50 text-amber-800 border border-amber-100'}`}>
+                          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                          <span><span className="font-semibold">{isSuspended ? 'ระงับ: ' : 'กำลังแก้ไข: '}</span>{revisionComment || 'อยู่ในระหว่างการแก้ไข Rev. ใหม่'}</span>
+                        </div>
+                      )}
+
+                      {/* Meta */}
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-400 mb-4">
+                        <span className="flex items-center gap-1"><Building className="w-3 h-3" /> {siteName}</span>
+                        <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {formatDate(doc.updatedAt)}</span>
+                        {catLabel !== '—' && <span className="text-slate-400 truncate max-w-[140px]">{catLabel}</span>}
+                      </div>
+
+                      {/* File buttons */}
+                      <div className="flex gap-2">
+                        <button onClick={() => !isSuspended && toggleDrawer(doc.id, 'pdf')}
+                          disabled={pdfFiles.length === 0 || isSuspended}
+                          className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-sm font-semibold border transition-all ${
+                            pdfFiles.length === 0 || isSuspended
+                              ? 'text-slate-300 border-slate-100 cursor-not-allowed'
+                              : isPdfOpen
+                                ? 'bg-red-600 text-white border-red-600'
+                                : 'text-slate-600 border-slate-200 hover:border-red-300 hover:text-red-600'
+                          }`}>
+                          <FileText className="w-4 h-4" />
+                          PDF ({pdfFiles.length})
+                        </button>
+                        <button onClick={() => !isSuspended && toggleDrawer(doc.id, 'cad')}
+                          disabled={cadFiles.length === 0 || isSuspended}
+                          className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-sm font-semibold border transition-all ${
+                            cadFiles.length === 0 || isSuspended
+                              ? 'text-slate-300 border-slate-100 cursor-not-allowed'
+                              : isCadOpen
+                                ? 'bg-blue-600 text-white border-blue-600'
+                                : 'text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600'
+                          }`}>
+                          <FileDigit className="w-4 h-4" />
+                          CAD ({cadFiles.length})
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Mobile PDF drawer */}
+                    {isPdfOpen && pdfFiles.length > 0 && (
+                      <div className="border-t border-slate-100 bg-slate-50 p-3">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 px-1">ไฟล์ PDF</p>
+                        <div className="space-y-1.5">
+                          {pdfFiles.map((pdf, idx) => (
+                            <button key={`${pdf.fileName}-${idx}`} onClick={() => setPreviewFile(pdf)}
+                              className="w-full flex items-center gap-3 p-3 bg-white rounded-lg border border-slate-200 hover:border-red-200 transition-all group">
+                              <div className="w-9 h-9 rounded-lg bg-red-50 text-red-500 flex items-center justify-center flex-shrink-0">
+                                <FileText className="w-4 h-4" />
+                              </div>
+                              <div className="flex-1 text-left min-w-0">
+                                <p className="text-sm font-medium text-slate-700 truncate">{pdf.fileName}</p>
+                                <p className="text-xs text-slate-400 mt-0.5">แตะเพื่อพรีวิว</p>
+                              </div>
+                              <Eye className="w-4 h-4 text-slate-300 group-hover:text-red-500 transition-colors" />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Mobile CAD drawer */}
+                    {isCadOpen && cadFiles.length > 0 && (
+                      <div className="border-t border-slate-100 bg-slate-50 p-3">
+                        <div className="flex items-center justify-between mb-2 px-1">
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">ไฟล์ CAD</p>
+                          {cadFiles.length > 1 && (
+                            <button onClick={() => cadFiles.forEach(f => f.fileUrl && window.open(f.fileUrl, '_blank'))}
+                              className="flex items-center gap-1 text-xs text-blue-600 font-semibold">
+                              <DownloadCloud className="w-3.5 h-3.5" /> ทั้งหมด
+                            </button>
+                          )}
+                        </div>
+                        <div className="space-y-1.5">
+                          {cadFiles.map((cad, idx) => (
+                            <button key={`${cad.fileName}-${idx}`} onClick={() => cad.fileUrl && window.open(cad.fileUrl, '_blank')}
+                              className="w-full flex items-center gap-3 p-3 bg-white rounded-lg border border-slate-200 hover:border-blue-200 transition-all group">
+                              <div className="w-9 h-9 rounded-lg bg-blue-50 text-blue-500 flex items-center justify-center flex-shrink-0">
+                                <FileDigit className="w-4 h-4" />
+                              </div>
+                              <div className="flex-1 text-left min-w-0">
+                                <p className="text-sm font-medium text-slate-700 truncate">{cad.fileName}</p>
+                                <p className="text-xs text-slate-400 mt-0.5">แตะเพื่อดาวน์โหลด</p>
+                              </div>
+                              <Download className="w-4 h-4 text-slate-300 group-hover:text-blue-500 transition-colors" />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* PDF Preview */}
+      <PDFPreviewModal isOpen={!!previewFile} file={previewFile} onClose={() => setPreviewFile(null)} allowEdit={false} />
+    </div>
   );
 }

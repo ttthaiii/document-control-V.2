@@ -539,11 +539,11 @@ export default function CreateRFAForm({
       <div className="flex-1 p-4 sm:p-6 overflow-y-auto bg-slate-50 space-y-6">
 
         {!presetRfaType && (
-          <section className="bg-white p-6 rounded-lg border border-gray-200">
-            <h3 className="flex items-center text-lg font-semibold text-gray-900 border-b pb-4 mb-6">
-              <span className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center mr-3 font-bold text-base">1</span>
-              เลือกประเภทเอกสาร
-            </h3>
+          <section className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+            <div className="flex items-center gap-3 border-b border-slate-100 pb-4 mb-6">
+              <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm flex-shrink-0">1</span>
+              <h3 className="text-lg font-semibold text-gray-900">เลือกประเภทเอกสาร</h3>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {Object.entries(RFA_TYPE_CONFIG).map(([type, config]) => {
                 const isAllowed = userProp ? config.allowedRoles.includes(userProp.role) : false;
@@ -566,11 +566,13 @@ export default function CreateRFAForm({
           </section>
         )}
 
-        <section className={`bg-white p-6 rounded-lg border border-gray-200 ${!formData.rfaType && !presetRfaType ? 'opacity-40 pointer-events-none' : ''}`}>
-          <h3 className="flex items-center text-lg font-semibold text-gray-900 border-b pb-4 mb-6">
-            <Info size={20} className="mr-3 text-blue-600" />
-            ข้อมูลเอกสาร
-          </h3>
+        <section className={`bg-white p-6 rounded-xl border border-slate-200 shadow-sm ${!formData.rfaType && !presetRfaType ? 'opacity-40 pointer-events-none' : ''}`}>
+          <div className="flex items-center gap-3 border-b border-slate-100 pb-4 mb-6">
+            <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm flex-shrink-0">
+              {presetRfaType ? '1' : '2'}
+            </span>
+            <h3 className="text-lg font-semibold text-gray-900">ข้อมูลเอกสาร</h3>
+          </div>
           <div className="space-y-6 max-w-3xl">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
@@ -680,11 +682,13 @@ export default function CreateRFAForm({
           </div>
         </section>
 
-        <section className={`bg-white p-6 rounded-lg border border-gray-200 ${!formData.rfaType && !presetRfaType ? 'opacity-40 pointer-events-none' : ''}`}>
-          <h3 className="flex items-center text-lg font-semibold text-gray-900 border-b pb-4 mb-6">
-            <Paperclip size={20} className="mr-3 text-blue-600" />
-            แนบไฟล์ <span className="text-red-500 ml-1">*</span>
-          </h3>
+        <section className={`bg-white p-6 rounded-xl border border-slate-200 shadow-sm ${!formData.rfaType && !presetRfaType ? 'opacity-40 pointer-events-none' : ''}`}>
+          <div className="flex items-center gap-3 border-b border-slate-100 pb-4 mb-6">
+            <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm flex-shrink-0">
+              {presetRfaType ? '2' : '3'}
+            </span>
+            <h3 className="text-lg font-semibold text-gray-900">แนบไฟล์ <span className="text-red-500">*</span></h3>
+          </div>
           <div className="space-y-6 max-w-3xl">
             <label htmlFor="file-upload" className="flex flex-col items-center justify-center w-full h-48 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-slate-50 hover:bg-slate-100 transition-colors">
               <div className="flex flex-col items-center justify-center pt-5 pb-6 text-center">

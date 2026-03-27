@@ -76,15 +76,15 @@ const WorkflowHistoryModal = ({
             {filteredWorkflow.length > 0 ? (
               filteredWorkflow.map((item, index) => (
                 <div key={index} className="relative pl-6 pb-8 last:pb-0">
-                  <div 
-                    className="absolute -left-[9px] top-1 w-4 h-4 rounded-full border-2 border-white z-10" 
+                  <div
+                    className="absolute -left-[9px] top-1 w-4 h-4 rounded-full border-2 border-white z-10"
                     style={{ backgroundColor: STATUS_COLORS[item.status] || '#3B82F6' }}
                   ></div>
                   <p className="font-semibold text-gray-800">
                     {item.revisionNumber !== undefined && (
                       <span className="text-blue-600 mr-2 font-bold">[Rev.{item.revisionNumber}]</span>
-                     )}
-                     {STATUS_LABELS[item.status] || item.status}
+                    )}
+                    {STATUS_LABELS[item.status] || item.status}
                   </p>
                   <p className="text-sm text-gray-600">โดย: {item.userName} ({item.role})</p>
                   <time className="text-xs text-gray-400">{formatDate(item.timestamp)}</time>
@@ -212,7 +212,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const [supersedeFiles, setSupersedeFiles] = useState<UploadedFile[]>([]);
   const [suspendOldDoc, setSuspendOldDoc] = useState(false); // default = ไม่ระงับ
   const [isSupersedeSubmitting, setIsSupersedeSubmitting] = useState(false);
-  
+
   // Pending Review States (Site Review)
   const [suspendPreviousRevision, setSuspendPreviousRevision] = useState(false);
 
@@ -239,10 +239,10 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     // Save current scroll position to prevent layout shifts
     const scrollY = window.scrollY;
     const body = window.document.body;
-    
+
     // Get scrollbar width to prevent layout shift when hiding internal scrollbars
     const scrollbarWidth = window.innerWidth - window.document.documentElement.clientWidth;
-    
+
     const originalStyle = {
       position: body.style.position,
       top: body.style.top,
@@ -250,7 +250,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       overflow: body.style.overflow,
       paddingRight: body.style.paddingRight
     };
-    
+
     // Lock the body to the current scroll position securely 
     // This perfectly hides the 'html' scrollbar without resetting scrollTop to 0
     body.style.position = 'fixed';
@@ -258,7 +258,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     body.style.width = '100%';
     body.style.overflow = 'hidden';
     body.style.paddingRight = `${scrollbarWidth}px`;
-    
+
     // Hide all internal scrollbars in the background table by adding a global style temporarily
     const style = window.document.createElement('style');
     style.id = 'rfa-modal-scroll-lock';
@@ -269,7 +269,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       }
     `;
     window.document.head.appendChild(style);
-    
+
     return () => {
       // Restore layout
       body.style.position = originalStyle.position;
@@ -277,7 +277,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       body.style.width = originalStyle.width;
       body.style.overflow = originalStyle.overflow;
       body.style.paddingRight = originalStyle.paddingRight;
-      
+
       const styleEl = window.document.getElementById('rfa-modal-scroll-lock');
       if (styleEl) styleEl.remove();
 
@@ -353,8 +353,8 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const canRevise = isCreator || user?.role === ROLES.ADMIN || canReviseBimDoc || canReviseNonBimDoc;
   const hasRequestedRevision = !!document?.supersededComment;
   const isRevisionFlow = (
-    document?.status === STATUSES.REJECTED || 
-    hasRequestedRevision || 
+    document?.status === STATUSES.REJECTED ||
+    hasRequestedRevision ||
     document?.status === STATUSES.APPROVED_REVISION_REQUIRED
   ) && canRevise && document?.isLatest;
 
@@ -492,7 +492,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
 
       const setFiles = target === 'revision' ? setRevisionFiles
         : target === 'supersede' ? setSupersedeFiles
-        : setNewFiles;
+          : setNewFiles;
 
       uploadTask.on(
         'state_changed',
@@ -808,8 +808,8 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
         uploadedFiles: successfulUploads.map(f => f.uploadedData),
         comments: revisionComment,
         verifiedTaskId: verifiedTaskId,
-        suspendOldDoc: document.status === STATUSES.APPROVED_REVISION_REQUIRED 
-          ? suspendOldDocForRevision 
+        suspendOldDoc: document.status === STATUSES.APPROVED_REVISION_REQUIRED
+          ? suspendOldDocForRevision
           : document.supersededStatus === 'SUSPENDED',
       };
       const response = await fetch(`/api/rfa/create_revision`, {
@@ -904,21 +904,18 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
 
   return (
     <>
-      <div 
-        className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-opacity duration-200 ${
-          isClosing ? 'opacity-0' : 'opacity-100'
-        } ${overlayClasses}`}
+      <div
+        className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-opacity duration-200 ${isClosing ? 'opacity-0' : 'opacity-100'
+          } ${overlayClasses}`}
         onClick={handleBackdropClick}
       >
-        <div 
-          className={`rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col transition-all duration-200 relative transform ${
-            isClosing ? 'scale-95 translate-y-2 opacity-0' : 'scale-100 translate-y-0 opacity-100'
-          } ${
-            document.supersededStatus === 'SUSPENDED' ? 'bg-red-50' : 'bg-white'
-          }`}
+        <div
+          className={`rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col transition-all duration-200 relative transform ${isClosing ? 'scale-95 translate-y-2 opacity-0' : 'scale-100 translate-y-0 opacity-100'
+            } ${document.supersededStatus === 'SUSPENDED' ? 'bg-red-50' : 'bg-white'
+            }`}
           onClick={(e) => e.stopPropagation()} // ป้องกันการคลิกทะลุไปถึง backdrop
         >
-          
+
           {/* 🔒 Loading Overlay ตอนกด Submit เพื่อบังไม่ให้เห็น UI กระพริบตอน Firestore อัปเดต */}
           {(isSubmitting || isSupersedeSubmitting) && (
             <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] z-[100] flex items-center justify-center rounded-lg">
@@ -967,486 +964,501 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
 
           {/* Scrollable Container for both Content and Action Panels */}
           <div className="flex-1 overflow-y-auto min-h-0 w-full">
-            
+
             <div className="p-6 space-y-6">
               <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                <div>
-                  <strong className="text-gray-700 font-semibold block mb-1">สถานะ:</strong>
-                  <span
-                    className="px-3 py-1 text-xs font-bold text-white rounded-full shadow-sm"
-                    style={{ backgroundColor: STATUS_COLORS[document.status] || '#6c757d' }}
-                  >
-                    {STATUS_LABELS[document.status] || document.status}
-                  </span>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                  <div>
+                    <strong className="text-gray-700 font-semibold block mb-1">สถานะ:</strong>
+                    <span
+                      className="px-3 py-1 text-xs font-bold text-white rounded-full shadow-sm"
+                      style={{ backgroundColor: STATUS_COLORS[document.status] || '#6c757d' }}
+                    >
+                      {STATUS_LABELS[document.status] || document.status}
+                    </span>
+                  </div>
+                  <div>
+                    <strong className="text-gray-700 font-semibold block">หมวดงาน:</strong>
+                    <span className="text-gray-900 font-medium">{document.category.categoryCode}</span>
+                  </div>
+                  <div>
+                    <strong className="text-gray-700 font-semibold block">โครงการ:</strong>
+                    <span className="text-gray-900 font-medium">{document.site?.name || 'N/A'}</span>
+                  </div>
                 </div>
-                <div>
-                  <strong className="text-gray-700 font-semibold block">หมวดงาน:</strong>
-                  <span className="text-gray-900 font-medium">{document.category.categoryCode}</span>
-                </div>
-                <div>
-                  <strong className="text-gray-700 font-semibold block">โครงการ:</strong>
-                  <span className="text-gray-900 font-medium">{document.site?.name || 'N/A'}</span>
-                </div>
+                {(displayDetailOrComment && displayDetailOrComment.trim() !== '') && (
+                  <div className='mt-4'>
+                    <strong className="text-gray-700 font-semibold block text-sm">{displayLabel}:</strong>
+                    <div className="text-gray-900 whitespace-pre-wrap bg-white p-3 rounded-md mt-1 border border-gray-300 shadow-sm">
+                      <p className="">"{displayDetailOrComment}"</p>
+                    </div>
+                  </div>
+                )}
               </div>
-              {(displayDetailOrComment && displayDetailOrComment.trim() !== '') && (
-                <div className='mt-4'>
-                  <strong className="text-gray-700 font-semibold block text-sm">{displayLabel}:</strong>
-                  <div className="text-gray-900 whitespace-pre-wrap bg-white p-3 rounded-md mt-1 border border-gray-300 shadow-sm">
-                    <p className="">"{displayDetailOrComment}"</p>
+
+              {document.status === STATUSES.REJECTED && !document.isLatest && (
+                <div className="p-4 bg-red-50 text-red-800 rounded-lg flex items-center">
+                  <AlertTriangle size={24} className="mr-3 flex-shrink-0 text-red-600" />
+                  <div>
+                    <h4 className="font-bold">เอกสารฉบับนี้ถูกแทนที่แล้ว</h4>
+                    <p className="text-sm text-red-700">
+                      ได้มีการสร้างเอกสารฉบับใหม่ <strong>(Rev.{String((document.revisionNumber || 0) + 1).padStart(2, '0')})</strong> จากเอกสารฉบับนี้แล้ว
+                    </p>
                   </div>
                 </div>
               )}
-            </div>
-
-            {document.status === STATUSES.REJECTED && !document.isLatest && (
-              <div className="p-4 bg-red-50 text-red-800 rounded-lg flex items-center">
-                <AlertTriangle size={24} className="mr-3 flex-shrink-0 text-red-600" />
-                <div>
-                  <h4 className="font-bold">เอกสารฉบับนี้ถูกแทนที่แล้ว</h4>
-                  <p className="text-sm text-red-700">
-                    ได้มีการสร้างเอกสารฉบับใหม่ <strong>(Rev.{String((document.revisionNumber || 0) + 1).padStart(2, '0')})</strong> จากเอกสารฉบับนี้แล้ว
-                  </p>
-                </div>
-              </div>
-            )}
 
 
-            {/* Revision Visual Banner Removed As Per User Request */}
+              {/* Revision Visual Banner Removed As Per User Request */}
 
-            <div>
-              <h4 className="text-md font-semibold mb-2 flex items-center text-slate-800">
-                <Paperclip size={16} className="mr-2" /> ไฟล์แนบ (ฉบับล่าสุด)
-              </h4>
-              <ul className="space-y-2">
-                {latestFiles.length > 0 ? (
-                  latestFiles.map((file, index) => {
-                    const isPdf = file.contentType === 'application/pdf' || file.fileName.toLowerCase().endsWith('.pdf');
-                    const isSuspended = document.supersededStatus === 'SUSPENDED';
-                    const FileContent = () => (
-                      <div className={`flex items-center min-w-0 ${isSuspended ? 'text-red-600 font-medium' : ''}`}>
-                        {isSuspended ? (
-                          <Lock className="w-5 h-5 text-red-500 mr-3 flex-shrink-0" />
-                        ) : (
-                          <FileText className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
-                        )}
-                        <div className="flex flex-col min-w-0">
-                          <span className={`text-sm font-medium truncate ${
-                            isSuspended ? 'text-red-500 group-hover:text-red-700 group-hover:underline' : 'text-blue-600 group-hover:text-blue-800 group-hover:underline'
-                          }`}>{file.fileName}</span>
-                          <span className="text-xs text-gray-500">{formatFileSize(file.fileSize)}</span>
+              <div>
+                <h4 className="text-md font-semibold mb-2 flex items-center text-slate-800">
+                  <Paperclip size={16} className="mr-2" /> ไฟล์แนบ (ฉบับล่าสุด)
+                </h4>
+                <ul className="space-y-2">
+                  {latestFiles.length > 0 ? (
+                    latestFiles.map((file, index) => {
+                      const isPdf = file.contentType === 'application/pdf' || file.fileName.toLowerCase().endsWith('.pdf');
+                      const isSuspended = document.supersededStatus === 'SUSPENDED';
+                      const FileContent = () => (
+                        <div className={`flex items-center min-w-0 ${isSuspended ? 'text-red-600 font-medium' : ''}`}>
+                          {isSuspended ? (
+                            <Lock className="w-5 h-5 text-red-500 mr-3 flex-shrink-0" />
+                          ) : (
+                            <FileText className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
+                          )}
+                          <div className="flex flex-col min-w-0">
+                            <span className={`text-sm font-medium truncate ${isSuspended ? 'text-red-500 group-hover:text-red-700 group-hover:underline' : 'text-blue-600 group-hover:text-blue-800 group-hover:underline'
+                              }`}>{file.fileName}</span>
+                            <span className="text-xs text-gray-500">{formatFileSize(file.fileSize)}</span>
+                          </div>
                         </div>
-                      </div>
-                    );
-                    return (
-                      <li key={index} className={`border rounded-md ${isSuspended ? 'bg-red-50 border-red-200 hover:bg-red-100' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'}`}>
-                        {isPdf ? (
-                          <button
-                            onClick={() => {
-                              logActivity({
-                                action: 'PREVIEW_FILE',
-                                resourceType: 'RFA',
-                                resourceId: document.id,
-                                resourceName: document.documentNumber || document.runningNumber,
-                                siteId: document.site.id,
-                                siteName: document.site.name,
-                                description: `เปิดดูไฟล์เอกสาร "${file.fileName}"`
-                              });
-                              setPreviewFile(file);
-                            }}
-                            className="w-full text-left p-2 rounded-md group transition-colors duration-200"
-                            title={isSuspended ? `[ระงับการใช้งาน] ดูตัวอย่างไฟล์ ${file.fileName}` : `ดูตัวอย่างไฟล์ ${file.fileName}`}
-                          >
-                            <FileContent />
-                          </button>
-                        ) : (
-                          <a
-                            href={file.fileUrl}
-                            download={file.fileName}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={() => {
-                              logActivity({
-                                action: 'DOWNLOAD_FILE',
-                                resourceType: 'RFA',
-                                resourceId: document.id,
-                                resourceName: document.documentNumber || document.runningNumber,
-                                siteId: document.site.id,
-                                siteName: document.site.name,
-                                description: `ดาวน์โหลดไฟล์เอกสาร "${file.fileName}"`
-                              });
-                            }}
-                            className="w-full text-left p-2 rounded-md group transition-colors duration-200 flex"
-                            title={isSuspended ? `[ระงับการใช้งาน] ดาวน์โหลด ${file.fileName}` : `ดาวน์โหลด ${file.fileName}`}
-                          >
-                            <FileContent />
-                          </a>
-                        )}
-                      </li>
-                    );
-                  })
-                ) : (
-                  <p className="text-sm text-slate-500">ไม่มีไฟล์แนบในฉบับล่าสุด</p>
-                )}
-              </ul>
+                      );
+                      return (
+                        <li key={index} className={`border rounded-md ${isSuspended ? 'bg-red-50 border-red-200 hover:bg-red-100' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'}`}>
+                          {isPdf ? (
+                            <button
+                              onClick={() => {
+                                logActivity({
+                                  action: 'PREVIEW_FILE',
+                                  resourceType: 'RFA',
+                                  resourceId: document.id,
+                                  resourceName: document.documentNumber || document.runningNumber,
+                                  siteId: document.site.id,
+                                  siteName: document.site.name,
+                                  description: `เปิดดูไฟล์เอกสาร "${file.fileName}"`
+                                });
+                                setPreviewFile(file);
+                              }}
+                              className="w-full text-left p-2 rounded-md group transition-colors duration-200"
+                              title={isSuspended ? `[ระงับการใช้งาน] ดูตัวอย่างไฟล์ ${file.fileName}` : `ดูตัวอย่างไฟล์ ${file.fileName}`}
+                            >
+                              <FileContent />
+                            </button>
+                          ) : (
+                            <a
+                              href={file.fileUrl}
+                              download={file.fileName}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={() => {
+                                logActivity({
+                                  action: 'DOWNLOAD_FILE',
+                                  resourceType: 'RFA',
+                                  resourceId: document.id,
+                                  resourceName: document.documentNumber || document.runningNumber,
+                                  siteId: document.site.id,
+                                  siteName: document.site.name,
+                                  description: `ดาวน์โหลดไฟล์เอกสาร "${file.fileName}"`
+                                });
+                              }}
+                              className="w-full text-left p-2 rounded-md group transition-colors duration-200 flex"
+                              title={isSuspended ? `[ระงับการใช้งาน] ดาวน์โหลด ${file.fileName}` : `ดาวน์โหลด ${file.fileName}`}
+                            >
+                              <FileContent />
+                            </a>
+                          )}
+                        </li>
+                      );
+                    })
+                  ) : (
+                    <p className="text-sm text-slate-500">ไม่มีไฟล์แนบในฉบับล่าสุด</p>
+                  )}
+                </ul>
+              </div>
             </div>
-          </div>
 
-          {/* Action Panels */}
-          <div className="p-6 border-t bg-slate-50 relative mt-auto">
+            {/* Action Panels */}
+            <div className="p-6 border-t bg-slate-50 relative mt-auto">
 
-            {/* 1. Site Review Panel */}
-            {isSiteReviewing && (
-              <div className="space-y-6">
-                <div className="pb-3 border-b border-slate-200">
-                  <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (Site)</h3>
-                  <p className="text-sm text-slate-500 mt-1">กรุณาดำเนินการตามขั้นตอนด้านล่างเพื่อตรวจสอบและส่งงานต่อ</p>
-                </div>
-
-                {needsDocNumber && (
-                  <div className="p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded-r-md">
-                    <label className="text-sm font-bold text-yellow-800 mb-2 block">
-                      <AlertTriangle size={16} className="inline mr-2" />
-                      กรุณาระบุเลขที่เอกสาร (Required)
-                    </label>
-                    <input
-                      type="text"
-                      value={newDocumentNumberInput}
-                      onChange={(e) => setNewDocumentNumberInput(e.target.value)}
-                      placeholder="กรอกเลขที่เอกสารที่นี่..."
-                      className="w-full p-2 border rounded-md text-sm border-yellow-300 focus:ring-yellow-500 focus:border-yellow-500 bg-white text-gray-900"
-                    />
-                    <p className="text-xs text-yellow-700 mt-1">เอกสารนี้ยังไม่มีเลขที่เอกสาร คุณต้องกำหนดก่อนส่งต่อไปยัง CM</p>
-                  </div>
-                )}
-
-                {/* Step 1: File Upload */}
-                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                  <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
-                    <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">1</span>
-                    <h4 className="font-semibold text-slate-800 text-base">แนบไฟล์ประกอบการพิจารณา</h4>
-                  </div>
-                  <div>
-                  <label className="text-sm font-medium text-gray-700 mb-1 block">
-                    แนบไฟล์ <span className="text-red-700">*</span>
-                  </label>
-                  <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
-                    <input type="file" multiple onChange={(e) => handleFileUpload(e, 'action')} className="hidden" id="action-file-upload" />
-                    <label htmlFor="action-file-upload" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
-                      <Upload size={16} className="mr-2" />
-                      คลิกเพื่อเลือกไฟล์
-                    </label>
+              {/* 1. Site Review Panel */}
+              {isSiteReviewing && (
+                <div className="space-y-6">
+                  <div className="pb-3 border-b border-slate-200">
+                    <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (Site)</h3>
+                    <p className="text-sm text-slate-500 mt-1">กรุณาดำเนินการตามขั้นตอนด้านล่างเพื่อตรวจสอบและส่งงานต่อ</p>
                   </div>
 
-                  {renderFileList(newFiles, 'action')}
+                  {needsDocNumber && (
+                    <div className="p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded-r-md">
+                      <label className="text-sm font-bold text-yellow-800 mb-2 block">
+                        <AlertTriangle size={16} className="inline mr-2" />
+                        กรุณาระบุเลขที่เอกสาร (Required)
+                      </label>
+                      <input
+                        type="text"
+                        value={newDocumentNumberInput}
+                        onChange={(e) => setNewDocumentNumberInput(e.target.value)}
+                        placeholder="กรอกเลขที่เอกสารที่นี่..."
+                        className="w-full p-2 border rounded-md text-sm border-yellow-300 focus:ring-yellow-500 focus:border-yellow-500 bg-white text-gray-900"
+                      />
+                      <p className="text-xs text-yellow-700 mt-1">เอกสารนี้ยังไม่มีเลขที่เอกสาร คุณต้องกำหนดก่อนส่งต่อไปยัง CM</p>
+                    </div>
+                  )}
 
-                  </div>
-                </div>
-
-                {/* Step 2 (Optional): Suspend Old Document */}
-                {document.previousRevisionId && !document.isFromSupersedeRequest && (
+                  {/* Step 1: File Upload */}
                   <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
                     <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
-                      <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">2</span>
-                      <h4 className="font-semibold text-slate-800 text-base">จัดการเอกสารฉบับเดิม</h4>
-                    </div>
-                    
-                    <div className="space-y-3">
-                      <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
-                        <span className="text-blue-500 text-sm flex-shrink-0">ℹ️</span>
-                        <p className="text-xs text-blue-700 leading-relaxed">
-                          เอกสาร <span className="font-semibold">{document?.documentNumber}</span> เป็นฉบับแก้ไขจากฉบับเดิมที่เคยอนุมัติแล้ว และกำลังเผยแพร่ให้ใช้งานอยู่ในขณะนี้
-                        </p>
-                      </div>
-                      <p className="text-sm font-semibold text-gray-700">
-                        กรุณาเลือกสถานะของเอกสาร (ฉบับเดิม) ในระหว่างดำเนินการตรวจสอบ
-                      </p>
-
-                    {/* Option 1: ยังใช้งานได้ */}
-                    <label className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${!suspendPreviousRevision ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
-                      <input
-                        type="radio"
-                        name="suspend-prev-rev-option"
-                        checked={!suspendPreviousRevision}
-                        onChange={() => setSuspendPreviousRevision(false)}
-                        className="mt-0.5 h-4 w-4 text-green-600 cursor-pointer flex-shrink-0"
-                      />
-                      <div>
-                        <p className="text-sm font-semibold text-gray-800">✅ ยังให้ใช้งานฉบับเดิมได้ตามปกติ</p>
-                        <p className="text-xs text-gray-500 mt-0.5">หน้างานยังดาวน์โหลดและใช้อ้างอิงฉบับเดิมได้ระหว่างรอฉบับแก้ไขนี้อนุมัติ</p>
-                      </div>
-                    </label>
-
-                    {/* Option 2: ระงับทันที */}
-                    <label className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${suspendPreviousRevision ? 'border-red-400 bg-red-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
-                      <input
-                        type="radio"
-                        name="suspend-prev-rev-option"
-                        checked={suspendPreviousRevision}
-                        onChange={() => setSuspendPreviousRevision(true)}
-                        className="mt-0.5 h-4 w-4 text-red-600 cursor-pointer flex-shrink-0"
-                      />
-                      <div>
-                        <p className="text-sm font-semibold text-gray-800">⛔ ระงับการใช้งานฉบับเดิมทันที</p>
-                        <p className="text-xs text-gray-500 mt-0.5">หน้างานจะเปิดหรือดาวน์โหลดฉบับเดิมไม่ได้อีกต่อไป — ใช้เมื่อฉบับเดิมมีข้อผิดพลาดร้ายแรงและห้ามนำไปใช้งานต่อ</p>
-                      </div>
-                    </label>
-                    </div>
-                  </div>
-                )}
-
-                {/* Step 3: Comments & Action */}
-                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                  <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
-                    <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">
-                      {(document.previousRevisionId && !document.isFromSupersedeRequest) ? '3' : '2'}
-                    </span>
-                    <h4 className="font-semibold text-slate-800 text-base">ความคิดเห็น & ตัดสินใจ</h4>
-                  </div>
-                  
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 mb-1.5 block">แสดงความคิดเห็น (Optional)</label>
-                    <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ (Optional)..." className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white text-gray-900 focus:ring-blue-500 focus:border-blue-500 transition-colors" rows={3} />
-                  </div>
-                <div className="flex flex-wrap justify-end gap-3">
-                  <button
-                    onClick={() => handleAction('REQUEST_REVISION')}
-                    disabled={isActionDisabled}
-                    className="flex items-center px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 disabled:bg-slate-200 disabled:cursor-not-allowed"
-                  >
-                    {loadingAction === 'REQUEST_REVISION' ? <Spinner className="w-4 h-4 mr-2" /> : <Edit3 size={16} className="mr-2" />} ขอแก้ไข
-                  </button>
-                  <button
-                    onClick={() => handleAction('SEND_TO_CM')}
-                    disabled={isActionDisabled || (needsDocNumber && !newDocumentNumberInput.trim())}
-                    className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed"
-                  >
-                    {loadingAction === 'SEND_TO_CM' ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />} ส่งให้ CM
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-            {/* 2. Resubmission Panel (Creator) */}
-            {isResubmissionFlow && (
-              <div className="space-y-4">
-                <h3 className="text-lg font-bold text-slate-800">ส่งเอกสารฉบับแก้ไข</h3>
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-1 block">แนบไฟล์ที่แก้ไขแล้ว <span className="text-red-700">*</span></label>
-                  <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
-                    <input type="file" multiple onChange={(e) => handleFileUpload(e, 'resubmission')} className="hidden" id="resubmit-file-upload" />
-                    <label htmlFor="resubmit-file-upload" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
-                      <Upload size={16} className="mr-2" />
-                      คลิกเพื่อเลือกไฟล์
-                    </label>
-                  </div>
-
-                  {/* [UPDATED] ใช้ renderFileList */}
-                  {renderFileList(newFiles, 'resubmission')}
-
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-1 block">หมายเหตุการแก้ไข</label>
-                  <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เช่น แก้ไขตาม Comment จาก CM..." className="w-full p-2 border rounded-md text-sm bg-white text-gray-900" rows={2} />
-                </div>
-                <div className="flex justify-end">
-                  <button
-                    onClick={handleResubmitRevision}
-                    disabled={isSubmitting || newFiles.filter(f => f.status === 'success').length === 0}
-                    className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-300"
-                  >
-                    {loadingAction === 'SUBMIT_REVISION' ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />}
-                    ส่งให้ Site ตรวจสอบอีกครั้ง
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* ✅ Supersede Request Button (สำหรับ Approved Docที่ยังไม่มีคำสั่งแก้) */}
-            {(canRequestSupersede && !document.supersededComment) && (
-              <div className="flex justify-end mb-4">
-                <button
-                  onClick={() => setShowSupersedeModal(true)}
-                  className="flex items-center px-4 py-2 text-sm font-medium text-white bg-orange-600 rounded-lg hover:bg-orange-700 transition-colors"
-                >
-                  <RefreshCw size={16} className="mr-2" />
-                  ขอสร้าง Revision ใหม่
-                </button>
-              </div>
-            )}
-
-            {/* Warning Box (View Only) - สำหรับคนที่ไม่มีสิทธิ์สร้าง Rev ใหม่ แต่ต้องเห็นคำสั่ง */}
-            {!!document.supersededComment && !isRevisionFlow && (
-              <div className="bg-orange-50 p-6 rounded-lg border border-orange-200 shadow-sm space-y-4 mb-4">
-                <h3 className="text-lg font-bold text-orange-800 flex items-center border-b border-orange-200 pb-2">
-                  <AlertTriangle className="mr-2" size={20} />
-                  สิ่งที่ต้องแก้ไขใน Rev. ถัดไป
-                </h3>
-                <div className="bg-white p-4 rounded-md text-orange-900 border border-orange-100">
-                  <p className="whitespace-pre-wrap text-base font-medium">{document.supersededComment}</p>
-                </div>
-              </div>
-            )}
-
-            {/* 3. Revision Creation Panel */}
-            {isRevisionFlow && (
-              <div className={`space-y-4 ${!!document.supersededComment ? 'bg-orange-50 p-6 rounded-lg border border-orange-200 shadow-sm mb-4' : ''}`}>
-                {!!document.supersededComment && (
-                  <>
-                    <h3 className="text-lg font-bold text-orange-800 flex items-center border-b border-orange-200 pb-2">
-                      <AlertTriangle className="mr-2" size={20} />
-                      สิ่งที่ต้องแก้ไขใน Rev. ถัดไป
-                    </h3>
-                    <div className="bg-white p-4 rounded-md text-orange-900 border border-orange-100 mb-6">
-                      <p className="whitespace-pre-wrap text-base font-medium">{document.supersededComment}</p>
-                    </div>
-                  </>
-                )}
-                
-                <h3 className={`text-lg font-bold mb-4 ${!!document.supersededComment ? 'text-slate-800 mt-6 pt-4 border-t border-orange-200' : 'text-slate-800'}`}>
-                  สร้างเอกสารฉบับแก้ไข
-                </h3>
-
-                {requiresBimVerification && (isVerifyingTask || verificationError) && (
-                  <div className="mb-4 p-3 rounded-md text-sm font-medium flex items-center border bg-white">
-                    {isVerifyingTask && (
-                      <>
-                        <Spinner className="w-4 h-4 mr-3 text-gray-500" />
-                        <span className="text-gray-600">กำลังตรวจสอบ Task ในระบบ BIM Tracking...</span>
-                      </>
-                    )}
-                    {verificationError && (
-                      <div className="flex items-center justify-between w-full">
-                        <span className="text-red-600 font-semibold">{verificationError}</span>
-                        <button 
-                          onClick={verifyBimTask}
-                          className="ml-4 px-3 py-1 text-sm bg-red-100 hover:bg-red-200 text-red-700 rounded-md transition-colors font-medium flex-shrink-0 flex items-center"
-                        >
-                          <RefreshCw size={14} className="mr-1.5" /> ลองใหม่
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {(!requiresBimVerification || isTaskVerified) && (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <p><strong>เอกสารเดิม:</strong> {document.documentNumber}</p>
-                      <p><strong>เอกสารใหม่:</strong> {newDocumentNumber}</p>
+                      <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">1</span>
+                      <h4 className="font-semibold text-slate-800 text-base">แนบไฟล์ประกอบการพิจารณา</h4>
                     </div>
                     <div>
-                      <label className="text-sm font-medium text-gray-700 mb-1 block">แนบไฟล์ที่แก้ไขแล้ว <span className="text-red-700">*</span></label>
+                      <label className="text-sm font-medium text-gray-700 mb-1 block">
+                        แนบไฟล์ <span className="text-red-700">*</span>
+                      </label>
                       <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
-                        <input type="file" multiple onChange={(e) => handleFileUpload(e, 'revision')} className="hidden" id="revision-file-upload" />
-                        <label htmlFor="revision-file-upload" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
+                        <input type="file" multiple onChange={(e) => handleFileUpload(e, 'action')} className="hidden" id="action-file-upload" />
+                        <label htmlFor="action-file-upload" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
                           <Upload size={16} className="mr-2" />
                           คลิกเพื่อเลือกไฟล์
                         </label>
                       </div>
 
-                      {/* [UPDATED] ใช้ renderFileList */}
-                      {renderFileList(revisionFiles, 'revision')}
+                      {renderFileList(newFiles, 'action')}
 
                     </div>
+                  </div>
+
+                  {/* Step 2 (Optional): Suspend Old Document */}
+                  {document.previousRevisionId && !document.isFromSupersedeRequest && (
+                    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                      <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+                        <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">2</span>
+                        <h4 className="font-semibold text-slate-800 text-base">จัดการเอกสารฉบับเดิม</h4>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                          <span className="text-blue-500 text-sm flex-shrink-0">ℹ️</span>
+                          <p className="text-xs text-blue-700 leading-relaxed">
+                            เอกสาร <span className="font-semibold">{document?.documentNumber}</span> เป็นฉบับแก้ไขจากฉบับเดิมที่เคยอนุมัติแล้ว และกำลังเผยแพร่ให้ใช้งานอยู่ในขณะนี้
+                          </p>
+                        </div>
+                        <p className="text-sm font-semibold text-gray-700">
+                          กรุณาเลือกสถานะของเอกสาร (ฉบับเดิม) ในระหว่างดำเนินการตรวจสอบ
+                        </p>
+
+                        {/* Option 1: ยังใช้งานได้ */}
+                        <label className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${!suspendPreviousRevision ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
+                          <input
+                            type="radio"
+                            name="suspend-prev-rev-option"
+                            checked={!suspendPreviousRevision}
+                            onChange={() => setSuspendPreviousRevision(false)}
+                            className="mt-0.5 h-4 w-4 text-green-600 cursor-pointer flex-shrink-0"
+                          />
+                          <div>
+                            <p className="text-sm font-semibold text-gray-800">✅ ยังให้ใช้งานฉบับเดิมได้ตามปกติ</p>
+                            <p className="text-xs text-gray-500 mt-0.5">หน้างานยังดาวน์โหลดและใช้อ้างอิงฉบับเดิมได้ระหว่างรอฉบับแก้ไขนี้อนุมัติ</p>
+                          </div>
+                        </label>
+
+                        {/* Option 2: ระงับทันที */}
+                        <label className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${suspendPreviousRevision ? 'border-red-400 bg-red-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
+                          <input
+                            type="radio"
+                            name="suspend-prev-rev-option"
+                            checked={suspendPreviousRevision}
+                            onChange={() => setSuspendPreviousRevision(true)}
+                            className="mt-0.5 h-4 w-4 text-red-600 cursor-pointer flex-shrink-0"
+                          />
+                          <div>
+                            <p className="text-sm font-semibold text-gray-800">⛔ ระงับการใช้งานฉบับเดิมทันที</p>
+                            <p className="text-xs text-gray-500 mt-0.5">หน้างานจะเปิดหรือดาวน์โหลดฉบับเดิมไม่ได้อีกต่อไป — ใช้เมื่อฉบับเดิมมีข้อผิดพลาดร้ายแรงและห้ามนำไปใช้งานต่อ</p>
+                          </div>
+                        </label>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Step 3: Comments & Action */}
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                    <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+                      <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">
+                        {(document.previousRevisionId && !document.isFromSupersedeRequest) ? '3' : '2'}
+                      </span>
+                      <h4 className="font-semibold text-slate-800 text-base">ความคิดเห็น</h4>
+                    </div>
+
                     <div>
-                      <label className="text-sm font-medium text-gray-700 mb-1 block">หมายเหตุการแก้ไข (Optional)</label>
-                      <textarea
-                        value={revisionComment}
-                        onChange={(e) => setRevisionComment(e.target.value)}
-                        placeholder="เช่น แก้ไขตาม Comment จาก CM..."
-                        className="w-full p-2 border rounded-md text-sm bg-white text-gray-900"
-                        rows={2}
-                      />
+                      <label className="text-sm font-medium text-gray-700 mb-1.5 block">แสดงความคิดเห็น (Optional)</label>
+                      <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ (Optional)..." className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white text-gray-900 focus:ring-blue-500 focus:border-blue-500 transition-colors" rows={3} />
                     </div>
-
-
-                    <div className="flex justify-end pt-4">
+                    <div className="flex flex-wrap justify-end gap-3">
                       <button
-                        onClick={handleCreateRevision}
-                        disabled={isSubmitting || revisionFiles.filter(f => f.status === 'success').length === 0 || (requiresBimVerification && !isTaskVerified)}
-                        className={`flex items-center px-6 py-2.5 text-sm font-medium text-white rounded-lg transition-colors shadow-sm disabled:cursor-not-allowed ${
-                          !!document.supersededComment 
-                          ? 'bg-orange-600 hover:bg-orange-700 disabled:bg-orange-300' 
-                          : 'bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300'
-                        }`}
+                        onClick={() => handleAction('REQUEST_REVISION')}
+                        disabled={isActionDisabled}
+                        className="flex items-center px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 disabled:bg-slate-200 disabled:cursor-not-allowed"
                       >
-                        {isSubmitting ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />}
-                        ส่งเอกสารฉบับแก้ไข (Rev.{String((document.revisionNumber || 0) + 1).padStart(2, '0')})
+                        {loadingAction === 'REQUEST_REVISION' ? <Spinner className="w-4 h-4 mr-2" /> : <Edit3 size={16} className="mr-2" />} ขอแก้ไข
+                      </button>
+                      <button
+                        onClick={() => handleAction('SEND_TO_CM')}
+                        disabled={isActionDisabled || (needsDocNumber && !newDocumentNumberInput.trim())}
+                        className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed"
+                      >
+                        {loadingAction === 'SEND_TO_CM' ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />} ส่งให้ CM
                       </button>
                     </div>
                   </div>
-                )}
-              </div>
-            )}
+                </div>
+              )}
 
-            {/* 4. Approval Panel (CM / Override User) */}
-            {isApproving && (
-              <div className="space-y-4">
-                <h3 className="text-lg font-bold text-slate-800">การอนุมัติ</h3>
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-1 block">
-                    แนบไฟล์ <span className="text-red-700">*</span>
-                  </label>
-
-                  <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
-                    <input type="file" multiple onChange={(e) => handleFileUpload(e, 'action')} className="hidden" id="action-file-upload-final" />
-                    <label htmlFor="action-file-upload-final" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
-                      <Upload size={16} className="mr-2" />
-                      คลิกเพื่อเลือกไฟล์
-                    </label>
+              {/* 2. Resubmission Panel (Creator) */}
+              {isResubmissionFlow && (
+                <div className="space-y-6">
+                  <div className="pb-3 border-b border-slate-200">
+                    <h3 className="text-lg font-bold text-slate-800">ส่งเอกสารฉบับแก้ไข</h3>
+                    <p className="text-sm text-slate-500 mt-1">กรุณาแนบไฟล์ที่แก้ไขเรียบร้อยแล้วเพื่อส่งให้ Site ตรวจสอบอีกครั้ง</p>
                   </div>
 
-                  {/* [UPDATED] ใช้ renderFileList */}
-                  {renderFileList(newFiles, 'action')}
+                  {/* Step 1: File Upload */}
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                    <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+                      <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">1</span>
+                      <h4 className="font-semibold text-slate-800 text-base">แนบไฟล์ที่แก้ไขแล้ว</h4>
+                    </div>
+                    <label className="text-sm font-medium text-gray-700 mb-1 block">แนบไฟล์ <span className="text-red-700">*</span></label>
+                    <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
+                      <input type="file" multiple onChange={(e) => handleFileUpload(e, 'resubmission')} className="hidden" id="resubmit-file-upload" />
+                      <label htmlFor="resubmit-file-upload" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
+                        <Upload size={16} className="mr-2" />
+                        คลิกเพื่อเลือกไฟล์
+                      </label>
+                    </div>
+                    {renderFileList(newFiles, 'resubmission')}
+                  </div>
 
+                  {/* Step 2: Comment & Submit */}
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                    <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+                      <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">2</span>
+                      <h4 className="font-semibold text-slate-800 text-base">หมายเหตุการแก้ไข & ส่ง</h4>
+                    </div>
+                    <label className="text-sm font-medium text-gray-700 mb-1.5 block">หมายเหตุ (Optional)</label>
+                    <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เช่น แก้ไขตาม Comment จาก CM..." className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white text-gray-900 focus:ring-blue-500 focus:border-blue-500" rows={3} />
+                    <div className="flex justify-end">
+                      <button
+                        onClick={handleResubmitRevision}
+                        disabled={isSubmitting || newFiles.filter(f => f.status === 'success').length === 0}
+                        className="flex items-center px-5 py-2.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed shadow-sm"
+                      >
+                        {loadingAction === 'SUBMIT_REVISION' ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />}
+                        ส่งให้ Site ตรวจสอบอีกครั้ง
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-1 block">แสดงความคิดเห็น (Optional)</label>
-                  <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..." className="w-full p-2 border rounded-md text-sm bg-white text-gray-900" rows={2} />
-                </div>
-                {/* Approval buttons: REJECT separated left, Approve group on right */}
-                <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200">
-                  {/* Left: Destructive action */}
+              )}
+
+              {/* ✅ Supersede Request Button (สำหรับ Approved Docที่ยังไม่มีคำสั่งแก้) */}
+              {(canRequestSupersede && !document.supersededComment) && (
+                <div className="flex justify-end mb-4">
                   <button
-                    onClick={() => handleAction('REJECT')}
-                    disabled={isActionDisabled}
-                    className="flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                    onClick={() => setShowSupersedeModal(true)}
+                    className="flex items-center px-4 py-2 text-sm font-medium text-white bg-orange-600 rounded-lg hover:bg-orange-700 transition-colors"
                   >
-                    {loadingAction === 'REJECT' ? <Spinner className="w-4 h-4 mr-2" /> : <ThumbsDown size={16} className="mr-2" />} ไม่อนุมัติ
+                    <RefreshCw size={16} className="mr-2" />
+                    ขอสร้าง Revision ใหม่
                   </button>
+                </div>
+              )}
 
-                  {/* Right: Approve variants group */}
-                  <div className="flex flex-wrap gap-3">
-                    <button
-                      onClick={() => handleAction('APPROVE_REVISION_REQUIRED')}
-                      disabled={isActionDisabled}
-                      className="flex items-center px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-lg hover:bg-orange-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
-                    >
-                      {loadingAction === 'APPROVE_REVISION_REQUIRED' ? <Spinner className="w-4 h-4 mr-2" /> : <Edit3 size={16} className="mr-2" />} อนุมัติ (ต้องแก้ไข)
-                    </button>
-                    <button
-                      onClick={() => handleAction('APPROVE_WITH_COMMENTS')}
-                      disabled={isActionDisabled}
-                      className="flex items-center px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
-                    >
-                      {loadingAction === 'APPROVE_WITH_COMMENTS' ? <Spinner className="w-4 h-4 mr-2" /> : <MessageSquare size={16} className="mr-2" />} อนุมัติ (มีคอมเมนต์)
-                    </button>
-                    <button
-                      onClick={() => handleAction('APPROVE')}
-                      disabled={isActionDisabled}
-                      className="flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
-                    >
-                      {loadingAction === 'APPROVE' ? <Spinner className="w-4 h-4 mr-2" /> : <ThumbsUp size={16} className="mr-2" />} อนุมัติ
-                    </button>
+              {/* Warning Box (View Only) - สำหรับคนที่ไม่มีสิทธิ์สร้าง Rev ใหม่ แต่ต้องเห็นคำสั่ง */}
+              {!!document.supersededComment && !isRevisionFlow && (
+                <div className="bg-orange-50 p-6 rounded-lg border border-orange-200 shadow-sm space-y-4 mb-4">
+                  <h3 className="text-lg font-bold text-orange-800 flex items-center border-b border-orange-200 pb-2">
+                    <AlertTriangle className="mr-2" size={20} />
+                    สิ่งที่ต้องแก้ไขใน Rev. ถัดไป
+                  </h3>
+                  <div className="bg-white p-4 rounded-md text-orange-900 border border-orange-100">
+                    <p className="whitespace-pre-wrap text-base font-medium">{document.supersededComment}</p>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
 
+              {/* 3. Revision Creation Panel */}
+              {isRevisionFlow && (
+                <div className="space-y-6">
+                  <div className="pb-3 border-b border-slate-200">
+                    <h3 className="text-lg font-bold text-slate-800">สร้างเอกสารฉบับแก้ไข</h3>
+                    <p className="text-sm text-slate-500 mt-1">กรุณาตรวจสอบข้อมูล แนบไฟล์ใหม่ และส่งเพื่อให้ Site ตรวจสอบ</p>
+                  </div>
+
+                  {/* Supersede Comment Banner */}
+                  {!!document.supersededComment && (
+                    <div className="bg-orange-50 p-4 rounded-xl border border-orange-200 shadow-sm">
+                      <h4 className="text-sm font-bold text-orange-800 flex items-center mb-2">
+                        <AlertTriangle className="mr-2" size={16} />
+                        สิ่งที่ต้องแก้ไขใน Rev. นี้
+                      </h4>
+                      <p className="whitespace-pre-wrap text-sm text-orange-900 font-medium">{document.supersededComment}</p>
+                    </div>
+                  )}
+
+                  {/* BIM Verification Status */}
+                  {requiresBimVerification && (isVerifyingTask || verificationError) && (
+                    <div className="p-3 rounded-lg text-sm font-medium flex items-center border bg-slate-50">
+                      {isVerifyingTask && (
+                        <>
+                          <Spinner className="w-4 h-4 mr-3 text-gray-500" />
+                          <span className="text-gray-600">กำลังตรวจสอบ Task ในระบบ BIM Tracking...</span>
+                        </>
+                      )}
+                      {verificationError && (
+                        <div className="flex items-center justify-between w-full">
+                          <span className="text-red-600 font-semibold">{verificationError}</span>
+                          <button onClick={verifyBimTask} className="ml-4 px-3 py-1 text-sm bg-red-100 hover:bg-red-200 text-red-700 rounded-md transition-colors font-medium flex-shrink-0 flex items-center">
+                            <RefreshCw size={14} className="mr-1.5" /> ลองใหม่
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {(!requiresBimVerification || isTaskVerified) && (
+                    <>
+                      {/* Step 1: File Upload */}
+                      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                        <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+                          <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">1</span>
+                          <h4 className="font-semibold text-slate-800 text-base">แนบไฟล์ที่แก้ไขแล้ว</h4>
+                        </div>
+                        <label className="text-sm font-medium text-gray-700 mb-1 block">แนบไฟล์ <span className="text-red-700">*</span></label>
+                        <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
+                          <input type="file" multiple onChange={(e) => handleFileUpload(e, 'revision')} className="hidden" id="revision-file-upload" />
+                          <label htmlFor="revision-file-upload" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
+                            <Upload size={16} className="mr-2" />
+                            คลิกเพื่อเลือกไฟล์
+                          </label>
+                        </div>
+                        {renderFileList(revisionFiles, 'revision')}
+                      </div>
+
+                      {/* Step 2: Comment & Submit */}
+                      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                        <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+                          <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">2</span>
+                          <h4 className="font-semibold text-slate-800 text-base">หมายเหตุการแก้ไข & ส่ง</h4>
+                        </div>
+                        <label className="text-sm font-medium text-gray-700 mb-1.5 block">หมายเหตุ (Optional)</label>
+                        <textarea
+                          value={revisionComment}
+                          onChange={(e) => setRevisionComment(e.target.value)}
+                          placeholder="เช่น แก้ไขตาม Comment จาก CM..."
+                          className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white text-gray-900 focus:ring-blue-500 focus:border-blue-500"
+                          rows={3}
+                        />
+                        <div className="flex justify-end">
+                          <button
+                            onClick={handleCreateRevision}
+                            disabled={isSubmitting || revisionFiles.filter(f => f.status === 'success').length === 0}
+                            className={`flex items-center px-6 py-2.5 text-sm font-medium text-white rounded-lg transition-colors shadow-sm disabled:cursor-not-allowed ${!!document.supersededComment
+                                ? 'bg-orange-600 hover:bg-orange-700 disabled:bg-orange-300'
+                                : 'bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300'
+                              }`}
+                          >
+                            {isSubmitting ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />}
+                            ส่งเอกสารฉบับแก้ไข (Rev.{String((document.revisionNumber || 0) + 1).padStart(2, '0')})
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+
+              {isApproving && (
+                <div className="space-y-6">
+                  <div className="pb-3 border-b border-slate-200">
+                    <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (อนุมัติ)</h3>
+                    <p className="text-sm text-slate-500 mt-1">กรุณาแนบไฟล์และแสดงความเห็นก่อนตัดสินใจ</p>
+                  </div>
+
+                  {/* Step 1: File Upload */}
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                    <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+                      <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">1</span>
+                      <h4 className="font-semibold text-slate-800 text-base">แนบไฟล์ประกอบการอนุมัติ</h4>
+                    </div>
+                    <label className="text-sm font-medium text-gray-700 mb-1 block">แนบไฟล์ <span className="text-red-700">*</span></label>
+                    <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
+                      <input type="file" multiple onChange={(e) => handleFileUpload(e, 'action')} className="hidden" id="action-file-upload-final" />
+                      <label htmlFor="action-file-upload-final" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
+                        <Upload size={16} className="mr-2" />
+                        คลิกเพื่อเลือกไฟล์
+                      </label>
+                    </div>
+                    {renderFileList(newFiles, 'action')}
+                  </div>
+
+                  {/* Step 2: Comment & Decision */}
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                    <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+                      <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">2</span>
+                      <h4 className="font-semibold text-slate-800 text-base">ความคิดเห็น</h4>
+                    </div>
+                    <label className="text-sm font-medium text-gray-700 mb-1.5 block">แสดงความคิดเห็น (Optional)</label>
+                    <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..." className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white text-gray-900 focus:ring-blue-500 focus:border-blue-500 transition-colors" rows={3} />
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200">
+                      <button
+                        onClick={() => handleAction('REJECT')}
+                        disabled={isActionDisabled}
+                        className="flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                      >
+                        {loadingAction === 'REJECT' ? <Spinner className="w-4 h-4 mr-2" /> : <ThumbsDown size={16} className="mr-2" />} ไม่อนุมัติ
+                      </button>
+                      <div className="flex flex-wrap gap-3">
+                        <button
+                          onClick={() => handleAction('APPROVE_REVISION_REQUIRED')}
+                          disabled={isActionDisabled}
+                          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-lg hover:bg-orange-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                        >
+                          {loadingAction === 'APPROVE_REVISION_REQUIRED' ? <Spinner className="w-4 h-4 mr-2" /> : <Edit3 size={16} className="mr-2" />} อนุมัติ (ต้องแก้ไข)
+                        </button>
+                        <button
+                          onClick={() => handleAction('APPROVE_WITH_COMMENTS')}
+                          disabled={isActionDisabled}
+                          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                        >
+                          {loadingAction === 'APPROVE_WITH_COMMENTS' ? <Spinner className="w-4 h-4 mr-2" /> : <MessageSquare size={16} className="mr-2" />} อนุมัติ (มีคอมเมนต์)
+                        </button>
+                        <button
+                          onClick={() => handleAction('APPROVE')}
+                          disabled={isActionDisabled}
+                          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                        >
+                          {loadingAction === 'APPROVE' ? <Spinner className="w-4 h-4 mr-2" /> : <ThumbsUp size={16} className="mr-2" />} อนุมัติ
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+            </div>
           </div>
-        </div>
         </div>
       </div>
       {showHistory && (
@@ -1527,8 +1539,8 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                       <div key={f.id} className="flex items-center text-xs text-gray-700 bg-slate-50 rounded p-1.5">
                         {f.status === 'uploading' ? <Spinner className="w-3 h-3 mr-2 text-blue-500" /> :
                           f.status === 'success' ? <Check className="w-3 h-3 mr-2 text-green-500" /> :
-                          f.status === 'error' ? <AlertTriangle className="w-3 h-3 mr-2 text-red-500" /> :
-                          <FileText className="w-3 h-3 mr-2 text-slate-500" />}
+                            f.status === 'error' ? <AlertTriangle className="w-3 h-3 mr-2 text-red-500" /> :
+                              <FileText className="w-3 h-3 mr-2 text-slate-500" />}
                         <span className="flex-1 truncate">{f.file.name}</span>
                         <button onClick={() => setSupersedeFiles(prev => prev.filter((_, idx) => idx !== i))} className="ml-2 text-gray-400 hover:text-red-500" type="button">
                           <X size={12} />
