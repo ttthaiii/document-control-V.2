@@ -106,11 +106,11 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
 
   const {
     canViewShop, canViewGen, canViewMat,
-    hasRfaAccess, hasWorkRequestAccess, isAdminAccess
+    hasRfaAccess, hasWorkRequestAccess, isAdminAccess, hasActivityLogAccess
   } = useMemo(() => {
     if (!user) return {
       canViewShop: false, canViewGen: false, canViewMat: false,
-      hasRfaAccess: false, hasWorkRequestAccess: false, isAdminAccess: false
+      hasRfaAccess: false, hasWorkRequestAccess: false, isAdminAccess: false, hasActivityLogAccess: false
     };
 
     const canViewShop = checkPerm(`RFA.${PERMISSION_KEYS.RFA.VIEW_SHOP}`);
@@ -126,7 +126,8 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
       canViewMat,
       hasRfaAccess: canViewShop || canViewGen || canViewMat,
       hasWorkRequestAccess: canViewWR,
-      isAdminAccess: user.role === 'Admin'
+      isAdminAccess: user.role === 'Admin',
+      hasActivityLogAccess: ['Admin', 'PM', 'PD'].includes(user.role)
     };
   }, [user, sites]);
 
@@ -232,24 +233,35 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
 
         </nav>
 
-        {isAdminAccess && (
+        {(isAdminAccess || hasActivityLogAccess) && (
           <div className="px-4 py-2">
             <div className="border-t border-orange-200" />
             <div className="mt-2 space-y-1">
-              <p className="px-3 text-xs font-semibold uppercase text-gray-500 tracking-wider pt-2">Admin</p>
+              <p className="px-3 text-xs font-semibold uppercase text-gray-500 tracking-wider pt-2">
+                {isAdminAccess ? 'Admin' : 'Management'}
+              </p>
 
-              <Link href="/admin" onClick={showLoader} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors duration-200 ${pathname === '/admin' ? 'bg-red-100 text-red-800' : 'text-gray-700 hover:bg-red-50 hover:text-red-700'}`}>
-                <Users size={18} /><span>Invite Users</span>
-              </Link>
+              {isAdminAccess && (
+                <>
+                  <Link href="/admin" onClick={showLoader} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors duration-200 ${pathname === '/admin' ? 'bg-red-100 text-red-800' : 'text-gray-700 hover:bg-red-50 hover:text-red-700'}`}>
+                    <Users size={18} /><span>Invite Users</span>
+                  </Link>
 
-              <Link href="/admin/users" onClick={showLoader} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors duration-200 ${isPathActive('/admin/users') ? 'bg-red-100 text-red-800' : 'text-gray-700 hover:bg-red-50 hover:text-red-700'}`}>
-                <UserCog size={18} /><span>Manage Users</span>
-              </Link>
+                  <Link href="/admin/users" onClick={showLoader} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors duration-200 ${isPathActive('/admin/users') ? 'bg-red-100 text-red-800' : 'text-gray-700 hover:bg-red-50 hover:text-red-700'}`}>
+                    <UserCog size={18} /><span>Manage Users</span>
+                  </Link>
 
-              <Link href="/admin/projects" onClick={showLoader} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors duration-200 ${isPathActive('/admin/projects') ? 'bg-red-100 text-red-800' : 'text-gray-700 hover:bg-red-50 hover:text-red-700'}`}>
-                <FolderKanban size={18} /><span>Manage Projects</span>
-              </Link>
+                  <Link href="/admin/projects" onClick={showLoader} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors duration-200 ${isPathActive('/admin/projects') ? 'bg-red-100 text-red-800' : 'text-gray-700 hover:bg-red-50 hover:text-red-700'}`}>
+                    <FolderKanban size={18} /><span>Manage Projects</span>
+                  </Link>
+                </>
+              )}
 
+              {hasActivityLogAccess && (
+                <Link href="/admin/activity-logs" onClick={showLoader} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors duration-200 ${isPathActive('/admin/activity-logs') ? 'bg-red-100 text-red-800' : 'text-gray-700 hover:bg-red-50 hover:text-red-700'}`}>
+                  <ClipboardList size={18} /><span>Activity Log</span>
+                </Link>
+              )}
             </div>
           </div>
         )}

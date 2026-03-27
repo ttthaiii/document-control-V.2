@@ -9,6 +9,7 @@ import { AuthGuard } from '@/lib/components/shared/AuthGuard';
 import { ROLES } from '@/lib/config/workflow';
 import { ActivityLog, LogAction } from '@/types/activity-log';
 import { auth } from '@/lib/firebase/client';
+import Layout from '@/components/layout/Layout';
 
 // --- ค่าคงที่ ---
 const LOG_VIEWER_ROLES = [ROLES.PM, ROLES.PD, ROLES.ADMIN];
@@ -92,7 +93,7 @@ function ActivityLogContent() {
     const loadSites = async () => {
       const token = await auth.currentUser?.getIdToken();
       if (!token) return;
-      const res = await fetch('/api/admin/debug-sites', { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch('/api/sites', { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) {
         const data = await res.json();
         const siteList = (data.sites || []).map((s: any) => ({ id: s.id, name: s.name }));
@@ -278,9 +279,26 @@ function ActivityLogContent() {
             </select>
           </div>
 
-          {/* Count */}
-          <div className="ml-auto text-sm text-gray-500 self-end pb-1.5">
-            {!loading && `${logs.length} รายการ`}
+          {/* Count & Clear Filters */}
+          <div className="ml-auto flex items-center gap-3 self-end pb-1.5">
+            {(filterAction || filterUserId || filterSiteId || dateFrom !== today || dateTo !== today) && (
+              <button
+                onClick={() => {
+                  setFilterAction('');
+                  setFilterUserId('');
+                  setFilterSiteId('');
+                  setDateFrom(today);
+                  setDateTo(today);
+                }}
+                className="text-red-600 hover:text-red-700 text-xs font-medium bg-red-50 hover:bg-red-100 px-2.5 py-1.5 rounded-md border border-red-200 transition-colors flex items-center gap-1"
+                title="ล้างตัวกรอง"
+              >
+                ✕ ล้างตัวกรอง
+              </button>
+            )}
+            <div className="text-sm text-gray-500">
+              {!loading && `${logs.length} รายการ`}
+            </div>
           </div>
         </div>
       </div>
@@ -327,10 +345,10 @@ function ActivityLogContent() {
                         {ACTION_LABELS[log.action] || log.action}
                       </span>
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="text-gray-700">{log.description}</div>
+                    <td className="px-4 py-3 max-w-sm">
+                      <div className="text-gray-700 truncate" title={log.description}>{log.description}</div>
                       {log.resourceName && (
-                        <div className="text-xs text-blue-600 font-mono mt-0.5">
+                        <div className="text-xs text-blue-600 font-mono mt-0.5 truncate" title={log.resourceName}>
                           {log.resourceType && <span className="text-gray-400 mr-1">[{log.resourceType}]</span>}
                           {log.resourceName}
                         </div>
@@ -354,7 +372,9 @@ function ActivityLogContent() {
 export default function ActivityLogPage() {
   return (
     <AuthGuard requiredRoles={LOG_VIEWER_ROLES}>
-      <ActivityLogContent />
+      <Layout>
+        <ActivityLogContent />
+      </Layout>
     </AuthGuard>
   );
 }

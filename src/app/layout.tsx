@@ -1,4 +1,4 @@
-import { Prompt } from 'next/font/google'
+import { Noto_Sans_Thai_Looped } from 'next/font/google'
 import './globals.css'
 import { AuthProvider } from '@/lib/auth/useAuth'
 import { LoadingProvider } from '@/lib/context/LoadingContext'
@@ -16,11 +16,11 @@ if (typeof Promise.withResolvers === 'undefined' && typeof window !== 'undefined
   };
 }
 
-const promptFont = Prompt({ 
+const notoSansThaiLooped = Noto_Sans_Thai_Looped({ 
   weight: ['300', '400', '500', '600', '700'],
   subsets: ['thai', 'latin'],
   display: 'swap',
-  variable: '--font-prompt',
+  variable: '--font-noto-sans-thai-looped',
 })
 
 // ✅ 1. เพิ่ม manifest และ icons ใน metadata
@@ -49,7 +49,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="th">
-      <body className={`${promptFont.variable} font-sans antialiased`}>
+      <body className={`${notoSansThaiLooped.variable} font-sans antialiased`}>
         <NotificationProvider>
           <AuthProvider>
             <LoadingProvider>

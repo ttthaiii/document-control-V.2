@@ -9,7 +9,7 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['var(--font-prompt)', 'sans-serif'],
+        sans: ['var(--font-noto-sans-thai-looped)', 'sans-serif'],
       },
       colors: {
         background: "var(--background)",

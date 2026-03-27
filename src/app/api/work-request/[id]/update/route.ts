@@ -5,6 +5,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { WR_STATUSES, WR_APPROVER_ROLES, REVIEWER_ROLES, ROLES } from '@/lib/config/workflow';
 import { WorkRequestStatus } from '@/types/work-request';
 import { getFileUrl } from '@/lib/utils/storage';
+import { logActivity, buildDescription } from '@/lib/utils/activityLogger';
 
 export const dynamic = 'force-dynamic';
 
@@ -138,6 +139,28 @@ export async function POST(
     }
 
     await docRef.update(updates);
+
+    const wrLogActionMap: Record<string, string> = {
+      'APPROVE_DRAFT': 'APPROVE_WORK_REQUEST',
+      'REJECT_DRAFT':  'REJECT_WORK_REQUEST',
+    };
+    const wrLogAction = wrLogActionMap[action];
+    if (wrLogAction) {
+      const siteDoc = await adminDb.collection('sites').doc(docData.siteId).get();
+      logActivity({
+        userId,
+        userEmail: userData.email,
+        userRole: userData.role,
+        siteId: docData.siteId,
+        siteName: siteDoc.data()?.name || '',
+        action: wrLogAction as any,
+        resourceType: 'WORK_REQUEST',
+        resourceId: params.id,
+        resourceName: docData.documentNumber,
+        description: buildDescription(wrLogAction as any, docData.documentNumber),
+        metadata: { newStatus },
+      });
+    }
 
     return NextResponse.json({ success: true, newStatus });
 

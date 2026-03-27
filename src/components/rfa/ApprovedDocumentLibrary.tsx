@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '@/lib/auth/useAuth'
+import { useLogActivity } from '@/lib/hooks/useLogActivity'
 import { Site, Category, RFADocument, RFAFile } from '@/types/rfa'
 import {
   Search, Building, Calendar, Download, Eye, ChevronDown,
@@ -42,6 +43,7 @@ const resolveCategoryKey = (doc: any): string =>
 
 export default function ApprovedDocumentLibrary() {
   const { user, firebaseUser } = useAuth();
+  const { logActivity } = useLogActivity();
 
   const [sites, setSites] = useState<Site[]>([]);
   const [documents, setDocuments] = useState<RFADocument[]>([]);
@@ -417,7 +419,18 @@ export default function ApprovedDocumentLibrary() {
                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">ไฟล์ PDF</p>
                             <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
                               {pdfFiles.map((pdf, idx) => (
-                                <button key={`${pdf.fileName}-${idx}`} onClick={() => setPreviewFile(pdf)}
+                                <button key={`${pdf.fileName}-${idx}`} onClick={() => {
+                                  logActivity({
+                                    action: 'PREVIEW_FILE',
+                                    resourceType: 'RFA',
+                                    resourceId: doc.id,
+                                    resourceName: doc.documentNumber,
+                                    siteId: (doc as any).siteId,
+                                    siteName: siteName,
+                                    description: `เปิดดูไฟล์ "${pdf.fileName}" (คลังเอกสาร)`
+                                  });
+                                  setPreviewFile(pdf);
+                                }}
                                   className="flex items-center gap-2.5 p-2.5 bg-white rounded-lg border border-slate-200 hover:border-red-300 hover:shadow-sm group transition-all text-left">
                                   <div className="w-8 h-8 rounded-md bg-red-50 text-red-500 flex items-center justify-center flex-shrink-0 group-hover:bg-red-500 group-hover:text-white transition-colors">
                                     <FileText className="w-4 h-4" />
@@ -438,7 +451,19 @@ export default function ApprovedDocumentLibrary() {
                             <div className="flex items-center justify-between mb-2">
                               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">ไฟล์ต้นฉบับ (CAD)</p>
                               {cadFiles.length > 1 && (
-                                <button onClick={() => cadFiles.forEach(f => f.fileUrl && window.open(f.fileUrl, '_blank'))}
+                                <button onClick={() => cadFiles.forEach(f => {
+                                  if (!f.fileUrl) return;
+                                  logActivity({
+                                    action: 'DOWNLOAD_FILE',
+                                    resourceType: 'RFA',
+                                    resourceId: doc.id,
+                                    resourceName: doc.documentNumber,
+                                    siteId: (doc as any).siteId,
+                                    siteName: siteName,
+                                    description: `ดาวน์โหลดไฟล์ CAD "${f.fileName}" (คลังเอกสาร)`
+                                  });
+                                  window.open(f.fileUrl, '_blank');
+                                })}
                                   className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 font-semibold transition-colors">
                                   <DownloadCloud className="w-3.5 h-3.5" /> โหลดทั้งหมด
                                 </button>
@@ -446,7 +471,18 @@ export default function ApprovedDocumentLibrary() {
                             </div>
                             <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
                               {cadFiles.map((cad, idx) => (
-                                <button key={`${cad.fileName}-${idx}`} onClick={() => cad.fileUrl && window.open(cad.fileUrl, '_blank')}
+                                <button key={`${cad.fileName}-${idx}`} onClick={() => {
+                                  logActivity({
+                                    action: 'DOWNLOAD_FILE',
+                                    resourceType: 'RFA',
+                                    resourceId: doc.id,
+                                    resourceName: doc.documentNumber,
+                                    siteId: (doc as any).siteId,
+                                    siteName: siteName,
+                                    description: `ดาวน์โหลดไฟล์ CAD "${cad.fileName}" (คลังเอกสาร)`
+                                  });
+                                  cad.fileUrl && window.open(cad.fileUrl, '_blank');
+                                }}
                                   className="flex items-center gap-2.5 p-2.5 bg-white rounded-lg border border-slate-200 hover:border-blue-300 hover:shadow-sm group transition-all text-left">
                                   <div className="w-8 h-8 rounded-md bg-blue-50 text-blue-500 flex items-center justify-center flex-shrink-0 group-hover:bg-blue-500 group-hover:text-white transition-colors">
                                     <FileDigit className="w-4 h-4" />
@@ -577,7 +613,18 @@ export default function ApprovedDocumentLibrary() {
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 px-1">ไฟล์ PDF</p>
                         <div className="space-y-1.5">
                           {pdfFiles.map((pdf, idx) => (
-                            <button key={`${pdf.fileName}-${idx}`} onClick={() => setPreviewFile(pdf)}
+                            <button key={`${pdf.fileName}-${idx}`} onClick={() => {
+                              logActivity({
+                                action: 'PREVIEW_FILE',
+                                resourceType: 'RFA',
+                                resourceId: doc.id,
+                                resourceName: doc.documentNumber,
+                                siteId: (doc as any).siteId,
+                                siteName: siteName,
+                                description: `เปิดดูไฟล์ "${pdf.fileName}" (คลังเอกสาร)`
+                              });
+                              setPreviewFile(pdf);
+                            }}
                               className="w-full flex items-center gap-3 p-3 bg-white rounded-lg border border-slate-200 hover:border-red-200 transition-all group">
                               <div className="w-9 h-9 rounded-lg bg-red-50 text-red-500 flex items-center justify-center flex-shrink-0">
                                 <FileText className="w-4 h-4" />
@@ -599,7 +646,19 @@ export default function ApprovedDocumentLibrary() {
                         <div className="flex items-center justify-between mb-2 px-1">
                           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">ไฟล์ CAD</p>
                           {cadFiles.length > 1 && (
-                            <button onClick={() => cadFiles.forEach(f => f.fileUrl && window.open(f.fileUrl, '_blank'))}
+                            <button onClick={() => cadFiles.forEach(f => {
+                              if (!f.fileUrl) return;
+                              logActivity({
+                                action: 'DOWNLOAD_FILE',
+                                resourceType: 'RFA',
+                                resourceId: doc.id,
+                                resourceName: doc.documentNumber,
+                                siteId: (doc as any).siteId,
+                                siteName: siteName,
+                                description: `ดาวน์โหลดไฟล์ CAD "${f.fileName}" (คลังเอกสาร)`
+                              });
+                              window.open(f.fileUrl, '_blank');
+                            })}
                               className="flex items-center gap-1 text-xs text-blue-600 font-semibold">
                               <DownloadCloud className="w-3.5 h-3.5" /> ทั้งหมด
                             </button>
@@ -607,7 +666,18 @@ export default function ApprovedDocumentLibrary() {
                         </div>
                         <div className="space-y-1.5">
                           {cadFiles.map((cad, idx) => (
-                            <button key={`${cad.fileName}-${idx}`} onClick={() => cad.fileUrl && window.open(cad.fileUrl, '_blank')}
+                            <button key={`${cad.fileName}-${idx}`} onClick={() => {
+                              logActivity({
+                                action: 'DOWNLOAD_FILE',
+                                resourceType: 'RFA',
+                                resourceId: doc.id,
+                                resourceName: doc.documentNumber,
+                                siteId: (doc as any).siteId,
+                                siteName: siteName,
+                                description: `ดาวน์โหลดไฟล์ CAD "${cad.fileName}" (คลังเอกสาร)`
+                              });
+                              cad.fileUrl && window.open(cad.fileUrl, '_blank');
+                            }}
                               className="w-full flex items-center gap-3 p-3 bg-white rounded-lg border border-slate-200 hover:border-blue-200 transition-all group">
                               <div className="w-9 h-9 rounded-lg bg-blue-50 text-blue-500 flex items-center justify-center flex-shrink-0">
                                 <FileDigit className="w-4 h-4" />
@@ -632,7 +702,29 @@ export default function ApprovedDocumentLibrary() {
       </div>
 
       {/* PDF Preview */}
-      <PDFPreviewModal isOpen={!!previewFile} file={previewFile} onClose={() => setPreviewFile(null)} allowEdit={false} />
+      <PDFPreviewModal 
+        isOpen={!!previewFile} 
+        file={previewFile} 
+        onClose={() => setPreviewFile(null)} 
+        allowEdit={false} 
+        onDownload={() => {
+          if (!previewFile) return;
+          const parentDoc = documents.find(d => d.files?.some(f => f.fileUrl === previewFile.fileUrl));
+          if (parentDoc) {
+            const anyDoc = parentDoc as any;
+            const siteName = sites.find(s => s.id === anyDoc.siteId)?.name || '—';
+            logActivity({
+              action: 'DOWNLOAD_FILE',
+              resourceType: 'RFA',
+              resourceId: parentDoc.id,
+              resourceName: parentDoc.documentNumber,
+              siteId: anyDoc.siteId,
+              siteName: siteName,
+              description: `ดาวน์โหลดไฟล์ "${previewFile.fileName}" (คลังเอกสาร)`
+            });
+          }
+        }}
+      />
     </div>
   );
 }

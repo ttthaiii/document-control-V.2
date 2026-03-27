@@ -6,6 +6,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { STATUSES, APPROVER_ROLES, ROLES } from '@/lib/config/workflow';
 import { getFileUrl } from '@/lib/utils/storage';
 import { Role } from '@/lib/config/workflow';
+import { logActivity } from '@/lib/utils/activityLogger';
 
 export const dynamic = 'force-dynamic';
 
@@ -140,6 +141,21 @@ export async function POST(req: Request) {
         files: finalFilesData,
         revisionNumber: rfaData.revisionNumber
       })
+    });
+
+    const supersedeSiteDoc = await adminDb.collection('sites').doc(rfaData.siteId).get();
+    logActivity({
+      userId: uid,
+      userEmail: userData.email || '',
+      userRole,
+      siteId: rfaData.siteId,
+      siteName: supersedeSiteDoc.data()?.name || '',
+      action: 'REQUEST_REVISION',
+      resourceType: 'RFA',
+      resourceId: docId,
+      resourceName: rfaData.documentNumber,
+      description: `ขอสร้าง Revision ใหม่: ${rfaData.documentNumber} — ${comment.trim()}`,
+      metadata: { newSupersededStatus, revisionNumber: rfaData.revisionNumber },
     });
 
     return NextResponse.json({
