@@ -1,4 +1,4 @@
-import { Inter } from 'next/font/google'
+import { Prompt } from 'next/font/google'
 import './globals.css'
 import { AuthProvider } from '@/lib/auth/useAuth'
 import { LoadingProvider } from '@/lib/context/LoadingContext'
@@ -16,7 +16,12 @@ if (typeof Promise.withResolvers === 'undefined' && typeof window !== 'undefined
   };
 }
 
-const inter = Inter({ subsets: ['latin'] })
+const promptFont = Prompt({ 
+  weight: ['300', '400', '500', '600', '700'],
+  subsets: ['thai', 'latin'],
+  display: 'swap',
+  variable: '--font-prompt',
+})
 
 // ✅ 1. เพิ่ม manifest และ icons ใน metadata
 export const metadata = {
@@ -44,7 +49,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="th">
-      <body className={inter.className}>
+      <body className={`${promptFont.variable} font-sans antialiased`}>
         <NotificationProvider>
           <AuthProvider>
             <LoadingProvider>

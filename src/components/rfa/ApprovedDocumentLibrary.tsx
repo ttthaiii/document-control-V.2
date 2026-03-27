@@ -291,12 +291,12 @@ export default function ApprovedDocumentLibrary() {
                 <div className="grid items-center px-6 py-3 bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider select-none"
                   style={{ gridTemplateColumns: '2fr 1.2fr 1fr 0.7fr auto' }}>
                   <button onClick={() => requestSort('documentNumber')} className="pl-3 flex items-center gap-1.5 hover:text-slate-800 transition-colors w-fit">
-                    เอกสาร / ชื่องาน <SortIcon columnKey="documentNumber" />
+                    เอกสาร <SortIcon columnKey="documentNumber" />
                   </button>
-                  <div>หมวดงาน / โครงการ</div>
+                  <div className="pl-1">หมวดงาน</div>
                   <div>สถานะ</div>
                   <button onClick={() => requestSort('updatedAt')} className="flex items-center justify-center gap-1.5 hover:text-slate-800 transition-colors mx-auto">
-                    อัปเดต <SortIcon columnKey="updatedAt" />
+                    อัปเดตล่าสุด <SortIcon columnKey="updatedAt" />
                   </button>
                   <div className="w-52 text-center">ไฟล์แนบ</div>
                 </div>

@@ -52,16 +52,16 @@ const CATEGORY_COLORS = [
   '#3D44B0', // hue 242° – Denim Indigo     (ครามยีนส์)
   '#B05618', // hue  20° – Sienna Brown     (น้ำตาลดินเผา)
   '#1E8A60', // hue 157° – Jade             (หยก)
-  '#8C2EA0', // hue 295° – Deep Violet      (ม่วงลึก)
+  '#C2185B', // hue 336° – Deep Rose        (กุหลาบเข้ม)        [เดิม 295° ชนกับ 315°]
   '#748C0A', // hue  72° – Olive Bark       (เปลือกต้นมะกอก)
   '#1C6AAA', // hue 210° – River Blue       (ฟ้าแม่น้ำ)
-  '#A02030', // hue 347° – Claret           (แดงไวน์)
-  '#288A2D', // hue 125° – Meadow Green     (เขียวทุ่งหญ้า)
+  '#B8620A', // hue  27° – Burnt Orange     (ส้มไหม้)           [เดิม 347° ชนกับ 0°]
+  '#1A7A40', // hue 145° – Emerald Muted    (มรกตหม่น)          [เดิม 125° ชนกับ 138°]
   '#6248B0', // hue 263° – Slate Purple     (ม่วงหินชนวน)
   '#A87612', // hue  40° – Burnished Gold   (ทองขัดเงา)
-  '#178580', // hue 178° – Patina Teal      (เขียวสนิม)
+  '#0F7A8C', // hue 188° – Deep Cyan        (ฟ้าเขียวเข้ม)      [เดิม 178° ชนกับ 190°]
   '#9C2480', // hue 315° – Mulberry         (หม่อน)
-  '#5A8A14', // hue  92° – Fern             (เฟิร์น)
+  '#7A9214', // hue  80° – Yellow Olive     (มะกอกเหลือง)       [เดิม 92° ชนกับ 105°]
 ];
 
 /** Hash ชื่อ category → index คงที่ ทำให้สีไม่เปลี่ยนเมื่อ filter */
@@ -111,7 +111,7 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
       const categoryName = doc.category?.categoryCode || categoryId;
       if (categoryName !== 'N/A') {
         if (!categoryCounts[categoryName]) {
-            categoryCounts[categoryName] = { value: 0, name: categoryName };
+          categoryCounts[categoryName] = { value: 0, name: categoryName };
         }
         categoryCounts[categoryName].value += 1;
       }
@@ -230,10 +230,10 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
             </ResponsiveContainer>
             <div
               className="absolute flex flex-col items-center justify-center pointer-events-none"
-              style={{ top: '50%', left: '50%', transform: 'translate(-50%, -60%)' }}
+              style={{ top: '42%', left: '50%', transform: 'translate(-50%, -50%)' }}
             >
-              <span className="text-xs text-gray-400 font-medium uppercase tracking-wider">TOTAL</span>
-              <span className="text-3xl font-bold text-gray-800">{displayTotalResponsible}</span>
+              <span className="text-xs text-gray-400 font-medium uppercase tracking-wider mb-1">TOTAL</span>
+              <span className="text-4xl font-bold text-gray-800 leading-none">{displayTotalResponsible}</span>
             </div>
           </div>
         </div>
@@ -279,10 +279,10 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
             </ResponsiveContainer>
             <div
               className="absolute flex flex-col items-center justify-center pointer-events-none"
-              style={{ top: '50%', left: '50%', transform: 'translate(-50%, -60%)' }}
+              style={{ top: '42%', left: '50%', transform: 'translate(-50%, -50%)' }}
             >
-              <span className="text-xs text-gray-400 font-medium uppercase tracking-wider">TOTAL</span>
-              <span className="text-3xl font-bold text-gray-800">{displayTotalCategory}</span>
+              <span className="text-xs text-gray-400 font-medium uppercase tracking-wider mb-1">TOTAL</span>
+              <span className="text-4xl font-bold text-gray-800 leading-none">{displayTotalCategory}</span>
             </div>
           </div>
         </div>
