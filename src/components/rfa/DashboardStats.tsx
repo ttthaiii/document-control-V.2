@@ -30,8 +30,12 @@ const CustomTooltip = ({ active, payload }: any) => {
     return (
       <div className="p-3 bg-white/90 backdrop-blur-sm shadow-lg rounded-lg border border-gray-200 z-50">
         <div className="flex items-center">
-          <div style={{ width: 12, height: 12, backgroundColor: data.payload.color, marginRight: 8, borderRadius: '50%' }}></div>
-          <p className="text-sm text-gray-700 font-medium">{`${data.name}: ${data.value}`}</p>
+          <span
+            className="w-3 h-3 rounded-full mr-2 flex-shrink-0"
+            style={{ backgroundColor: data.payload.color }}
+            aria-hidden="true"
+          />
+          <p className="text-sm text-text-body font-medium">{`${data.name}: ${data.value}`}</p>
         </div>
       </div>
     );

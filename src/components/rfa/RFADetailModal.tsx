@@ -3,7 +3,7 @@
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react'
 import { RFADocument, RFAPermissions, RFAWorkflowStep, RFAFile, RFASite } from '@/types/rfa'
-import { X, Paperclip, Clock, User, Check, Send, AlertTriangle, FileText, Download, History, MessageSquare, Edit3, Upload, ThumbsUp, ThumbsDown, Eye, CornerUpLeft, RefreshCw, EyeOff, Lock } from 'lucide-react'
+import { X, Paperclip, Clock, User, Check, Send, AlertTriangle, FileText, Download, History, MessageSquare, Edit3, Upload, ThumbsUp, ThumbsDown, Eye, CornerUpLeft, RefreshCw, EyeOff, Lock, CheckCircle2, XCircle, RotateCcw, Hourglass } from 'lucide-react'
 import Spinner from '@/components/shared/Spinner';
 import { useAuth } from '@/lib/auth/useAuth'
 import { Role, STATUS_LABELS, STATUSES, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUS_COLORS, ROLES } from '@/lib/config/workflow'
@@ -13,6 +13,7 @@ import { useLogActivity } from '@/lib/hooks/useLogActivity';
 import { storage } from '@/lib/firebase/client';
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { getFileUrl } from '@/lib/utils/storage';
+import { useScrollLock } from '@/hooks/useScrollLock';
 
 // --- Helper Functions ---
 const formatDate = (dateString: string | undefined): string => {
@@ -25,6 +26,22 @@ const formatFileSize = (bytes: number): string => {
   const sizes = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+};
+
+// C2: Status icon map for color-blind accessibility
+const getStatusIcon = (status: string) => {
+  const cls = 'w-3.5 h-3.5 mr-1.5 flex-shrink-0';
+  switch (status) {
+    case 'PENDING_REVIEW':          return <Hourglass className={cls} aria-hidden="true" />;
+    case 'PENDING_CM_APPROVAL':     return <Send className={cls} aria-hidden="true" />;
+    case 'PENDING_FINAL_APPROVAL':  return <Hourglass className={cls} aria-hidden="true" />;
+    case 'APPROVED':                return <CheckCircle2 className={cls} aria-hidden="true" />;
+    case 'APPROVED_WITH_COMMENTS':  return <MessageSquare className={cls} aria-hidden="true" />;
+    case 'APPROVED_REVISION_REQUIRED': return <RotateCcw className={cls} aria-hidden="true" />;
+    case 'REVISION_REQUIRED':       return <RotateCcw className={cls} aria-hidden="true" />;
+    case 'REJECTED':                return <XCircle className={cls} aria-hidden="true" />;
+    default:                        return null;
+  }
 };
 
 // --- Component: Workflow History Modal ---
@@ -67,8 +84,12 @@ const WorkflowHistoryModal = ({
             <History size={20} className="mr-2" />
             ประวัติการดำเนินงาน
           </h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <X size={24} />
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 focus-visible:ring-2 focus-visible:ring-blue-500 rounded outline-none"
+            aria-label="\u0e1b\u0e34\u0e14"
+          >
+            <X size={24} aria-hidden="true" />
           </button>
         </div>
         <div className="p-6 overflow-y-auto">
@@ -234,57 +255,8 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const [verifiedTaskId, setVerifiedTaskId] = useState<string | null>(null);
   const [newDocumentNumberInput, setNewDocumentNumberInput] = useState('');
 
-  // 0. Prevent Body Scroll without causing Jump to Top (Anti-pattern fix)
-  useEffect(() => {
-    // Save current scroll position to prevent layout shifts
-    const scrollY = window.scrollY;
-    const body = window.document.body;
-
-    // Get scrollbar width to prevent layout shift when hiding internal scrollbars
-    const scrollbarWidth = window.innerWidth - window.document.documentElement.clientWidth;
-
-    const originalStyle = {
-      position: body.style.position,
-      top: body.style.top,
-      width: body.style.width,
-      overflow: body.style.overflow,
-      paddingRight: body.style.paddingRight
-    };
-
-    // Lock the body to the current scroll position securely 
-    // This perfectly hides the 'html' scrollbar without resetting scrollTop to 0
-    body.style.position = 'fixed';
-    body.style.top = `-${scrollY}px`;
-    body.style.width = '100%';
-    body.style.overflow = 'hidden';
-    body.style.paddingRight = `${scrollbarWidth}px`;
-
-    // Hide all internal scrollbars in the background table by adding a global style temporarily
-    const style = window.document.createElement('style');
-    style.id = 'rfa-modal-scroll-lock';
-    style.innerHTML = `
-      .scroll-locked-when-modal {
-        overflow: hidden !important;
-        padding-right: ${scrollbarWidth}px !important;
-      }
-    `;
-    window.document.head.appendChild(style);
-
-    return () => {
-      // Restore layout
-      body.style.position = originalStyle.position;
-      body.style.top = originalStyle.top;
-      body.style.width = originalStyle.width;
-      body.style.overflow = originalStyle.overflow;
-      body.style.paddingRight = originalStyle.paddingRight;
-
-      const styleEl = window.document.getElementById('rfa-modal-scroll-lock');
-      if (styleEl) styleEl.remove();
-
-      // Restore scroll position instantly
-      window.scrollTo(0, scrollY);
-    };
-  }, []);
+  // 0. Prevent Body Scroll — use shared hook to avoid race condition with stacked modals
+  useScrollLock(true);
 
   // 1. Fetch Full Document Data
   useEffect(() => {
@@ -448,11 +420,48 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     }
   }, [isRevisionFlow, requiresBimVerification, firebaseUser, document, verifyBimTask]);
 
-  // 4. Loading State
+  // 4. Loading State — Skeleton instead of black overlay
   if (isLoading) {
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
-        <Spinner className="h-12 w-12 text-white" />
+      <div className="fixed inset-0 bg-black/50 z-modal flex items-center justify-center p-4">
+        <div className="bg-surface rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col animate-pulse">
+          {/* Skeleton Header */}
+          <div className="flex justify-between items-start p-4 border-b border-border-subtle">
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <div className="h-6 w-32 bg-surface-muted rounded" />
+                <div className="h-6 w-16 bg-surface-muted rounded" />
+              </div>
+              <div className="h-5 w-64 bg-surface-muted rounded" />
+              <div className="h-3 w-24 bg-surface-muted rounded" />
+            </div>
+            <div className="h-8 w-8 bg-surface-muted rounded-full" />
+          </div>
+          {/* Skeleton Content */}
+          <div className="flex-1 p-6 space-y-6 overflow-hidden">
+            <div className="bg-surface-raised rounded-lg p-4 space-y-3">
+              <div className="grid grid-cols-3 gap-4">
+                <div className="h-12 bg-surface-muted rounded" />
+                <div className="h-12 bg-surface-muted rounded" />
+                <div className="h-12 bg-surface-muted rounded" />
+              </div>
+            </div>
+            <div className="space-y-3">
+              <div className="h-4 w-32 bg-surface-muted rounded" />
+              <div className="h-10 bg-surface-muted rounded" />
+              <div className="h-10 bg-surface-muted rounded" />
+              <div className="h-10 w-3/4 bg-surface-muted rounded" />
+            </div>
+          </div>
+          {/* Skeleton Action Panel */}
+          <div className="p-6 border-t bg-surface-raised">
+            <div className="h-4 w-32 bg-surface-muted rounded mb-4" />
+            <div className="flex gap-3 justify-end">
+              <div className="h-9 w-24 bg-surface-muted rounded-lg" />
+              <div className="h-9 w-28 bg-surface-muted rounded-lg" />
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -952,12 +961,17 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
             <div className="flex items-center space-x-4">
               <button
                 onClick={() => setShowHistory(true)}
-                className="flex items-center text-sm text-gray-500 hover:text-blue-600"
+                className="flex items-center text-sm text-text-secondary hover:text-blue-600 focus-visible:ring-2 focus-visible:ring-brand rounded outline-none"
+                aria-label="ดูประวัติการดำเนินงาน"
               >
                 <History size={16} className="mr-1" /> ดูประวัติการดำเนินงาน
               </button>
-              <button onClick={triggerClose} className="text-gray-400 hover:text-gray-600">
-                <X size={24} />
+              <button
+                onClick={triggerClose}
+                className="text-text-secondary hover:text-text-body focus-visible:ring-2 focus-visible:ring-brand rounded outline-none"
+                aria-label="ปิด"
+              >
+                <X size={24} aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -971,9 +985,10 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                   <div>
                     <strong className="text-gray-700 font-semibold block mb-1">สถานะ:</strong>
                     <span
-                      className="px-3 py-1 text-xs font-bold text-white rounded-full shadow-sm"
+                      className="inline-flex items-center px-3 py-1 text-xs font-bold text-white rounded-full shadow-sm"
                       style={{ backgroundColor: STATUS_COLORS[document.status] || '#6c757d' }}
                     >
+                      {getStatusIcon(document.status)}
                       {STATUS_LABELS[document.status] || document.status}
                     </span>
                   </div>
@@ -1096,7 +1111,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 <div className="space-y-6">
                   <div className="pb-3 border-b border-slate-200">
                     <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (Site)</h3>
-                    <p className="text-sm text-slate-500 mt-1">กรุณาดำเนินการตามขั้นตอนด้านล่างเพื่อตรวจสอบและส่งงานต่อ</p>
                   </div>
 
                   {needsDocNumber && (
@@ -1229,7 +1243,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 <div className="space-y-6">
                   <div className="pb-3 border-b border-slate-200">
                     <h3 className="text-lg font-bold text-slate-800">ส่งเอกสารฉบับแก้ไข</h3>
-                    <p className="text-sm text-slate-500 mt-1">กรุณาแนบไฟล์ที่แก้ไขเรียบร้อยแล้วเพื่อส่งให้ Site ตรวจสอบอีกครั้ง</p>
                   </div>
 
                   {/* Step 1: File Upload */}
@@ -1302,7 +1315,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 <div className="space-y-6">
                   <div className="pb-3 border-b border-slate-200">
                     <h3 className="text-lg font-bold text-slate-800">สร้างเอกสารฉบับแก้ไข</h3>
-                    <p className="text-sm text-slate-500 mt-1">กรุณาตรวจสอบข้อมูล แนบไฟล์ใหม่ และส่งเพื่อให้ Site ตรวจสอบ</p>
                   </div>
 
                   {/* Supersede Comment Banner */}
@@ -1393,7 +1405,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 <div className="space-y-6">
                   <div className="pb-3 border-b border-slate-200">
                     <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (อนุมัติ)</h3>
-                    <p className="text-sm text-slate-500 mt-1">กรุณาแนบไฟล์และแสดงความเห็นก่อนตัดสินใจ</p>
                   </div>
 
                   {/* Step 1: File Upload */}
@@ -1421,33 +1432,37 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                     </div>
                     <label className="text-sm font-medium text-gray-700 mb-1.5 block">แสดงความคิดเห็น (Optional)</label>
                     <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..." className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white text-gray-900 focus:ring-blue-500 focus:border-blue-500 transition-colors" rows={3} />
+
+                    {/* H7: Improved button hierarchy — REJECT far left outline, approve actions far right solid */}
                     <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200">
+                      {/* Destructive action — left, outline style */}
                       <button
                         onClick={() => handleAction('REJECT')}
                         disabled={isActionDisabled}
-                        className="flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                        className="flex items-center px-4 py-2 text-sm font-medium text-red-600 bg-white border-2 border-red-300 rounded-lg hover:bg-red-50 hover:border-red-500 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-red-500 outline-none transition-colors"
                       >
                         {loadingAction === 'REJECT' ? <Spinner className="w-4 h-4 mr-2" /> : <ThumbsDown size={16} className="mr-2" />} ไม่อนุมัติ
                       </button>
-                      <div className="flex flex-wrap gap-3">
+                      {/* Approval actions — right, solid (ascending visual weight) */}
+                      <div className="flex flex-wrap gap-2">
                         <button
                           onClick={() => handleAction('APPROVE_REVISION_REQUIRED')}
                           disabled={isActionDisabled}
-                          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-lg hover:bg-orange-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-amber-400 outline-none transition-colors"
                         >
                           {loadingAction === 'APPROVE_REVISION_REQUIRED' ? <Spinner className="w-4 h-4 mr-2" /> : <Edit3 size={16} className="mr-2" />} อนุมัติ (ต้องแก้ไข)
                         </button>
                         <button
                           onClick={() => handleAction('APPROVE_WITH_COMMENTS')}
                           disabled={isActionDisabled}
-                          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-teal-500 outline-none transition-colors"
                         >
                           {loadingAction === 'APPROVE_WITH_COMMENTS' ? <Spinner className="w-4 h-4 mr-2" /> : <MessageSquare size={16} className="mr-2" />} อนุมัติ (มีคอมเมนต์)
                         </button>
                         <button
                           onClick={() => handleAction('APPROVE')}
                           disabled={isActionDisabled}
-                          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                          className="flex items-center px-5 py-2 text-sm font-bold text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-green-500 outline-none transition-colors shadow-sm"
                         >
                           {loadingAction === 'APPROVE' ? <Spinner className="w-4 h-4 mr-2" /> : <ThumbsUp size={16} className="mr-2" />} อนุมัติ
                         </button>

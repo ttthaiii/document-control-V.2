@@ -14,6 +14,27 @@ const config: Config = {
       colors: {
         background: "var(--background)",
         foreground: "var(--foreground)",
+        surface: {
+          DEFAULT: '#ffffff',
+          raised: '#f8fafc',
+          muted: '#f1f5f9',
+        },
+        border: {
+          subtle: '#e2e8f0',
+          DEFAULT: '#cbd5e1',
+        },
+        brand: {
+          DEFAULT: '#f97316',
+          light: '#ffedd5',
+        },
+        'text-body': '#0f172a',
+        'text-secondary': '#64748b',
+      },
+      zIndex: {
+        'modal': '50',
+        'modal-elevated': '60',
+        'modal-top': '100',
+        'tooltip': '200',
       },
     },
   },

@@ -76,6 +76,7 @@ export default function PDFPreviewModal({
   const [managedFileUrl, setManagedFileUrl] = useState<string | null>(null);
   const [isPageManagementMode, setIsPageManagementMode] = useState(false);
   const [draggedPage, setDraggedPage] = useState<number | null>(null);
+  const [pendingDeletePage, setPendingDeletePage] = useState<number | null>(null); // H4: inline confirm
 
   const isPinchingRef = useRef(false);
   const startPinchDistRef = useRef<number>(0);
@@ -502,9 +503,9 @@ export default function PDFPreviewModal({
       return;
     }
     if (sizeInMB > 5) {
-      if (!window.confirm('คำเตือน: ไฟล์ PDF นี้มีขนาดค่อนข้างใหญ่ อาจทำให้หน่วงหรือเบราว์เซอร์ทำงานช้าลงระหว่างจัดการหน้ากระดาษ ต้องการดำเนินการต่อหรือไม่?')) {
-        return;
-      }
+      // H4: Non-blocking warning — show notification and let user proceed after
+      showNotification('warning', 'ไฟล์มีขนาดใหญ่ (จะหน่วงได้)', 'ไฟล์ PDF มีขนาด > 5MB อาจทำให้เบราว์เซอร์ทำงานช้าลงระหว่างจัดการหน้ากระดาษ');
+      // Proceed anyway — user is informed, not blocked
     }
     setIsPageManagementMode(true);
     setIsSidebarOpen(true); // Force open sidebar
@@ -1260,7 +1261,8 @@ export default function PDFPreviewModal({
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (window.confirm(`ต้องการลบหน้า ${p} ใช่หรือไม่?`)) handleDeletePage(p);
+                            // H4: Set pending page — renders inline confirm instead of window.confirm
+                            setPendingDeletePage(p);
                           }}
                           disabled={totalPages <= 1}
                           className="p-1 bg-red-50 border border-red-200 rounded shadow hover:bg-red-100 text-red-600 disabled:opacity-30"
@@ -1268,6 +1270,24 @@ export default function PDFPreviewModal({
                         >
                           <Trash2 size={16} />
                         </button>
+                      </div>
+                    )}
+                    {/* H4: Inline delete confirmation */}
+                    {pendingDeletePage === p && (
+                      <div className="absolute inset-x-0 bottom-0 bg-red-600 text-white text-xs rounded-b-md p-1.5 flex items-center justify-between gap-1 z-10">
+                        <span className="font-medium truncate">\u0e25\u0e1a\u0e2b\u0e19\u0e49\u0e32 {p}?</span>
+                        <div className="flex gap-1 flex-shrink-0">
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); handleDeletePage(p); setPendingDeletePage(null); }}
+                            className="px-1.5 py-0.5 bg-white text-red-700 rounded font-bold hover:bg-red-50"
+                          >\u0e43\u0e0a\u0e48</button>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setPendingDeletePage(null); }}
+                            className="px-1.5 py-0.5 bg-red-500 text-white rounded hover:bg-red-400"
+                          >\u0e44\u0e21\u0e48</button>
+                        </div>
                       </div>
                     )}
                   </div>

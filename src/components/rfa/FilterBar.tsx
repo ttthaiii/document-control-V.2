@@ -138,14 +138,18 @@ const FilterBar: React.FC<FilterBarProps> = ({
             type="checkbox"
             checked={filters.showAllRevisions}
             onChange={(e) => handleFilterChange('showAllRevisions', e.target.checked)}
-            className="h-4 w-4 rounded border-gray-300 text-blue-600"
+            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus-visible:ring-2 focus-visible:ring-blue-500 outline-none cursor-pointer"
           />
-          <label htmlFor="show-all-revisions" className="ml-2 text-sm text-gray-700">ทุกฉบับ</label>
+          <label htmlFor="show-all-revisions" className="ml-2 text-sm text-gray-700 cursor-pointer select-none">ทุกฉบับ</label>
         </div>
 
         {/* Reset Button */}
         <div className="md:col-span-1">
-          <button onClick={resetFilters} className="w-full h-10 px-4 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 font-medium"> {/* ✅ ใส่ h-10 */}
+          <button
+            onClick={resetFilters}
+            className="w-full h-10 px-4 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 font-medium focus-visible:ring-2 focus-visible:ring-blue-500 outline-none transition-colors"
+            aria-label="รีเซ็ตตัวกรองทั้งหมด"
+          >
             รีเซ็ต
           </button>
         </div>

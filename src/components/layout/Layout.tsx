@@ -3,7 +3,7 @@
 import React, { useState } from 'react'
 import { useAuth } from '@/lib/auth/useAuth'
 import Sidebar from './Sidebar'
-import { Menu, Bell, Building2,HardHat, Hand } from 'lucide-react'
+import { Menu, Bell, Building2, HardHat } from 'lucide-react'
 import { useLoading } from '@/lib/context/LoadingContext'
 import { GlobalSpinner } from '@/lib/context/LoadingContext'
 
@@ -51,8 +51,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             </button>
 
             {user && (
-              <span className="hidden sm:flex items-center gap-2 text-sm text-gray-600">
-                <Hand className="text-yellow-500" size={16} />
+              <span className="hidden sm:flex items-center gap-2 text-sm text-text-secondary">
                 สวัสดี, {user.email.split('@')[0]}
               </span>
             )}

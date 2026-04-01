@@ -32,29 +32,35 @@ const BUTTON_STYLES = {
   warning: 'bg-yellow-600 hover:bg-yellow-700',
 };
 
+const BUTTON_TEXT = {
+  success: 'เข้าใจแล้ว',
+  error: 'ปิด',
+  warning: 'รับทราบ',
+};
+
 const NotificationModal: React.FC<NotificationModalProps> = ({ isOpen, type, title, message, onClose }) => {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-60 z-[100] flex items-center justify-center p-4">
-      <div className="relative bg-white rounded-xl shadow-2xl border border-gray-200 w-full max-w-md mx-auto overflow-hidden">
+    <div className="fixed inset-0 bg-black bg-opacity-60 z-modal-top flex items-center justify-center p-4">
+      <div className="relative bg-surface rounded-xl shadow-2xl border border-border-subtle w-full max-w-md mx-auto overflow-hidden animate-in zoom-in-95 duration-200">
         {/* Colored accent header */}
         <div className={`${ICON_BG[type]} px-6 pt-8 pb-6 flex flex-col items-center`}>
           <div className="flex justify-center mb-4">
             {ICONS[type]}
           </div>
-          <h3 className="text-xl font-bold text-gray-900 text-center">{title}</h3>
+          <h3 className="text-xl font-bold text-text-body text-center">{title}</h3>
         </div>
         {/* Body */}
         <div className="px-6 py-5">
           {message && (
-            <p className="text-gray-600 text-sm mb-5 whitespace-pre-wrap text-center">{message}</p>
+            <p className="text-text-secondary text-sm mb-5 whitespace-pre-wrap text-center">{message}</p>
           )}
           <button
             onClick={onClose}
-            className={`w-full px-4 py-2.5 text-white font-semibold rounded-lg transition-colors text-sm ${BUTTON_STYLES[type]}`}
+            className={`w-full px-4 py-2.5 text-white font-semibold rounded-lg transition-colors text-sm focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-brand ${BUTTON_STYLES[type]}`}
           >
-            ตกลง
+            {BUTTON_TEXT[type]}
           </button>
         </div>
       </div>
