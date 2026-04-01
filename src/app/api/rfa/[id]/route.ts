@@ -393,6 +393,7 @@ export async function PUT(
             resourceType: 'RFA',
             resourceId: params.id,
             resourceName: docNumber,
+            resourceTitle: documentTitle,
             description: buildDescription(mappedLogAction, docNumber),
             metadata: { rfaType: docData.rfaType, newStatus, comments: comments || '' },
           });

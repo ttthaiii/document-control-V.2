@@ -147,6 +147,7 @@ export async function POST(request: NextRequest) {
       resourceType: body.resourceType || null,
       resourceId: body.resourceId || null,
       resourceName: body.resourceName || null,
+      resourceTitle: body.resourceTitle || null,
       description: body.description || body.action,
       metadata: body.metadata || null,
       createdAt: FieldValue.serverTimestamp(),

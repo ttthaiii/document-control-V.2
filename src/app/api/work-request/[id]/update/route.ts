@@ -157,6 +157,7 @@ export async function POST(
         resourceType: 'WORK_REQUEST',
         resourceId: params.id,
         resourceName: docData.documentNumber,
+        resourceTitle: docData.taskName,
         description: buildDescription(wrLogAction as any, docData.documentNumber),
         metadata: { newStatus },
       });

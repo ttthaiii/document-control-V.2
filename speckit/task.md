@@ -2,11 +2,11 @@
 
 ## Known Fixes — ห้ามแก้กลับ (Regression Guard)
 
-- [x] **SCROLL-LOCK**: `useScrollLock` ต้อง lock ทั้ง `html` และ `body` พร้อมกัน (ไม่ใช่แค่ `body`)
+- [x] **SCROLL-LOCK**: `useScrollLock` ต้องใช้ `position:fixed` + `top:-scrollY` เท่านั้น
   - ไฟล์: `src/hooks/useScrollLock.ts`
-  - ปัญหา: `globals.css` กำหนด `html, body { height: 100% }` → browser render scrollbar จาก `html` ด้วย → lock แค่ `body` ไม่พอ
-  - Fix: lock `html.style.overflow = 'hidden'` + `body.style.overflow = 'hidden'` + `body.style.paddingRight` ชดเชย scrollbar width
-  - **ห้ามลด code กลับไปใช้แค่ `body.style.overflow = 'hidden'`**
+  - ปัญหา: `globals.css` มี `html, body { height: 100% }` → `overflow:hidden` บน body/html ทำให้ scroll position reset = 0 = หน้าจอเด้งขึ้น top
+  - Fix: บันทึก `scrollY` ก่อน → set `body.style.position='fixed'` + `body.style.top='-scrollY'` → cleanup: restore styles แล้ว `window.scrollTo(0, savedScrollY)`
+  - **ห้ามเปลี่ยนกลับเป็น `overflow:hidden` บน body/html — scroll position จะหายทุกครั้ง**
 
 ## Active Tasks
 - [x] [T-002] **Migrate Historical RFA Data** <!-- id: 11 -->

@@ -221,6 +221,7 @@ export async function POST(req: Request) {
       resourceType: 'RFA',
       resourceId: rfaRef.id,
       resourceName: documentNumber || runningNumber,
+      resourceTitle: title,
       description: buildDescription('CREATE_DOCUMENT', documentNumber || runningNumber),
       metadata: { rfaType, initialStatus },
     });

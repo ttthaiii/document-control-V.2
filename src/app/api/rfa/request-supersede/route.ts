@@ -154,6 +154,7 @@ export async function POST(req: Request) {
       resourceType: 'RFA',
       resourceId: docId,
       resourceName: rfaData.documentNumber,
+      resourceTitle: rfaData.title,
       description: `ขอสร้าง Revision ใหม่: ${rfaData.documentNumber} — ${comment.trim()}`,
       metadata: { newSupersededStatus, revisionNumber: rfaData.revisionNumber },
     });

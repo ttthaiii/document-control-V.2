@@ -23,6 +23,7 @@ export async function logActivity(params: LogActivityParams): Promise<void> {
       resourceType: params.resourceType || null,
       resourceId: params.resourceId || null,
       resourceName: params.resourceName || null,
+      resourceTitle: params.resourceTitle || null,
       description: params.description,
       metadata: params.metadata || null,
       createdAt: FieldValue.serverTimestamp(),

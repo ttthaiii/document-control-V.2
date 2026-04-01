@@ -134,6 +134,7 @@ const WorkflowHistoryModal = ({
                                   resourceType: 'RFA',
                                   resourceId: docId,
                                   resourceName: docNumber,
+                                  resourceTitle: undefined, // WorkflowHistory ไม่มี title prop — ใช้ undefined
                                   siteId: siteId,
                                   siteName: siteName,
                                   description: `${isPdf ? 'เปิดดูไฟล์' : 'ดาวน์โหลดไฟล์'} "${file.fileName}" (จากประวัติ)`,
@@ -1059,6 +1060,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                                   resourceType: 'RFA',
                                   resourceId: document.id,
                                   resourceName: document.documentNumber || document.runningNumber,
+                                  resourceTitle: document.title,
                                   siteId: document.site.id,
                                   siteName: document.site.name,
                                   description: `เปิดดูไฟล์เอกสาร "${file.fileName}"`
@@ -1082,6 +1084,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                                   resourceType: 'RFA',
                                   resourceId: document.id,
                                   resourceName: document.documentNumber || document.runningNumber,
+                                  resourceTitle: document.title,
                                   siteId: document.site.id,
                                   siteName: document.site.name,
                                   description: `ดาวน์โหลดไฟล์เอกสาร "${file.fileName}"`
@@ -1643,6 +1646,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
             resourceType: 'RFA',
             resourceId: document.id,
             resourceName: document.documentNumber || document.runningNumber,
+            resourceTitle: document.title,
             siteId: document.site?.id,
             siteName: document.site?.name,
             description: `ดาวน์โหลดไฟล์เอกสาร "${previewFile?.fileName}"`

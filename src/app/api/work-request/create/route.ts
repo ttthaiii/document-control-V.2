@@ -145,6 +145,7 @@ export async function POST(req: NextRequest) {
           resourceType: 'WORK_REQUEST',
           resourceId: newWorkRequestRef.id,
           resourceName: documentNumber,
+          resourceTitle: taskName,
           description: buildDescription('CREATE_WORK_REQUEST', documentNumber),
         });
 

@@ -11,6 +11,7 @@ interface ClientLogParams {
   resourceType?: ResourceType;
   resourceId?: string;
   resourceName?: string;
+  resourceTitle?: string;   // ชื่อเอกสาร (สำหรับ Document Audit search)
   description?: string;
   siteId?: string;
   siteName?: string;

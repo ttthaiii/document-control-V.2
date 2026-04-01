@@ -45,8 +45,10 @@ export default function SmartRFAModal({ documentId, onClose }: SmartRFAModalProp
             resourceType: 'RFA',
             resourceId: docSnap.id,
             resourceName: data.documentNumber || data.runningNumber,
-            siteId: data.site?.id,
-            siteName: data.site?.name,
+            resourceTitle: data.title,
+            // fallback: เอกสารเก่าบางตัวเก็บ siteName ไว้ที่ root level แทน site.name
+            siteId: data.site?.id || data.siteId,
+            siteName: data.site?.name || data.siteName,
             description: `เข้าดูรายละเอียด RFA: ${data.documentNumber || data.runningNumber}`
           });
           hasLoggedViewRef.current = docSnap.id;

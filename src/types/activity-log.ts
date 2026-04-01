@@ -34,7 +34,8 @@ export interface ActivityLog {
   action: LogAction;
   resourceType?: ResourceType;
   resourceId?: string;
-  resourceName?: string;    // เช่น 'ST2-RFA-001 REV.02' (ใช้อ้างอิงใน dispute)
+  resourceName?: string;    // เช่น 'ST2-RFA-001 REV.02' (เลขที่เอกสาร)
+  resourceTitle?: string;   // เช่น 'แบบเสาชั้น 1 อาคาร A' (ชื่อเอกสาร)
   description: string;      // ข้อความอธิบาย ภาษาไทย
   metadata?: Record<string, any>;
   createdAt: Date;
@@ -51,6 +52,8 @@ export interface LogActivityParams {
   resourceType?: ResourceType;
   resourceId?: string;
   resourceName?: string;
+  resourceTitle?: string;   // ชื่อเอกสาร (สำหรับ Document Audit search)
   description: string;
   metadata?: Record<string, any>;
 }
+
