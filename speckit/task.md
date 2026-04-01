@@ -1,5 +1,13 @@
 # Task List
 
+## Known Fixes — ห้ามแก้กลับ (Regression Guard)
+
+- [x] **SCROLL-LOCK**: `useScrollLock` ต้อง lock ทั้ง `html` และ `body` พร้อมกัน (ไม่ใช่แค่ `body`)
+  - ไฟล์: `src/hooks/useScrollLock.ts`
+  - ปัญหา: `globals.css` กำหนด `html, body { height: 100% }` → browser render scrollbar จาก `html` ด้วย → lock แค่ `body` ไม่พอ
+  - Fix: lock `html.style.overflow = 'hidden'` + `body.style.overflow = 'hidden'` + `body.style.paddingRight` ชดเชย scrollbar width
+  - **ห้ามลด code กลับไปใช้แค่ `body.style.overflow = 'hidden'`**
+
 ## Active Tasks
 - [x] [T-002] **Migrate Historical RFA Data** <!-- id: 11 -->
     - **Type**: Utility / Migration

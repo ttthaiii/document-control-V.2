@@ -420,45 +420,45 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     }
   }, [isRevisionFlow, requiresBimVerification, firebaseUser, document, verifyBimTask]);
 
-  // 4. Loading State — Skeleton instead of black overlay
+  // 4. Loading State — Skeleton with per-element pulse (not whole-container flash)
   if (isLoading) {
     return (
-      <div className="fixed inset-0 bg-black/50 z-modal flex items-center justify-center p-4">
-        <div className="bg-surface rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col animate-pulse">
+      <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
           {/* Skeleton Header */}
-          <div className="flex justify-between items-start p-4 border-b border-border-subtle">
-            <div className="space-y-2">
+          <div className="flex justify-between items-start p-4 border-b border-gray-200">
+            <div className="space-y-2.5">
               <div className="flex gap-2">
-                <div className="h-6 w-32 bg-surface-muted rounded" />
-                <div className="h-6 w-16 bg-surface-muted rounded" />
+                <div className="h-6 w-32 bg-gray-200 rounded animate-pulse" />
+                <div className="h-6 w-16 bg-gray-200 rounded animate-pulse" />
               </div>
-              <div className="h-5 w-64 bg-surface-muted rounded" />
-              <div className="h-3 w-24 bg-surface-muted rounded" />
+              <div className="h-5 w-64 bg-gray-200 rounded animate-pulse" />
+              <div className="h-3 w-24 bg-gray-200 rounded animate-pulse" />
             </div>
-            <div className="h-8 w-8 bg-surface-muted rounded-full" />
+            <div className="h-8 w-8 bg-gray-200 rounded-full animate-pulse" />
           </div>
           {/* Skeleton Content */}
           <div className="flex-1 p-6 space-y-6 overflow-hidden">
-            <div className="bg-surface-raised rounded-lg p-4 space-y-3">
+            <div className="bg-gray-50 rounded-lg p-4 space-y-3">
               <div className="grid grid-cols-3 gap-4">
-                <div className="h-12 bg-surface-muted rounded" />
-                <div className="h-12 bg-surface-muted rounded" />
-                <div className="h-12 bg-surface-muted rounded" />
+                <div className="h-12 bg-gray-200 rounded animate-pulse" />
+                <div className="h-12 bg-gray-200 rounded animate-pulse" />
+                <div className="h-12 bg-gray-200 rounded animate-pulse" />
               </div>
             </div>
             <div className="space-y-3">
-              <div className="h-4 w-32 bg-surface-muted rounded" />
-              <div className="h-10 bg-surface-muted rounded" />
-              <div className="h-10 bg-surface-muted rounded" />
-              <div className="h-10 w-3/4 bg-surface-muted rounded" />
+              <div className="h-4 w-32 bg-gray-200 rounded animate-pulse" />
+              <div className="h-10 bg-gray-200 rounded animate-pulse" />
+              <div className="h-10 bg-gray-200 rounded animate-pulse" />
+              <div className="h-10 w-3/4 bg-gray-200 rounded animate-pulse" />
             </div>
           </div>
           {/* Skeleton Action Panel */}
-          <div className="p-6 border-t bg-surface-raised">
-            <div className="h-4 w-32 bg-surface-muted rounded mb-4" />
+          <div className="p-6 border-t border-gray-200 bg-gray-50">
+            <div className="h-4 w-32 bg-gray-200 rounded animate-pulse mb-4" />
             <div className="flex gap-3 justify-end">
-              <div className="h-9 w-24 bg-surface-muted rounded-lg" />
-              <div className="h-9 w-28 bg-surface-muted rounded-lg" />
+              <div className="h-9 w-24 bg-gray-200 rounded-lg animate-pulse" />
+              <div className="h-9 w-28 bg-gray-200 rounded-lg animate-pulse" />
             </div>
           </div>
         </div>

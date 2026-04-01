@@ -7,14 +7,14 @@ import { useLogActivity } from '@/lib/hooks/useLogActivity'
 import { Site, Category, RFADocument, RFAFile } from '@/types/rfa'
 import {
   Search, Building, Tag, FileText, Calendar, Download, Eye,
-  FileDigit, AlertTriangle, Lock, FolderOpen, ChevronDown, ChevronUp, Filter
+  FileDigit, AlertTriangle, Lock, FolderOpen, ChevronDown, ChevronUp, Filter, BookOpen
 } from 'lucide-react'
 import Spinner from '@/components/shared/Spinner'
 import PDFPreviewModal from './PDFPreviewModal'
 
 import { db } from '@/lib/firebase/client'
 import { collection, query, where, getDocs, orderBy, QueryConstraint } from 'firebase/firestore'
-import { STATUSES, STATUS_LABELS } from '@/lib/config/workflow'
+import { STATUSES, STATUS_LABELS, STATUS_COLORS } from '@/lib/config/workflow'
 
 
 const formatDate = (date: any): string => {
@@ -25,6 +25,19 @@ const formatDate = (date: any): string => {
   const d = new Date(date);
   if (isNaN(d.getTime())) return 'Invalid Date';
   return d.toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' });
+};
+
+// C2: แปลง hex color → rgba สำหรับ status badge
+const getStatusBadgeStyle = (status: string): React.CSSProperties => {
+  const hex = STATUS_COLORS[status];
+  if (!hex) return { backgroundColor: '#d1fae5', color: '#065f46' };
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return {
+    backgroundColor: `rgba(${r}, ${g}, ${b}, 0.12)`,
+    color: hex,
+  };
 };
 
 const useIsMobile = () => {
@@ -283,8 +296,9 @@ export default function ApprovedDocumentLibrary() {
 
         {/* ── Filter Bar ── */}
         <div className="p-4 border-b">
-          <h2 className="text-xl font-bold text-gray-800 mb-4">
-            📚 คลังเอกสารอนุมัติ (Approved Document Library)
+          <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+            <BookOpen className="w-5 h-5 text-blue-600 flex-shrink-0" />
+            คลังเอกสารอนุมัติ (Approved Document Library)
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
             <div className="relative md:col-span-1">
@@ -401,7 +415,7 @@ export default function ApprovedDocumentLibrary() {
                         <span className="inline-flex items-center px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-[11px] font-semibold">
                           Rev.{String(doc.revisionNumber || 0).padStart(2, '0')}
                           {isRevisionInProgress && (
-                            <span className="ml-1 text-orange-500">⚠</span>
+                            <AlertTriangle className="w-3 h-3 ml-1 text-orange-500" />
                           )}
                         </span>
                         {doc.rfaType && (
@@ -544,15 +558,11 @@ export default function ApprovedDocumentLibrary() {
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
                       หมวดงาน
                     </th>
-                    {/* Col 5: สถานะ */}
+                    {/* Col 5: สถานะ + หมายเหตุ */}
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
                       สถานะ
                     </th>
-                    {/* Col 6: หมายเหตุ */}
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
-                      หมายเหตุ
-                    </th>
-                    {/* Col 7: อัปเดตล่าสุด */}
+                    {/* Col 6: อัปเดตล่าสุด */}
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
                       <button
                         onClick={() => requestSort('updatedAt')}
@@ -561,7 +571,7 @@ export default function ApprovedDocumentLibrary() {
                         อัปเดตล่าสุด <SortIcon columnKey="updatedAt" />
                       </button>
                     </th>
-                    {/* Col 8: ไฟล์แนบ */}
+                    {/* Col 7: ไฟล์แนบ */}
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
                       ไฟล์แนบ
                     </th>
@@ -614,7 +624,7 @@ export default function ApprovedDocumentLibrary() {
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-xs font-semibold">
                             {String(doc.revisionNumber || 0).padStart(2, '0')}
                             {isRevisionInProgress && (
-                              <span className="text-orange-500">⚠</span>
+                              <AlertTriangle className="w-3 h-3 text-orange-500" />
                             )}
                           </span>
                         </td>
@@ -626,43 +636,39 @@ export default function ApprovedDocumentLibrary() {
                           </span>
                         </td>
 
-                        {/* Col 5: สถานะ */}
-                        <td className="px-4 py-4 whitespace-nowrap">
-                          <span className="inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-green-100 text-green-800">
+                        {/* Col 5: สถานะ + หมายเหตุ */}
+                        <td className="px-4 py-4 max-w-[220px]">
+                          {/* Status badge */}
+                          <span
+                            className="inline-flex items-center px-2.5 py-1 rounded text-xs font-medium"
+                            style={getStatusBadgeStyle(doc.status)}
+                          >
                             {STATUS_LABELS[doc.status] || doc.status}
                           </span>
-                        </td>
 
-                        {/* Col 6: หมายเหตุ */}
-                        <td className="px-4 py-4 max-w-[200px]">
+                          {/* Remark — แสดงใต้ badge เมื่อมีข้อมูล */}
                           {isSuspended ? (
-                            // กรณีระงับ
-                            <span className="flex items-start gap-1 text-xs text-red-600 font-medium">
-                              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            <p className="flex items-start gap-1 mt-1.5 text-xs text-red-600 font-medium">
+                              <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
                               ห้ามใช้ไฟล์ฉบับนี้
-                            </span>
+                            </p>
                           ) : isRevisionInProgress && revisionComment ? (
-                            // กำลังแก้ไข + มี comment → แสดง comment พร้อม tooltip เพื่อให้ดูเต็มเมื่อ hover
-                            <span
-                              className="flex items-start gap-1 text-xs text-amber-700 cursor-help"
+                            <p
+                              className="flex items-start gap-1 mt-1.5 text-xs text-amber-700 cursor-help line-clamp-2"
                               title={revisionComment}
                             >
-                              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                              <span className="line-clamp-2">{revisionComment}</span>
-                            </span>
+                              <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+                              {revisionComment}
+                            </p>
                           ) : isRevisionInProgress ? (
-                            // กำลังแก้ไข + ไม่มี comment → แสดงข้อความ default
-                            <span className="flex items-start gap-1 text-xs text-amber-600">
-                              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                              <span>อยู่ระหว่างการสร้าง Rev. ใหม่</span>
-                            </span>
-                          ) : (
-                            // ปกติ ไม่มีหมายเหตุ
-                            <span className="text-sm text-gray-400">—</span>
-                          )}
+                            <p className="flex items-start gap-1 mt-1.5 text-xs text-amber-600">
+                              <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+                              อยู่ระหว่างการสร้าง Rev. ใหม่
+                            </p>
+                          ) : null}
                         </td>
 
-                        {/* Col 7: อัปเดตล่าสุด */}
+                        {/* Col 6: อัปเดตล่าสุด */}
                         <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500">
                           {formatDate(doc.updatedAt)}
                         </td>
