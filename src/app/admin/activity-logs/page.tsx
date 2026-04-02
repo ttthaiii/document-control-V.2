@@ -87,18 +87,18 @@ function LogTable({ logs, sites, loading, isAuditMode }: { logs: ActivityLog[], 
     );
   }
   return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
-      <table className="w-full text-sm table-fixed">
-        <thead className="bg-gray-50/80 border-b border-gray-200">
+    <div className="w-full h-full bg-white relative">
+      <table className="min-w-full text-sm table-fixed">
+        <thead className="bg-[#EBECEE] sticky top-0 z-10 shadow-sm border-b border-gray-200">
           <tr>
-            <th className="text-left px-5 py-3.5 font-semibold text-gray-600 w-44">เวลา</th>
-            <th className="text-left px-5 py-3.5 font-semibold text-gray-600 w-48">ผู้ใช้งาน</th>
-            <th className="text-left px-5 py-3.5 font-semibold text-gray-600 w-40">การกระทำ</th>
-            <th className="text-left px-5 py-3.5 font-semibold text-gray-600">รายละเอียด</th>
-            {!isAuditMode && <th className="text-left px-5 py-3.5 font-semibold text-gray-600 w-32">โครงการ</th>}
+            <th className="text-left px-5 py-3.5 font-semibold text-gray-700 w-44">เวลา</th>
+            <th className="text-left px-5 py-3.5 font-semibold text-gray-700 w-48">ผู้ใช้งาน</th>
+            <th className="text-left px-5 py-3.5 font-semibold text-gray-700 w-40">การกระทำ</th>
+            <th className="text-left px-5 py-3.5 font-semibold text-gray-700">รายละเอียด</th>
+            {!isAuditMode && <th className="text-left px-5 py-3.5 font-semibold text-gray-700 w-32">โครงการ</th>}
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-100">
+        <tbody className="divide-y divide-gray-100 bg-white">
           {logs.map((log) => {
             const displaySiteName = log.siteName || (log.siteId ? (sites.find(s => s.id === log.siteId)?.name || log.siteId) : '—');
             return (
@@ -349,38 +349,68 @@ function ActivityLogContent() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50/50">
-      <div className="w-full px-6 py-8 space-y-4">
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col overflow-hidden h-[calc(100vh-6rem)] sm:h-[calc(100vh-7rem)] lg:h-[calc(100vh-8rem)] w-full">
         
-        {/* Header */}
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            📊 Activity Log
-          </h1>
-          <p className="text-gray-500 mt-1">มอนิเตอร์และตรวจสอบประวัติการเข้าวิเคราะห์เอกสารในระบบ</p>
-        </div>
+        {/* ── Filter Bar & Headers ── */}
+        <div className="p-4 border-b border-gray-200 bg-white shrink-0">
+          
+          {/* Header & Status Row */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+             <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+               📊 Activity Log
+               <span className="text-sm font-normal text-gray-500 ml-2 hidden sm:inline">มอนิเตอร์และตรวจสอบประวัติการเข้าทำงาน</span>
+             </h2>
+             <div className="flex items-center gap-3 text-sm">
+               <span className="text-gray-500">พบข้อมูล<strong className="text-gray-900 mx-1">{filteredLogs.length}</strong>รายการ</span>
+               {mode === 'TIMELINE' ? (
+                 <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-100">
+                   <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" /> Live Timeline
+                 </span>
+               ) : (
+                 <span className="flex items-center gap-1.5 text-xs font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-100">
+                   <Info size={12} /> ข้อมูลย้อนหลังทั้งหมด
+                 </span>
+               )}
+             </div>
+          </div>
 
-        {/* Banner for Doc Audit Mode */}
-        {mode === 'DOC_AUDIT' && selectedDoc && (
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 mb-4 bg-blue-50 border border-blue-200 rounded-2xl shadow-sm animate-in fade-in slide-in-from-top-2">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 bg-white text-blue-600 rounded-xl shadow-sm"><FileText size={20} /></div>
-                  <div>
-                    <div className="text-xs font-semibold text-blue-600 uppercase tracking-wider mb-0.5">โหมดตรวจสอบประวัติเอกสาร (Document Audit)</div>
-                    <div className="font-bold text-gray-900 text-lg flex items-center gap-2">
-                      {selectedDoc.documentNumber}
-                      <span className="text-base font-medium text-gray-600 truncate max-w-sm sm:max-w-md">{selectedDoc.title}</span>
+          {/* Banner for Doc Audit Mode */}
+          {mode === 'DOC_AUDIT' && selectedDoc && (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 mb-4 bg-blue-50/50 border border-blue-200 rounded-xl">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-white text-blue-600 rounded-lg shadow-sm"><FileText size={18} /></div>
+                    <div>
+                      <div className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider mb-0.5">โหมดตรวจสอบประวัติเอกสาร (Document Audit)</div>
+                      <div className="font-bold text-gray-900 text-sm flex items-center gap-2">
+                        {selectedDoc.documentNumber}
+                        <span className="font-medium text-gray-600 truncate max-w-[200px] sm:max-w-md">{selectedDoc.title}</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-                <button onClick={handleClearAudit} className="mt-3 sm:mt-0 flex items-center justify-center gap-1.5 px-4 py-2 bg-white text-gray-600 hover:text-red-600 hover:bg-red-50 hover:border-red-200 border border-gray-200 rounded-xl text-sm font-medium transition-all shadow-sm">
-                  <X size={16} /> ยกเลิก
-                </button>
-            </div>
-        )}
+                  <button onClick={handleClearAudit} className="mt-2 sm:mt-0 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-white text-gray-600 hover:text-red-600 hover:bg-red-50 hover:border-red-200 border border-gray-200 rounded-lg text-xs font-medium transition-all shadow-sm">
+                    <X size={14} /> ยกเลิก
+                  </button>
+              </div>
+          )}
 
-        {/* Unified Search & Filters Bar */}
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 space-y-4">
+          {/* Audit Stats Indicator */}
+          {mode === 'DOC_AUDIT' && filteredLogs.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4 animate-in fade-in slide-in-from-top-2">
+               {[
+                 { title: 'เปิดดูเอกสารทั้งหมด', count: filteredLogs.filter(l => l.action === 'VIEW_DETAIL').length, icon: <Eye size={16} className="text-indigo-500" />, bg: 'bg-indigo-50 border-indigo-100' },
+                 { title: 'สั่งดาวน์โหลดไฟล์', count: filteredLogs.filter(l => l.action === 'DOWNLOAD_FILE').length, icon: <Download size={16} className="text-cyan-500" />, bg: 'bg-cyan-50 border-cyan-100' },
+                 { title: 'พิมพ์/เปิด Preview', count: filteredLogs.filter(l => l.action === 'PREVIEW_FILE').length, icon: <FileText size={16} className="text-purple-500" />, bg: 'bg-purple-50 border-purple-100' },
+               ].map((stat, i) => (
+                  <div key={i} className={`rounded-lg border p-2.5 flex items-center gap-3 ${stat.bg}`}>
+                    <div className="p-2 bg-white rounded-md shadow-sm">{stat.icon}</div>
+                    <div>
+                      <div className="text-lg font-bold text-gray-800 leading-none mb-0.5">{stat.count} <span className="text-xs font-normal text-gray-500">ครั้ง</span></div>
+                      <div className="text-[10px] font-medium text-gray-600 leading-tight">{stat.title}</div>
+                    </div>
+                  </div>
+               ))}
+            </div>
+          )}
           
           {/* Top Row: Filters & Exports */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 relative z-30 items-end">
@@ -432,8 +462,8 @@ function ActivityLogContent() {
             </div>
           </div>
 
-          {/* Bottom Row: Search Box */}
-          <div className="relative z-20">
+          {/* Search Row */}
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 relative z-20 mt-3 pt-3 border-t border-gray-100">
               <div className="relative w-full">
                 <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
                   <Search size={18} />
@@ -472,61 +502,25 @@ function ActivityLogContent() {
           </div>
         </div>
 
-        {/* Audit Stats Indicator (Shows only in Document Audit Mode) */}
-        {mode === 'DOC_AUDIT' && filteredLogs.length > 0 && (
-          <div className="grid grid-cols-3 gap-4 mb-2 animate-in slide-in-from-bottom-2 fade-in">
-             {[
-               { title: 'เปิดดูเอกสารทั้งหมด', count: filteredLogs.filter(l => l.action === 'VIEW_DETAIL').length, icon: <Eye size={20} className="text-indigo-500" />, bg: 'bg-indigo-50 border-indigo-100' },
-               { title: 'สั่งดาวน์โหลดไฟล์', count: filteredLogs.filter(l => l.action === 'DOWNLOAD_FILE').length, icon: <Download size={20} className="text-cyan-500" />, bg: 'bg-cyan-50 border-cyan-100' },
-               { title: 'พิมพ์/เปิด Preview', count: filteredLogs.filter(l => l.action === 'PREVIEW_FILE').length, icon: <FileText size={20} className="text-purple-500" />, bg: 'bg-purple-50 border-purple-100' },
-             ].map((stat, i) => (
-                <div key={i} className={`rounded-xl border p-4 flex items-center gap-4 ${stat.bg}`}>
-                  <div className="p-3 bg-white rounded-lg shadow-sm">{stat.icon}</div>
-                  <div>
-                    <div className="text-2xl font-bold text-gray-800 leading-none">{stat.count} <span className="text-sm font-normal text-gray-500">ครั้ง</span></div>
-                    <div className="text-xs font-medium text-gray-600 mt-1">{stat.title}</div>
-                  </div>
-                </div>
-             ))}
-          </div>
-        )}
-
-        {/* Status Bar */}
-        <div className="flex justify-between items-center text-sm px-2 mt-4">
-          <div className="text-gray-500">
-            {loading && !loadingMore ? 'กำลังคำนวณข้อมูล...' : (
-              <>พบข้อมูลที่ตรงกัน <strong className="text-gray-900 mx-1">{filteredLogs.length}</strong> รายการ</>
-            )}
-          </div>
-          {mode === 'TIMELINE' ? (
-            <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-100">
-              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" /> Live Timeline
-            </span>
-          ) : (
-            <span className="flex items-center gap-1.5 text-xs font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-100">
-              <Info size={12} /> ข้อมูลย้อนหลังทั้งหมดของเอกสาร
-            </span>
+        {/* ── Desktop List View (Table) ── */}
+        <div className="flex-1 overflow-auto bg-gray-50/30 min-h-[400px]">
+          <LogTable logs={filteredLogs} sites={sites} loading={loading && !loadingMore} isAuditMode={mode === 'DOC_AUDIT'} />
+          
+          {/* Load More Pagination */}
+          {mode === 'TIMELINE' && hasMore && !loading && searchInput.trim() === '' && (
+            <div className="flex justify-center p-6 border-t border-gray-200 bg-white">
+              <button onClick={() => fetchLogs(true)} disabled={loadingMore}
+                className="group flex items-center gap-2 px-6 py-2.5 text-sm font-medium bg-white border border-gray-300 rounded-full hover:border-blue-500 hover:text-blue-600 text-gray-600 transition-all shadow-sm disabled:opacity-50">
+                {loadingMore ? (
+                  <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" /> โหลดข้อมูล...</>
+                ) : (
+                  <><ChevronDown size={16} className="group-hover:translate-y-0.5 transition-transform" /> แสดงข้อมูลประวัติเพิ่ม (ทีละ 100)</>
+                )}
+              </button>
+            </div>
           )}
         </div>
 
-        {/* Main Table */}
-        <LogTable logs={filteredLogs} sites={sites} loading={loading && !loadingMore} isAuditMode={mode === 'DOC_AUDIT'} />
-
-        {/* Load More Pagination */}
-        {mode === 'TIMELINE' && hasMore && !loading && searchInput.trim() === '' && (
-          <div className="flex justify-center pt-4 pb-12">
-            <button onClick={() => fetchLogs(true)} disabled={loadingMore}
-              className="group flex items-center gap-2 px-6 py-3 text-sm font-medium bg-white border-2 border-gray-200 rounded-full hover:border-blue-500 hover:text-blue-600 text-gray-600 transition-all shadow-sm shadow-gray-100 disabled:opacity-50">
-              {loadingMore ? (
-                <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" /> โหลดข้อมูล...</>
-              ) : (
-                <><ChevronDown size={18} className="group-hover:translate-y-0.5 transition-transform" /> แสดงข้อมูลประวัติเพิ่ม (ทีละ 100)</>
-              )}
-            </button>
-          </div>
-        )}
-
-      </div>
     </div>
   );
 }

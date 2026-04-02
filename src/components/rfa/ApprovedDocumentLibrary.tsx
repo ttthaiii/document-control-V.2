@@ -27,17 +27,28 @@ const formatDate = (date: any): string => {
   return d.toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' });
 };
 
-// C2: แปลง hex color → rgba สำหรับ status badge
-const getStatusBadgeStyle = (status: string): React.CSSProperties => {
-  const hex = STATUS_COLORS[status];
-  if (!hex) return { backgroundColor: '#d1fae5', color: '#065f46' };
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return {
-    backgroundColor: `rgba(${r}, ${g}, ${b}, 0.12)`,
-    color: hex,
-  };
+// ✅ ใช้ getStatusColor (Tailwind Classes) เหมือนกับหน้าตารางหลัก เพื่อแก้ปัญหา Contrast ไม่ผ่าน WCAG
+const getStatusColor = (status: string) => {
+  switch (status) {
+    case STATUSES.PENDING_REVIEW:
+      return 'bg-[#78909C]/20 text-[#546E7A]';
+    case STATUSES.PENDING_CM_APPROVAL:
+      return 'bg-[#546E7A]/20 text-[#37474F]';
+    case STATUSES.PENDING_FINAL_APPROVAL:
+      return 'bg-[#607D8B]/20 text-[#455A64]';
+    case STATUSES.REVISION_REQUIRED:
+      return 'bg-[#C0CA33]/20 text-[#827717]';
+    case STATUSES.APPROVED_REVISION_REQUIRED:
+      return 'bg-[#D87D4A]/20 text-[#BF360C]';
+    case STATUSES.APPROVED:
+      return 'bg-[#558B2F]/20 text-[#33691E]';
+    case STATUSES.APPROVED_WITH_COMMENTS:
+      return 'bg-[#4DB6AC]/20 text-[#00695C]';
+    case STATUSES.REJECTED:
+      return 'bg-[#A5574C]/20 text-[#8D3930]';
+    default:
+      return 'bg-gray-100 text-gray-600';
+  }
 };
 
 const useIsMobile = () => {
@@ -397,7 +408,9 @@ export default function ApprovedDocumentLibrary() {
                 const isSuspended = doc.supersededStatus === 'SUSPENDED';
                 const isRevisionInProgress = doc.supersededStatus === 'ACTIVE' || isSuspended;
                 const cadFiles: any[] = (doc as any).cadFiles || [];
-                const pdfFiles = (doc.files || []).filter(
+                const lastStep = doc.workflow && doc.workflow.length > 0 ? doc.workflow[doc.workflow.length - 1] : null;
+                const currentActiveFiles = lastStep?.files && lastStep.files.length > 0 ? lastStep.files : (doc.files || []);
+                const pdfFiles = currentActiveFiles.filter(
                   f => f.contentType === 'application/pdf' || f.fileName.toLowerCase().endsWith('.pdf')
                 );
 
@@ -522,7 +535,7 @@ export default function ApprovedDocumentLibrary() {
                     )}
 
                     <div className="flex justify-between items-center pt-2 border-t text-xs text-gray-500">
-                      <span className="px-2 py-1 bg-green-100 text-green-800 rounded font-medium">
+                      <span className={`px-2 py-1 rounded font-medium ${getStatusColor(doc.status)}`}>
                         {STATUS_LABELS[doc.status] || doc.status}
                       </span>
                       <span>{formatDate(doc.updatedAt)}</span>
@@ -584,7 +597,12 @@ export default function ApprovedDocumentLibrary() {
                     const isSuspended = doc.supersededStatus === 'SUSPENDED';
                     const isRevisionInProgress = doc.supersededStatus === 'ACTIVE' || isSuspended;
                     const cadFiles: any[] = (doc as any).cadFiles || [];
-                    const pdfFiles = (doc.files || []).filter(
+                    
+                    // Use the latest workflow step files to avoid showing accumulated historical files 
+                    const lastStep = doc.workflow && doc.workflow.length > 0 ? doc.workflow[doc.workflow.length - 1] : null;
+                    const currentActiveFiles = lastStep?.files && lastStep.files.length > 0 ? lastStep.files : (doc.files || []);
+                    
+                    const pdfFiles = currentActiveFiles.filter(
                       f => f.contentType === 'application/pdf' || f.fileName.toLowerCase().endsWith('.pdf')
                     );
 
@@ -642,8 +660,7 @@ export default function ApprovedDocumentLibrary() {
                         <td className="px-4 py-4 max-w-[220px]">
                           {/* Status badge */}
                           <span
-                            className="inline-flex items-center px-2.5 py-1 rounded text-xs font-medium"
-                            style={getStatusBadgeStyle(doc.status)}
+                            className={`inline-flex items-center px-2.5 py-1 rounded text-xs font-medium ${getStatusColor(doc.status)}`}
                           >
                             {STATUS_LABELS[doc.status] || doc.status}
                           </span>

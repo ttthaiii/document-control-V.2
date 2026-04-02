@@ -285,8 +285,9 @@ export async function PUT(
                 break;
         }
 
-        // ... (ส่วนจัดการไฟล์) ...
-        let finalDocFiles: RFAFile[] = docData.files || [];
+        // Instead of accumulating all historical files, we REPLACE doc.files with the new upload.
+        // Historical files are preserved in the `workflow` array.
+        let finalDocFiles: RFAFile[] = newFiles && Array.isArray(newFiles) && newFiles.length > 0 ? [] : (docData.files || []);
         let workflowFiles: RFAFile[] = [];
 
         if (newFiles && Array.isArray(newFiles) && newFiles.length > 0) {

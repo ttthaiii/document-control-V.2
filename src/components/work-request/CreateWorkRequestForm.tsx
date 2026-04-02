@@ -196,7 +196,7 @@ export default function CreateWorkRequestForm({ onClose, userProp }: { onClose: 
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'เกิดข้อผิดพลาด');
 
-      showNotification('success', 'สร้าง Work Request สำเร็จ!', `เลขที่เอกสาร: ${result.documentNumber}`);
+      showNotification('success', 'สร้างเอกสารสำเร็จ', `เอกสาร: ${result.documentNumber ? `${result.documentNumber} - ` : ''}${taskName}`);
       onClose();
     } catch (error) {
       showNotification('error', 'เกิดข้อผิดพลาด', error instanceof Error ? error.message : 'Unknown error');

@@ -204,6 +204,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState(false);
   const [isClosing, setIsClosing] = useState(false); // [NEW] สำหรับ Animate ตอนปิด Modal
 
   // Modal Close Animation helper
@@ -237,6 +238,15 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
 
   // Pending Review States (Site Review)
   const [suspendPreviousRevision, setSuspendPreviousRevision] = useState(false);
+
+  // Advanced CAD Warning Modal States
+  const [cadWarningModalData, setCadWarningModalData] = useState<{
+    isOpen: boolean;
+    action: string;
+    cadMeta: { fileName: string; rev: number; uploader: string; date: string; fileUrl?: string } | null;
+    isHighRisk: boolean;
+  }>({ isOpen: false, action: '', cadMeta: null, isHighRisk: false });
+  const [cadWarningChecked, setCadWarningChecked] = useState(false);
 
   // SupersedeComplete Modal States removed: auto-supersede is now done by the backend on approval
 
@@ -734,24 +744,10 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   );
 
   // 7. Action Handlers
-  const handleAction = async (action: string) => {
-    const actionsRequiringFile = [
-      'REQUEST_REVISION',
-      'SEND_TO_CM',
-      'SUBMIT_REVISION',
-      'APPROVE',
-      'APPROVE_WITH_COMMENTS',
-      'APPROVE_REVISION_REQUIRED',
-      'REJECT'
-    ];
-
-    if (actionsRequiringFile.includes(action) && newFiles.filter(f => f.status === 'success').length === 0) {
-      showNotification('warning', 'คำเตือน', 'กรุณาแนบไฟล์ประกอบการดำเนินการ');
-      return;
-    }
-
+  const executeAction = async (action: string) => {
     setIsSubmitting(true);
     setLoadingAction(action);
+    let isSuccess = false;
     try {
       const token = await firebaseUser?.getIdToken();
 
@@ -761,11 +757,13 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
         newFiles: any[];
         documentNumber?: string;
         suspendPreviousRevision?: boolean;
+        cadWarningAcknowledged?: boolean;
       } = {
         action,
         comments: comment,
         newFiles: newFiles.filter(f => f.status === 'success').map(f => f.uploadedData),
-        suspendPreviousRevision
+        suspendPreviousRevision,
+        cadWarningAcknowledged: cadWarningModalData.isOpen ? true : false,
       };
 
       if (needsDocNumber && newDocumentNumberInput.trim()) {
@@ -779,7 +777,12 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       });
       const result = await response.json();
       if (result.success) {
-        showNotification('success', 'ดำเนินการสำเร็จ!', result.message);
+        isSuccess = true;
+        setActionSuccess(true);
+        // ปิด CAD Warning Modal ทันที เพื่อประหยัด Modal หลายชั้นที่ปิดไม่พร้อมกัน
+        setCadWarningModalData({ isOpen: false, action: '', cadMeta: null, isHighRisk: false });
+        
+        showNotification('success', 'อัปเดตสถานะสำเร็จ', `เอกสาร: ${document?.documentNumber ? `${document?.documentNumber} - ` : ''}${document?.title}`);
 
         // Fire-and-forget: extract CAD files in background
         const isFinalApprovalAction = ['APPROVE', 'APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED'].includes(action);
@@ -791,7 +794,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
           }).catch(() => { /* silent fail — non-critical */ });
         }
 
-        triggerClose();
+        setTimeout(() => triggerClose(), 1500);
       } else {
         throw new Error(result.error || 'เกิดข้อผิดพลาด');
       }
@@ -799,9 +802,89 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       const message = error instanceof Error ? error.message : 'Unknown error';
       showNotification('error', 'เกิดข้อผิดพลาด', message);
     } finally {
-      setIsSubmitting(false);
-      setLoadingAction(null);
+      if (!isSuccess) {
+        setIsSubmitting(false);
+        setLoadingAction(null);
+      }
     }
+  };
+
+  const handleAction = async (action: string) => {
+    const actionsRequiringFile = [
+      'REQUEST_REVISION',
+      'SEND_TO_CM',
+      'SUBMIT_REVISION',
+      'APPROVE',
+      'APPROVE_WITH_COMMENTS',
+      'APPROVE_REVISION_REQUIRED',
+      'REJECT'
+    ];
+
+    const successfulFiles = newFiles.filter(f => f.status === 'success');
+
+    if (actionsRequiringFile.includes(action) && successfulFiles.length === 0) {
+      showNotification('warning', 'คำเตือน', 'กรุณาแนบไฟล์ประกอบการดำเนินการ');
+      return;
+    }
+
+    const isFinalApprovalAction = ['APPROVE', 'APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED'].includes(action);
+
+    // [NEW] Advanced CAD Warning Logic
+    if (isFinalApprovalAction) {
+      const CAD_EXTENSIONS = ['.dwg', '.zip', '.rar'];
+      const hasCadFile = successfulFiles.some(f => 
+         CAD_EXTENSIONS.some(ext => f.file.name.toLowerCase().endsWith(ext))
+      );
+
+      if (!hasCadFile) {
+        let cadMeta = null;
+        if (document?.workflow) {
+          const reversedWorkflow = [...document.workflow].reverse();
+          for (const step of reversedWorkflow) {
+            if (step.files) {
+              const cadFile = step.files.find(f => CAD_EXTENSIONS.some(ext => f.fileName.toLowerCase().endsWith(ext)));
+              if (cadFile) {
+                cadMeta = {
+                  fileName: cadFile.fileName,
+                  fileUrl: cadFile.fileUrl,
+                  rev: step.revisionNumber || 0,
+                  uploader: step.userName || 'Unknown',
+                  date: formatDate(step.timestamp)
+                };
+                break;
+              }
+            }
+          }
+        }
+
+        const isHighRisk = action === 'APPROVE_WITH_COMMENTS' || action === 'APPROVE_REVISION_REQUIRED';
+        
+        if (!isHighRisk) {
+          // Low Risk -> Light confirm
+          const confirmProceed = window.confirm(
+            '⚠️ คุณไม่ได้แนบไฟล์ CAD ใหม่มาด้วย\n\n' +
+            'ระบบตรวจพบว่ามี "ไฟล์ CAD ต้นฉบับที่ส่งมาจากฝั่ง BIM"\n' +
+            'ระบบจะเผยแพร่ไฟล์ CAD ต้นฉบับนี้ให้หน้างานโดยอัตโนมัติ\n\n' +
+            '- กด [OK] เพื่อยินยอมและเผยแพร่ CAD ต้นฉบับ\n' +
+            '- กด [Cancel] เพื่อย้อนกลับและแนบไฟล์ CAD ใหม่'
+          );
+          if (!confirmProceed) return;
+        } else {
+          // High Risk -> Show custom CAD Warning Modal and halt execution here
+          setCadWarningChecked(false);
+          setCadWarningModalData({
+            isOpen: true,
+            action,
+            cadMeta,
+            isHighRisk: true
+          });
+          return; // Stop execution, wait for user to click confirm in the modal
+        }
+      }
+    }
+
+    // If no CAD warning or if low-risk accepted, proceed:
+    await executeAction(action);
   };
 
   const handleCreateRevision = async () => {
@@ -811,6 +894,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       return;
     }
     setIsSubmitting(true);
+    let isSuccess = false;
     try {
       const token = await firebaseUser?.getIdToken();
       const payload = {
@@ -829,8 +913,10 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       });
       const result = await response.json();
       if (result.success) {
-        showNotification('success', 'สร้าง Revision สำเร็จ!', `เอกสารฉบับใหม่ ${newDocumentNumber} ถูกสร้างแล้ว`);
-        triggerClose();
+        isSuccess = true;
+        setActionSuccess(true);
+        showNotification('success', 'สร้าง Revision สำเร็จ', `เอกสารฉบับใหม่: ${newDocumentNumber} - ${document?.title} ถูกสร้างแล้ว`);
+        setTimeout(() => triggerClose(), 1500);
       } else {
         throw new Error(result.error || 'เกิดข้อผิดพลาดในการสร้าง Revision');
       }
@@ -838,7 +924,9 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       const message = error instanceof Error ? error.message : 'Unknown error';
       showNotification('error', 'เกิดข้อผิดพลาด', message);
     } finally {
-      setIsSubmitting(false);
+      if (!isSuccess) {
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -867,6 +955,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       return;
     }
     setIsSupersedeSubmitting(true);
+    let isSuccess = false;
     try {
       const token = await firebaseUser?.getIdToken();
       const response = await fetch('/api/rfa/request-supersede', {
@@ -881,18 +970,20 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       });
       const result = await response.json();
       if (result.success) {
+        isSuccess = true;
+        setActionSuccess(true);
         setShowSupersedeModal(false);
         setSupersedeComment('');
         setSupersedeFiles([]);
         const isBimDoc = result.data?.originalDocument?.isBimDocument;
         if (isBimDoc) {
           // BIM: ระบบส่ง Signal ไป BIM Tracking แล้ว ให้แสดง message รอ BIM มาส่งใหม่
-          showNotification('success', 'ส่งคำขอแก้ไขสำเร็จ', 'รอทาง BIM สร้าง Task ใหม่ใน BIM Tracking และส่งเอกสาร Rev. ใหม่');
+          showNotification('success', 'ส่งคำขอแก้ไขสำเร็จ', `เอกสาร: ${document?.documentNumber ? `${document?.documentNumber} - ` : ''}${document?.title} (รอทาง BIM ส่งเอกสาร Rev. ใหม่)`);
         } else {
           // Non-BIM: ให้ผู้ใช้กลับไปแนบ Rev ใหม่เองเมื่อพร้อม
-          showNotification('success', 'ส่งคำขอแก้ไขสำเร็จ', 'ตั้งสถานะเป็นรอแก้ไขแล้ว สามารถนำส่ง Rev. ใหม่ได้จากหน้ารายการ');
+          showNotification('success', 'ส่งคำขอแก้ไขสำเร็จ', `เอกสาร: ${document?.documentNumber ? `${document?.documentNumber} - ` : ''}${document?.title} (รอส่ง Rev. ใหม่)`);
         }
-        triggerClose();
+        setTimeout(() => triggerClose(), 1500);
       } else {
         throw new Error(result.error || 'เกิดข้อผิดพลาด');
       }
@@ -900,7 +991,9 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       const message = error instanceof Error ? error.message : 'Unknown error';
       showNotification('error', 'เกิดข้อผิดพลาด', message);
     } finally {
-      setIsSupersedeSubmitting(false);
+      if (!isSuccess) {
+        setIsSupersedeSubmitting(false);
+      }
     }
   };
 
@@ -926,13 +1019,25 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
           onClick={(e) => e.stopPropagation()} // ป้องกันการคลิกทะลุไปถึง backdrop
         >
 
-          {/* 🔒 Loading Overlay ตอนกด Submit เพื่อบังไม่ให้เห็น UI กระพริบตอน Firestore อัปเดต */}
-          {(isSubmitting || isSupersedeSubmitting) && (
+          {/* 🔒 Loading/Success Overlay */}
+          {(isSubmitting || isSupersedeSubmitting || actionSuccess) && (
             <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] z-[100] flex items-center justify-center rounded-lg">
               <div className="flex flex-col items-center bg-white p-6 rounded-xl shadow-lg border border-gray-100">
-                <Spinner className="w-10 h-10 text-blue-600 mb-4" />
-                <p className="text-gray-800 font-semibold text-lg">กำลังดำเนินการ...</p>
-                <p className="text-gray-500 text-sm mt-1">กรุณารอสักครู่ ระบบกำลังบันทึกข้อมูลและไฟล์</p>
+                {actionSuccess ? (
+                  <>
+                    <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
+                      <Check className="w-10 h-10 text-green-600" />
+                    </div>
+                    <p className="text-gray-800 font-bold text-xl">ดำเนินการสำเร็จ</p>
+                    <p className="text-gray-500 text-sm mt-1">หน้าต่างกำลังจะปิด...</p>
+                  </>
+                ) : (
+                  <>
+                    <Spinner className="w-10 h-10 text-blue-600 mb-4" />
+                    <p className="text-gray-800 font-semibold text-lg">กำลังดำเนินการ...</p>
+                    <p className="text-gray-500 text-sm mt-1">กรุณารอสักครู่ ระบบกำลังบันทึกข้อมูลและไฟล์</p>
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -1628,6 +1733,104 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
               >
                 {isSupersedeSubmitting ? <Spinner className="w-4 h-4 mr-2" /> : <RefreshCw size={16} className="mr-2" />}
                 ยืนยัน และสร้าง Rev. ใหม่
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal #2: Advanced CAD Warning Modal */}
+      {cadWarningModalData.isOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-[70] flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg relative overflow-hidden">
+            <div className="flex justify-between items-center p-4 border-b">
+              <h3 className="text-lg font-bold text-amber-600 flex items-center">
+                <AlertTriangle size={20} className="mr-2" />
+                ต้องการการยืนยัน
+              </h3>
+              <button 
+                onClick={() => setCadWarningModalData({ isOpen: false, action: '', cadMeta: null, isHighRisk: false })}
+                className="text-gray-400 hover:text-gray-600 outline-none"
+              >
+                <X size={22} />
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-4">
+              <div className="text-sm text-gray-800 font-medium">
+                เอกสารนี้มีความเห็นแนบ (Approved {cadWarningModalData.action === 'APPROVE_REVISION_REQUIRED' ? 'Revision Required' : 'with Comments'}) 
+                <span className="text-red-600 ml-1">แต่ระบบไม่พบไฟล์ CAD ใหม่จากคุณ</span>
+              </div>
+              
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-md">
+                <p className="text-sm font-semibold text-gray-700 mb-2">ระบบจะเผยแพร่ไฟล์ CAD ต้นฉบับล่าสุด:</p>
+                <div className="text-sm text-gray-600 space-y-1">
+                  <div className="flex">
+                    <span className="w-20 font-medium text-gray-500">ไฟล์:</span> 
+                    {cadWarningModalData.cadMeta?.fileUrl ? (
+                      <a 
+                        href={cadWarningModalData.cadMeta.fileUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="font-semibold text-blue-600 truncate flex-1 hover:underline hover:text-blue-800" 
+                        title={`คลิกเพื่อดาวน์โหลด: ${cadWarningModalData.cadMeta?.fileName}`}
+                        onClick={() => {
+                          logActivity({
+                            action: 'DOWNLOAD_FILE',
+                            resourceType: 'RFA',
+                            resourceId: document?.id,
+                            resourceName: document?.documentNumber || document?.title,
+                            siteId: document?.site?.id,
+                            siteName: document?.site?.name,
+                            description: `ดาวน์โหลดไฟล์อ้างอิง "${cadWarningModalData.cadMeta?.fileName}" จากหน้าต่างยืนยันความเสี่ยง CAD`
+                          });
+                        }}
+                      >
+                        {cadWarningModalData.cadMeta?.fileName || 'ไม่พบในประวัติ'}
+                      </a>
+                    ) : (
+                      <span className="font-semibold text-blue-600 truncate flex-1" title={cadWarningModalData.cadMeta?.fileName || 'Unknown'}>
+                        {cadWarningModalData.cadMeta?.fileName || 'ไม่พบในประวัติ'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex"><span className="w-20 font-medium text-gray-500">ส่งโดย:</span> <span>{cadWarningModalData.cadMeta?.uploader || '-'}</span></div>
+                  <div className="flex"><span className="w-20 font-medium text-gray-500">เมื่อ:</span> <span>{cadWarningModalData.cadMeta?.date || '-'}</span></div>
+                  <div className="flex"><span className="w-20 font-medium text-gray-500">Rev:</span> <span>{cadWarningModalData.cadMeta?.rev !== undefined ? String(cadWarningModalData.cadMeta.rev).padStart(2, '0') : '-'}</span></div>
+                </div>
+                <div className="mt-2 text-xs text-red-600 font-medium flex items-start">
+                  <AlertTriangle size={14} className="mr-1 flex-shrink-0 mt-0.5" />
+                  คำเตือน: ไฟล์ต้นฉบับนี้ "อาจยังไม่สะท้อนข้อผิดพลาดหรือความเห็น" ที่คุณเพิ่งคอมเมนต์ไป
+                </div>
+              </div>
+
+              <label className="flex items-start gap-3 p-3 mt-4 rounded-lg border-2 border-amber-200 bg-amber-50 cursor-pointer hover:bg-amber-100 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={cadWarningChecked}
+                  onChange={(e) => setCadWarningChecked(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 text-amber-600 rounded border-amber-300 focus:ring-amber-500 cursor-pointer"
+                />
+                <span className="text-sm font-bold text-amber-900">
+                  ฉันยืนยันว่า "ไฟล์ CAD ต้นฉบับนี้" ยังคงสามารถให้หน้างานนำไปใช้อ้างอิงได้ โดยไม่ต้องแก้ไขเพิ่มเติม
+                </span>
+              </label>
+            </div>
+            
+            <div className="flex justify-between items-center p-4 border-t bg-slate-50">
+              <button
+                onClick={() => setCadWarningModalData({ isOpen: false, action: '', cadMeta: null, isHighRisk: false })}
+                className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
+              >
+                <CornerUpLeft size={16} className="mr-2" /> ย้อนกลับ (เพื่อไปแนบไฟล์)
+              </button>
+              <button
+                onClick={() => executeAction(cadWarningModalData.action)}
+                disabled={!cadWarningChecked || isSubmitting}
+                className="flex items-center px-4 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 focus-visible:ring-2 focus-visible:ring-amber-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {isSubmitting ? <Spinner className="w-4 h-4 mr-2" /> : <Check size={16} className="mr-2" />}
+                ยืนยันและเผยแพร่
               </button>
             </div>
           </div>

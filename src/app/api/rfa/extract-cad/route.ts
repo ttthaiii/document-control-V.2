@@ -51,7 +51,19 @@ export async function POST(request: NextRequest) {
         //   - Resubmission flow: PENDING_REVIEW [old_dwg] → REVISION_REQUIRED → PENDING_REVIEW [new_dwg]
         //     → ต้องได้ new_dwg ไม่ใช่ old_dwg
         const CAD_EXTENSIONS = ['.dwg', '.zip', '.rar'];
-        const submissionStatuses = ['PENDING_REVIEW', 'PENDING_CM_APPROVAL', 'DRAFT'];
+        
+        // ค้นหาจากสถานะอนุมัติก่อน (ถ้าผู้อนุมัติแนบ CAD ไฟล์แบบ Stamped มาให้)
+        // แต่ถ้าไม่มีไฟล์ใน step อนุมัติ มันจะย้อนไปหาไฟล์จาก PENDING_REVIEW ให้อัตโนมัติ (Fallback)
+        // เพื่อป้องกันปัญหาไม่มีไฟล์ CAD ให้หน้างาน และหลีกเลี่ยงการเปิดช่องโหว่ให้แก้ไฟล์แนบหลังอนุมัติ
+        const targetStatuses = [
+            'APPROVED',
+            'APPROVED_WITH_COMMENTS',
+            'APPROVED_REVISION_REQUIRED',
+            'PENDING_FINAL_APPROVAL',
+            'PENDING_REVIEW',
+            'PENDING_CM_APPROVAL',
+            'DRAFT'
+        ];
 
         const hasCadFile = (files: RFAFile[]) =>
             files.some(f => CAD_EXTENSIONS.some(ext => f.fileName.toLowerCase().endsWith(ext)));
@@ -59,13 +71,13 @@ export async function POST(request: NextRequest) {
         // Pass 1: หา step ล่าสุดที่มีไฟล์ CAD โดยตรง
         const latestCadStep = [...workflow].reverse().find(
             w => w.files?.length > 0 &&
-                 submissionStatuses.includes(w.status) &&
+                 targetStatuses.includes(w.status) &&
                  hasCadFile(w.files)
         );
 
-        // Pass 2: fallback → หา step ล่าสุดที่มีไฟล์ใดก็ได้ (กรณี site ส่งแค่ PDF ไม่มี DWG)
+        // Pass 2: fallback → ถ้าไม่เจอ CAD แต่เจอไฟล์อื่นๆ (เช่น แนบ PDF)
         const latestAnyStep = latestCadStep ?? [...workflow].reverse().find(
-            w => w.files?.length > 0 && submissionStatuses.includes(w.status)
+            w => w.files?.length > 0 && targetStatuses.includes(w.status)
         );
 
         const originalFiles: RFAFile[] = latestAnyStep?.files ?? workflow[0]?.files ?? [];

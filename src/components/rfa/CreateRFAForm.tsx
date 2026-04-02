@@ -330,8 +330,8 @@ export default function CreateRFAForm({
       if (result.success) {
         showNotification(
           'success',
-          'สร้าง RFA สำเร็จ!',
-          `หมายเลขเอกสาร: ${result.runningNumber}`
+          'สร้างเอกสารสำเร็จ',
+          `เอกสาร: ${formData.documentNumber ? `${formData.documentNumber} - ` : ''}${formData.title}`
         );
         if (onClose) onClose();
       } else {

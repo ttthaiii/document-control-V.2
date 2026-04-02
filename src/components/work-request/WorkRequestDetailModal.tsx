@@ -129,6 +129,7 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
     const [document, setDocument] = useState<WorkRequest | null>(null);
     const [loading, setLoading] = useState(true);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [actionSuccess, setActionSuccess] = useState(false);
     const [actionComment, setActionComment] = useState('');
     const [actionFiles, setActionFiles] = useState<UploadedFile[]>([]);
     const [showHistory, setShowHistory] = useState(false);
@@ -422,6 +423,7 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
     const handleBimAction = async (action: any) => {
         if (!document || !firebaseUser) return;
         setIsSubmitting(true);
+        let isSuccess = false;
         try {
             const token = await firebaseUser.getIdToken();
             const successfulFiles = actionFiles.filter(f => f.status === 'success');
@@ -444,22 +446,29 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
             });
             const result = await response.json();
             if (result.success) {
-                showNotification('success', 'ดำเนินการสำเร็จ', `สถานะถูกเปลี่ยนเป็น: ${getStatusStyles(result.newStatus).text}`);
-                onUpdate();
-                onClose();
+                isSuccess = true;
+                setActionSuccess(true);
+                showNotification('success', 'อัปเดตสถานะสำเร็จ', `เอกสาร: ${document?.documentNumber ? `${document?.documentNumber} - ` : ''}${document?.taskName}`);
+                setTimeout(() => {
+                    onUpdate();
+                    onClose();
+                }, 1500);
             } else {
                 throw new Error(result.error);
             }
         } catch (error) {
             showNotification('error', 'เกิดข้อผิดพลาด', error instanceof Error ? error.message : 'Unknown error');
         } finally {
-            setIsSubmitting(false);
+            if (!isSuccess) {
+                setIsSubmitting(false);
+            }
         }
     };
 
     const handleSiteAction = async (action: any) => {
         if (!document || !firebaseUser) return;
         setIsSubmitting(true);
+        let isSuccess = false;
         try {
             const token = await firebaseUser.getIdToken();
             const successfulFiles = actionFiles.filter(f => f.status === 'success');
@@ -477,16 +486,22 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
             });
             const result = await response.json();
             if (result.success) {
-                showNotification('success', 'ดำเนินการสำเร็จ', `สถานะถูกเปลี่ยนเป็น: ${getStatusStyles(result.newStatus).text}`);
-                onUpdate();
-                onClose();
+                isSuccess = true;
+                setActionSuccess(true);
+                showNotification('success', 'อัปเดตสถานะสำเร็จ', `เอกสาร: ${document?.documentNumber ? `${document?.documentNumber} - ` : ''}${document?.taskName}`);
+                setTimeout(() => {
+                    onUpdate();
+                    onClose();
+                }, 1500);
             } else {
                 throw new Error(result.error);
             }
         } catch (error) {
             showNotification('error', 'เกิดข้อผิดพลาด', error instanceof Error ? error.message : 'Failed to perform action');
         } finally {
-            setIsSubmitting(false);
+            if (!isSuccess) {
+                setIsSubmitting(false);
+            }
         }
     };
 
@@ -501,6 +516,7 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
             return;
         }
         setIsSubmitting(true);
+        let isSuccess = false;
         try {
             const token = await firebaseUser?.getIdToken();
             const payload = {
@@ -516,16 +532,22 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
             });
             const result = await response.json();
             if (result.success) {
-                showNotification('success', 'สร้าง Revision สำเร็จ!', `เอกสารฉบับใหม่ ${result.newDocumentNumber} ถูกส่งให้ Site ตรวจสอบแล้ว`);
-                onUpdate();
-                onClose();
+                isSuccess = true;
+                setActionSuccess(true);
+                showNotification('success', 'สร้าง Revision สำเร็จ', `เอกสารฉบับใหม่: ${result.newDocumentNumber} - ${document?.taskName} ถูกสร้างแล้ว`);
+                setTimeout(() => {
+                    onUpdate();
+                    onClose();
+                }, 1500);
             } else {
                 throw new Error(result.error || 'เกิดข้อผิดพลาดในการสร้าง Revision');
             }
         } catch (error) {
             showNotification('error', 'เกิดข้อผิดพลาด', error instanceof Error ? error.message : 'Unknown error');
         } finally {
-            setIsSubmitting(false);
+            if (!isSuccess) {
+                setIsSubmitting(false);
+            }
         }
     };
 
@@ -536,6 +558,7 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
             return;
         }
         setIsSubmitting(true);
+        let isSuccess = false;
         try {
             const token = await firebaseUser.getIdToken();
 
@@ -555,16 +578,22 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
             });
             const result = await response.json();
             if (result.success) {
-                showNotification('success', 'ดำเนินการสำเร็จ', `สถานะถูกเปลี่ยนเป็น: ${getStatusStyles(result.newStatus).text}`);
-                onUpdate();
-                onClose();
+                isSuccess = true;
+                setActionSuccess(true);
+                showNotification('success', 'อัปเดตสถานะสำเร็จ', `เอกสาร: ${document?.documentNumber ? `${document?.documentNumber} - ` : ''}${document?.taskName}`);
+                setTimeout(() => {
+                    onUpdate();
+                    onClose();
+                }, 1500);
             } else {
                 throw new Error(result.error || 'เกิดข้อผิดพลาดในการดำเนินการ');
             }
         } catch (error) {
             showNotification('error', 'เกิดข้อผิดพลาด', error instanceof Error ? error.message : 'Unknown error');
         } finally {
-            setIsSubmitting(false);
+            if (!isSuccess) {
+                setIsSubmitting(false);
+            }
         }
     };
 
@@ -658,7 +687,21 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
     return (
         <>
             <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
-                <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+                <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col relative">
+                    
+                    {/* 🔒 Action Success Overlay */}
+                    {actionSuccess && (
+                        <div className="absolute inset-0 bg-white/80 backdrop-blur-[2px] z-[100] flex items-center justify-center rounded-lg">
+                            <div className="flex flex-col items-center bg-white p-8 rounded-2xl shadow-xl border border-green-100 transform scale-100 animate-in zoom-in duration-300">
+                                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
+                                    <Check className="w-10 h-10 text-green-600" />
+                                </div>
+                                <p className="text-gray-800 font-bold text-xl mb-1">ดำเนินการสำเร็จ</p>
+                                <p className="text-gray-500 text-sm">หน้าต่างกำลังจะปิด...</p>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Header & Info */}
                     <div className="flex justify-between items-start p-4 border-b">
                         <div>
