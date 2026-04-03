@@ -794,7 +794,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
           }).catch(() => { /* silent fail — non-critical */ });
         }
 
-        setTimeout(() => triggerClose(), 1500);
+        setTimeout(() => triggerClose(), 900);
       } else {
         throw new Error(result.error || 'เกิดข้อผิดพลาด');
       }
@@ -916,7 +916,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
         isSuccess = true;
         setActionSuccess(true);
         showNotification('success', 'สร้าง Revision สำเร็จ', `เอกสารฉบับใหม่: ${newDocumentNumber} - ${document?.title} ถูกสร้างแล้ว`);
-        setTimeout(() => triggerClose(), 1500);
+        setTimeout(() => triggerClose(), 900);
       } else {
         throw new Error(result.error || 'เกิดข้อผิดพลาดในการสร้าง Revision');
       }
@@ -972,9 +972,9 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       if (result.success) {
         isSuccess = true;
         setActionSuccess(true);
-        setShowSupersedeModal(false);
-        setSupersedeComment('');
-        setSupersedeFiles([]);
+        // DO NOT set showSupersedeModal to false here, so we can see the green takeover
+        // setSupersedeComment('');
+        // setSupersedeFiles([]);
         const isBimDoc = result.data?.originalDocument?.isBimDocument;
         if (isBimDoc) {
           // BIM: ระบบส่ง Signal ไป BIM Tracking แล้ว ให้แสดง message รอ BIM มาส่งใหม่
@@ -983,7 +983,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
           // Non-BIM: ให้ผู้ใช้กลับไปแนบ Rev ใหม่เองเมื่อพร้อม
           showNotification('success', 'ส่งคำขอแก้ไขสำเร็จ', `เอกสาร: ${document?.documentNumber ? `${document?.documentNumber} - ` : ''}${document?.title} (รอส่ง Rev. ใหม่)`);
         }
-        setTimeout(() => triggerClose(), 1500);
+        setTimeout(() => triggerClose(), 900);
       } else {
         throw new Error(result.error || 'เกิดข้อผิดพลาด');
       }
@@ -1005,8 +1005,61 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const isActionDisabled = isSubmitting || newFiles.filter(f => f.status === 'success').length === 0;
   const needsDocNumber = isSiteReviewing && !document.documentNumber;
 
+  // ── Reusable Loading/Success Overlay function ──
+  const renderLoadingOrSuccessOverlay = (loading: boolean, success: boolean) => {
+    if (!loading && !success) return null;
+    return (
+      <div
+        className={`absolute inset-0 z-[100] flex items-center justify-center rounded-lg transition-colors duration-300 ${
+          success ? 'bg-green-600' : 'bg-white/70 backdrop-blur-sm'
+        }`}
+      >
+        {success ? (
+          // Success: full-color green takeover
+          <div
+            className="flex flex-col items-center text-white"
+            style={{ animation: 'overlayFadeInUp 0.2s ease-out forwards' }}
+          >
+            <div className="w-20 h-20 rounded-full bg-white/20 flex items-center justify-center mb-5 ring-4 ring-white/30">
+              <Check className="w-11 h-11 text-white" strokeWidth={2.5} />
+            </div>
+            <p className="font-bold text-2xl tracking-tight">ดำเนินการสำเร็จ</p>
+            <p className="text-green-100 text-sm mt-1.5 font-medium">กำลังปิดหน้าต่าง...</p>
+            {/* Progress bar — synced with 900ms setTimeout */}
+            <div className="mt-6 w-40 h-1 rounded-full bg-white/20 overflow-hidden">
+              <div
+                className="h-full bg-white rounded-full"
+                style={{ animation: 'shrinkProgress 0.9s linear forwards' }}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center">
+            <div className="relative w-14 h-14 mb-4">
+              <div className="absolute inset-0 rounded-full border-4 border-blue-100" />
+              <div className="absolute inset-0 rounded-full border-4 border-blue-500 border-t-transparent animate-spin" />
+            </div>
+            <p className="text-gray-700 font-semibold text-base">กำลังดำเนินการ...</p>
+            <p className="text-gray-400 text-xs mt-1">กรุณารอสักครู่</p>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <>
+      {/* Global keyframes for overlay animations — injected once per component mount */}
+      <style>{`
+        @keyframes shrinkProgress {
+          from { width: 100%; }
+          to   { width: 0%; }
+        }
+        @keyframes overlayFadeInUp {
+          from { opacity: 0; transform: translateY(8px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
       <div
         className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-opacity duration-200 ${isClosing ? 'opacity-0' : 'opacity-100'
           } ${overlayClasses}`}
@@ -1019,27 +1072,10 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
           onClick={(e) => e.stopPropagation()} // ป้องกันการคลิกทะลุไปถึง backdrop
         >
 
-          {/* 🔒 Loading/Success Overlay */}
-          {(isSubmitting || isSupersedeSubmitting || actionSuccess) && (
-            <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] z-[100] flex items-center justify-center rounded-lg">
-              <div className="flex flex-col items-center bg-white p-6 rounded-xl shadow-lg border border-gray-100">
-                {actionSuccess ? (
-                  <>
-                    <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
-                      <Check className="w-10 h-10 text-green-600" />
-                    </div>
-                    <p className="text-gray-800 font-bold text-xl">ดำเนินการสำเร็จ</p>
-                    <p className="text-gray-500 text-sm mt-1">หน้าต่างกำลังจะปิด...</p>
-                  </>
-                ) : (
-                  <>
-                    <Spinner className="w-10 h-10 text-blue-600 mb-4" />
-                    <p className="text-gray-800 font-semibold text-lg">กำลังดำเนินการ...</p>
-                    <p className="text-gray-500 text-sm mt-1">กรุณารอสักครู่ ระบบกำลังบันทึกข้อมูลและไฟล์</p>
-                  </>
-                )}
-              </div>
-            </div>
+          {/* 🔒 Loading/Success Overlay for Main Modal */}
+          {renderLoadingOrSuccessOverlay(
+            (isSubmitting || isSupersedeSubmitting) && !showSupersedeModal && !cadWarningModalData.isOpen,
+            actionSuccess && !showSupersedeModal && !cadWarningModalData.isOpen
           )}
 
           {/* Header */}
@@ -1600,7 +1636,11 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       {/* Modal #1: ขอแก้ไข Rev. ใหม่ */}
       {showSupersedeModal && (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-[60] flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg relative overflow-hidden">
+            
+            {/* 🔒 Loading/Success Overlay for Supersede Modal */}
+            {renderLoadingOrSuccessOverlay(isSupersedeSubmitting, actionSuccess)}
+
             <div className="flex justify-between items-center p-4 border-b">
               <h3 className="text-lg font-bold text-orange-700 flex items-center">
                 <RefreshCw size={18} className="mr-2" />
@@ -1743,6 +1783,10 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       {cadWarningModalData.isOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-[70] flex items-center justify-center p-4">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-lg relative overflow-hidden">
+            
+            {/* 🔒 Loading/Success Overlay for CAD Warning Modal */}
+            {renderLoadingOrSuccessOverlay(isSubmitting, actionSuccess)}
+
             <div className="flex justify-between items-center p-4 border-b">
               <h3 className="text-lg font-bold text-amber-600 flex items-center">
                 <AlertTriangle size={20} className="mr-2" />
