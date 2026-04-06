@@ -32,15 +32,15 @@ const formatFileSize = (bytes: number): string => {
 const getStatusIcon = (status: string) => {
   const cls = 'w-3.5 h-3.5 mr-1.5 flex-shrink-0';
   switch (status) {
-    case 'PENDING_REVIEW':          return <Hourglass className={cls} aria-hidden="true" />;
-    case 'PENDING_CM_APPROVAL':     return <Send className={cls} aria-hidden="true" />;
-    case 'PENDING_FINAL_APPROVAL':  return <Hourglass className={cls} aria-hidden="true" />;
-    case 'APPROVED':                return <CheckCircle2 className={cls} aria-hidden="true" />;
-    case 'APPROVED_WITH_COMMENTS':  return <MessageSquare className={cls} aria-hidden="true" />;
+    case 'PENDING_REVIEW': return <Hourglass className={cls} aria-hidden="true" />;
+    case 'PENDING_CM_APPROVAL': return <Send className={cls} aria-hidden="true" />;
+    case 'PENDING_FINAL_APPROVAL': return <Hourglass className={cls} aria-hidden="true" />;
+    case 'APPROVED': return <CheckCircle2 className={cls} aria-hidden="true" />;
+    case 'APPROVED_WITH_COMMENTS': return <MessageSquare className={cls} aria-hidden="true" />;
     case 'APPROVED_REVISION_REQUIRED': return <RotateCcw className={cls} aria-hidden="true" />;
-    case 'REVISION_REQUIRED':       return <RotateCcw className={cls} aria-hidden="true" />;
-    case 'REJECTED':                return <XCircle className={cls} aria-hidden="true" />;
-    default:                        return null;
+    case 'REVISION_REQUIRED': return <RotateCcw className={cls} aria-hidden="true" />;
+    case 'REJECTED': return <XCircle className={cls} aria-hidden="true" />;
+    default: return null;
   }
 };
 
@@ -49,7 +49,7 @@ const WorkflowHistoryModal = ({
   workflow,
   onClose,
   userRole,
-  cmSystemType = 'INTERNAL', // Default as internal
+  cmSystemType = 'INTERNAL',
   docId,
   docNumber,
   siteId,
@@ -66,9 +66,6 @@ const WorkflowHistoryModal = ({
 }) => {
   const { logActivity } = useLogActivity();
   const filteredWorkflow = useMemo(() => {
-    // Hide internal drafting steps ONLY for CM, and ONLY if it's an INTERNAL system type.
-    // PMs and all Reviewers (Site Admin, PE, OE) should see everything.
-    // If it's an EXTERNAL CM system, the CM is part of the system and needs to see everything.
     if (userRole === ROLES.CM && cmSystemType === 'INTERNAL') {
       const statusesToHide = [STATUSES.PENDING_REVIEW, STATUSES.REVISION_REQUIRED];
       return workflow.filter(item => !statusesToHide.includes(item.status));
@@ -87,7 +84,7 @@ const WorkflowHistoryModal = ({
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600 focus-visible:ring-2 focus-visible:ring-blue-500 rounded outline-none"
-            aria-label="\u0e1b\u0e34\u0e14"
+            aria-label="ปิด"
           >
             <X size={24} aria-hidden="true" />
           </button>
@@ -134,7 +131,7 @@ const WorkflowHistoryModal = ({
                                   resourceType: 'RFA',
                                   resourceId: docId,
                                   resourceName: docNumber,
-                                  resourceTitle: undefined, // WorkflowHistory ไม่มี title prop — ใช้ undefined
+                                  resourceTitle: undefined,
                                   siteId: siteId,
                                   siteName: siteName,
                                   description: `${isPdf ? 'เปิดดูไฟล์' : 'ดาวน์โหลดไฟล์'} "${file.fileName}" (จากประวัติ)`,
@@ -182,7 +179,7 @@ interface SiteWithSystemType extends RFASite {
 interface FullRFADocument extends RFADocument {
   isFromSupersedeRequest?: boolean;
   site: SiteWithSystemType;
-  creatorRole?: 'BIM' | 'ME' | 'SN'; // Note: Usually fallback to document.createdByInfo?.role
+  creatorRole?: 'BIM' | 'ME' | 'SN';
   taskData?: {
     projectId?: string;
     taskName?: string;
@@ -204,13 +201,26 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
-  const [actionSuccess, setActionSuccess] = useState(false);
-  const [isClosing, setIsClosing] = useState(false); // [NEW] สำหรับ Animate ตอนปิด Modal
+  const [isClosing, setIsClosing] = useState(false);
+  const [isCadModalClosing, setIsCadModalClosing] = useState(false); // [NEW] Fade out CAD Modal smoothly
+  const [isSupersedeModalClosing, setIsSupersedeModalClosing] = useState(false); // [NEW] Fade out Supersede Modal
 
   // Modal Close Animation helper
   const triggerClose = () => {
     setIsClosing(true);
-    setTimeout(() => onClose(), 200); // รอ animation fade out จบ 200ms
+    setTimeout(() => onClose(), 200);
+  };
+
+  const executeSuccessFlow = (message: string) => {
+    // 1. ถ้ามี Sub-modal ขวางอยู่ สั่งให้มันเฟดตัวเองทิ้ง (จางหายไปรออยู่บนพื้นแบคกราวด์เบลอๆ)
+    if (showSupersedeModal) setIsSupersedeModalClosing(true);
+    if (cadWarningModalData.isOpen) setIsCadModalClosing(true);
+
+    // 2. เรียก Success Modal (Global NotificationModal) — ปิดอัตโนมัติ 5 วินาที
+    showNotification('success', message, `เอกสาร: ${document?.documentNumber} - ${document?.title}`, true);
+
+    // 3. รอแช่ให้ User เฟดตัวหน้าต่างหลักออก 
+    triggerClose();
   };
 
   const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -233,7 +243,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const [showSupersedeModal, setShowSupersedeModal] = useState(false);
   const [supersedeComment, setSupersedeComment] = useState('');
   const [supersedeFiles, setSupersedeFiles] = useState<UploadedFile[]>([]);
-  const [suspendOldDoc, setSuspendOldDoc] = useState(false); // default = ไม่ระงับ
+  const [suspendOldDoc, setSuspendOldDoc] = useState(false);
   const [isSupersedeSubmitting, setIsSupersedeSubmitting] = useState(false);
 
   // Pending Review States (Site Review)
@@ -247,8 +257,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     isHighRisk: boolean;
   }>({ isOpen: false, action: '', cadMeta: null, isHighRisk: false });
   const [cadWarningChecked, setCadWarningChecked] = useState(false);
-
-  // SupersedeComplete Modal States removed: auto-supersede is now done by the backend on approval
 
   // State for Rename File Modal
   const [renameState, setRenameState] = useState<{
@@ -266,11 +274,17 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const [verifiedTaskId, setVerifiedTaskId] = useState<string | null>(null);
   const [newDocumentNumberInput, setNewDocumentNumberInput] = useState('');
 
-  // 0. Prevent Body Scroll — use shared hook to avoid race condition with stacked modals
+  // 0. Prevent Body Scroll
   useScrollLock(true);
+
+  // ป้องกันไม่ให้ useEffect ทำงานดึงข้อมูลใหม่ (และโชว์ Skeleton) หากเรากำลัง Submit หรือกำลังแสดงกล่อง Success อยู่
+  const isActionActiveRef = React.useRef(false);
+  isActionActiveRef.current = isSubmitting || isSupersedeSubmitting || isClosing;
 
   // 1. Fetch Full Document Data
   useEffect(() => {
+    if (isActionActiveRef.current) return; // ข้ามการโหลดหน้าใหม่ถ้ากำลังโชว์กล่องเขียว หรือกำลังโหลด Submit อยู่
+
     const fetchFullDocument = async () => {
       if (!initialDoc || !firebaseUser) {
         setIsLoading(false);
@@ -297,21 +311,17 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     fetchFullDocument();
   }, [initialDoc, firebaseUser]);
 
-  // 2. Memoized Values (Hooks)
+  // 2. Memoized Values
   const latestFiles = useMemo(() => {
     if (!document) return [];
     if (!document.workflow || document.workflow.length === 0) return document.files || [];
-
     const reversedWorkflow = [...document.workflow].reverse();
     const latestStepWithFiles = reversedWorkflow.find(step => step.files && step.files.length > 0);
-
     return latestStepWithFiles?.files || document.files || [];
   }, [document]);
 
   const latestCommentItem = useMemo(() => {
     if (!document?.workflow || document.workflow.length === 0) return null;
-    // Only look at the LAST workflow step — if it has no comment, return null.
-    // We intentionally do NOT scan older steps to avoid surfacing stale comments.
     const lastStep = document.workflow[document.workflow.length - 1];
     if (lastStep?.comments && lastStep.comments.trim() !== '') return lastStep;
     return null;
@@ -319,20 +329,11 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
 
   // --- Logic สิทธิ์การแก้ไข PDF & Revision ---
   const isCreator = document?.createdBy === user?.id;
-
-  // To enforce BIM tracking checks, we verify both that the document was created by a BIM user
-  // and that the current user viewing it is also a BIM user.
-  // Note: createdByInfo is sometimes undefined if accessed via direct URL, so fallback to workflow[0].role
   const isBimDocument = document?.workflow?.[0]?.role === 'BIM' || document?.createdByInfo?.role === 'BIM';
   const isBimUser = user?.role === 'BIM';
   const requiresBimVerification = isBimUser && isBimDocument;
-
-  // การอนุญาตให้สร้าง Revision ใหม่ (Team-based permissions)
-  // 1. ถ้าเป็นเอกสาร BIM (requiresBimVerification = true) -> ทีม BIM ทุกคนสร้าง Rev ได้
-  // 2. ถ้าเป็นเอกสาร Non-BIM -> ทุกคนที่ไม่ใช่ BIM สามารถสร้าง Rev ได้
   const canReviseBimDoc = requiresBimVerification;
   const canReviseNonBimDoc = !isBimDocument && !isBimUser;
-
   const canRevise = isCreator || user?.role === ROLES.ADMIN || canReviseBimDoc || canReviseNonBimDoc;
   const hasRequestedRevision = !!document?.supersededComment;
   const isRevisionFlow = (
@@ -341,64 +342,49 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     document?.status === STATUSES.APPROVED_REVISION_REQUIRED
   ) && canRevise && document?.isLatest;
 
-  // --- สิทธิ์ขอแก้ไข Rev. ใหม่จากเอกสาร "อนุมัติ" (Supersede Flow) ---
   const APPROVED_STATUSES = [STATUSES.APPROVED, STATUSES.APPROVED_WITH_COMMENTS];
   const isApprovedStatus = document ? APPROVED_STATUSES.includes(document.status) : false;
   const isApprover = APPROVER_ROLES.includes(user?.role as Role);
   const isAdmin = user?.role === ROLES.ADMIN;
   const canRequestSupersede =
     isApprovedStatus &&
-    document?.supersededStatus !== 'SUSPENDED' && // ยังไม่ได้ขอแก้ไขอยู่
-    (
-      isAdmin ||
-      isApprover
-    );
+    document?.supersededStatus !== 'SUSPENDED' &&
+    (isAdmin || isApprover);
 
   const canEditPDF = useMemo(() => {
     if (!document || !user) return false;
-
     const { status } = document;
     const permissions = document.permissions || {} as RFAPermissions;
     const userRole = user.role;
-
     const isSiteReviewing = REVIEWER_ROLES.includes(userRole as Role) && status === STATUSES.PENDING_REVIEW;
     const isApproving = permissions.canApprove;
     const isResubmissionFlow = status === STATUSES.REVISION_REQUIRED && document.createdBy === user.id;
     const isDocRevisionFlow = (status === STATUSES.REJECTED || !!document.supersededComment) && canRevise && document.isLatest;
-
     if (isDocRevisionFlow) return true;
     if (status === STATUSES.APPROVED || status === STATUSES.APPROVED_WITH_COMMENTS || status === STATUSES.APPROVED_REVISION_REQUIRED) return false;
     if (isSiteReviewing) return true;
     if (isApproving) return true;
     if (isResubmissionFlow) return true;
-
     return false;
   }, [document, user]);
 
-  // 3. Task Verification Logic (for Revision)
-  // 3. Task Verification Logic (for Revision)
+  // 3. Task Verification Logic
   const verifyBimTask = useCallback(async () => {
     if (!document?.site?.name || !document?.documentNumber || !document?.taskData?.taskName) {
       setVerificationError("ข้อมูลเอกสารไม่สมบูรณ์ ไม่สามารถตรวจสอบ Task ได้");
       return;
     }
-
     setIsVerifyingTask(true);
     setIsTaskVerified(false);
     setVerificationError(null);
     setVerifiedTaskId(null);
-
     try {
       const token = await firebaseUser?.getIdToken();
       if (!token) throw new Error("Authentication failed");
       const newRevNumber = (document.revisionNumber || 0) + 1;
-
       const response = await fetch('/api/bim-tracking/verify-task', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           documentNumber: document.documentNumber.split('-REV')[0],
           projectName: document.site.name,
@@ -406,7 +392,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
           taskName: document.taskData.taskName,
         }),
       });
-
       const result = await response.json();
       if (response.ok && result.success) {
         if (result.exists) {
@@ -431,12 +416,11 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     }
   }, [isRevisionFlow, requiresBimVerification, firebaseUser, document, verifyBimTask]);
 
-  // 4. Loading State — Skeleton with per-element pulse (not whole-container flash)
+  // 4. Loading State — Skeleton
   if (isLoading) {
     return (
       <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
-          {/* Skeleton Header */}
           <div className="flex justify-between items-start p-4 border-b border-gray-200">
             <div className="space-y-2.5">
               <div className="flex gap-2">
@@ -448,7 +432,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
             </div>
             <div className="h-8 w-8 bg-gray-200 rounded-full animate-pulse" />
           </div>
-          {/* Skeleton Content */}
           <div className="flex-1 p-6 space-y-6 overflow-hidden">
             <div className="bg-gray-50 rounded-lg p-4 space-y-3">
               <div className="grid grid-cols-3 gap-4">
@@ -464,7 +447,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
               <div className="h-10 w-3/4 bg-gray-200 rounded animate-pulse" />
             </div>
           </div>
-          {/* Skeleton Action Panel */}
           <div className="p-6 border-t border-gray-200 bg-gray-50">
             <div className="h-4 w-32 bg-gray-200 rounded animate-pulse mb-4" />
             <div className="flex gap-3 justify-end">
@@ -486,10 +468,8 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const newDocumentNumber = `${document.documentNumber.split('-REV')[0]}-REV${String(newRevisionNumber).padStart(2, '0')}`;
   const displayDetailOrComment = latestCommentItem?.comments || document.description;
   const displayLabel = latestCommentItem ? `ความคิดเห็นล่าสุด` : 'รายละเอียดเพิ่มเติม';
-
   const { role: userRole } = user || {};
   const { status } = document;
-
   const isSiteReviewing = REVIEWER_ROLES.includes(userRole as Role) && status === STATUSES.PENDING_REVIEW;
   const isApproving = permissions.canApprove;
 
@@ -500,20 +480,16 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
         reject(new Error('User ID not found for upload.'));
         return;
       }
-
       const timestamp = Date.now();
       const originalName = fileObj.file.name || "file";
       const tempPath = `temp/${user.id}/${timestamp}_${originalName}`;
       const storageRef = ref(storage, tempPath);
-
       const uploadTask = uploadBytesResumable(storageRef, fileObj.file, {
         contentType: fileObj.file.type || "application/octet-stream",
       });
-
       const setFiles = target === 'revision' ? setRevisionFiles
         : target === 'supersede' ? setSupersedeFiles
           : setNewFiles;
-
       uploadTask.on(
         'state_changed',
         (snapshot) => {
@@ -528,7 +504,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
         async () => {
           try {
             const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
-
             const uploadedData: RFAFile = {
               fileName: originalName,
               fileUrl: downloadUrl,
@@ -556,11 +531,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       id: `${file.name}-${Date.now()}`, file, status: 'pending', progress: 0
     }));
     const setFiles = target === 'revision' ? setRevisionFiles : setNewFiles;
-
-    // Add pending files to state first
     setFiles(prev => [...prev, ...uploadedFileObjects]);
-
-    // Start upload for each file
     uploadedFileObjects.forEach(fileObj => {
       uploadTempFile(fileObj, target).catch(err => console.error("Upload failed for", fileObj.file.name, err));
     });
@@ -571,18 +542,14 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     let target: 'action' | 'revision' | 'resubmission' = 'action';
     if (isResubmissionFlow) target = 'resubmission';
     else if (isRevisionFlow) target = 'revision';
-
     const setFiles = target === 'revision' ? setRevisionFiles : setNewFiles;
-
     const newFileObj: UploadedFile = {
       id: `edited-${Date.now()}`,
       file: editedFile,
       status: 'pending',
       progress: 0
     };
-
     setFiles(prev => [...prev, newFileObj]);
-
     try {
       await uploadTempFile(newFileObj, target);
       showNotification('success', 'บันทึกไฟล์สำเร็จ', 'ไฟล์ที่แก้ไขถูกแนบเรียบร้อยแล้ว');
@@ -595,7 +562,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const handleRenameFile = (index: number, target: 'action' | 'revision' | 'resubmission') => {
     const files = target === 'revision' ? revisionFiles : target === 'resubmission' ? resubmissionFiles : newFiles;
     const fileObj = files[index];
-
     setRenameState({
       isOpen: true,
       index,
@@ -611,23 +577,16 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       setRenameState(prev => ({ ...prev, isOpen: false }));
       return;
     }
-
     const setFiles = target === 'revision' ? setRevisionFiles : target === 'resubmission' ? setResubmissionFiles : setNewFiles;
-
-    // Check if user forgot to keep .pdf/.dwg extension, append original extension if needed
     let finalName = newName.trim();
     const originalExt = currentName.substring(currentName.lastIndexOf('.'));
     const newExt = finalName.includes('.') ? finalName.substring(finalName.lastIndexOf('.')) : '';
-
-    // Automatically add extension if missing
     if (!newExt && originalExt) {
       finalName += originalExt;
     }
-
     const files = target === 'revision' ? revisionFiles : target === 'resubmission' ? resubmissionFiles : newFiles;
     const fileObj = files[index];
     const updatedFile = renameFileObj(fileObj.file, finalName);
-
     setFiles(prev => prev.map((f, i) => i === index ? { ...f, file: updatedFile } : f));
     setRenameState(prev => ({ ...prev, isOpen: false }));
   };
@@ -641,7 +600,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
         contentType: fileObj.file.type,
         fileSize: fileObj.file.size,
         uploadedAt: new Date().toISOString(),
-        // [FIXED] ใช้ email แทน name ที่ไม่มีอยู่
         uploadedBy: user?.email || 'Unknown User',
         filePath: 'temp/local-preview',
         size: fileObj.file.size
@@ -654,10 +612,8 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     const files = target === 'revision' ? revisionFiles : newFiles;
     const setFiles = target === 'revision' ? setRevisionFiles : setNewFiles;
     const fileToRemove = files[index];
-
     if (fileToRemove.status === 'success' && fileToRemove.uploadedData?.filePath) {
       try {
-        // Delete from Firebase Storage directly
         const fileRef = ref(storage, fileToRemove.uploadedData.filePath);
         await deleteObject(fileRef);
       } catch (error) {
@@ -667,7 +623,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     setFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  // [NEW] Helper function for rendering file lists with consistent UI
   const renderFileList = (files: UploadedFile[], target: 'action' | 'revision' | 'resubmission') => (
     <div className="mt-2 space-y-2">
       {files.map((fileObj, index) => (
@@ -750,7 +705,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     let isSuccess = false;
     try {
       const token = await firebaseUser?.getIdToken();
-
       const payload: {
         action: string;
         comments: string;
@@ -765,11 +719,9 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
         suspendPreviousRevision,
         cadWarningAcknowledged: cadWarningModalData.isOpen ? true : false,
       };
-
       if (needsDocNumber && newDocumentNumberInput.trim()) {
         payload.documentNumber = newDocumentNumberInput.trim();
       }
-
       const response = await fetch(`/api/rfa/${document.id}`, {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -778,23 +730,19 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       const result = await response.json();
       if (result.success) {
         isSuccess = true;
-        setActionSuccess(true);
-        // ปิด CAD Warning Modal ทันที เพื่อประหยัด Modal หลายชั้นที่ปิดไม่พร้อมกัน
-        setCadWarningModalData({ isOpen: false, action: '', cadMeta: null, isHighRisk: false });
-        
-        showNotification('success', 'อัปเดตสถานะสำเร็จ', `เอกสาร: ${document?.documentNumber ? `${document?.documentNumber} - ` : ''}${document?.title}`);
 
-        // Fire-and-forget: extract CAD files in background
+        // Fire-and-forget
         const isFinalApprovalAction = ['APPROVE', 'APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED'].includes(action);
         if (isFinalApprovalAction && result.newStatus && ['APPROVED', 'APPROVED_WITH_COMMENTS', 'APPROVED_REVISION_REQUIRED'].includes(result.newStatus)) {
           fetch('/api/rfa/extract-cad', {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ docId: document.id }),
-          }).catch(() => { /* silent fail — non-critical */ });
+          }).catch(() => { });
         }
 
-        setTimeout(() => triggerClose(), 900);
+        executeSuccessFlow('อัปเดตสถานะสำเร็จ');
+
       } else {
         throw new Error(result.error || 'เกิดข้อผิดพลาด');
       }
@@ -819,23 +767,17 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       'APPROVE_REVISION_REQUIRED',
       'REJECT'
     ];
-
     const successfulFiles = newFiles.filter(f => f.status === 'success');
-
     if (actionsRequiringFile.includes(action) && successfulFiles.length === 0) {
       showNotification('warning', 'คำเตือน', 'กรุณาแนบไฟล์ประกอบการดำเนินการ');
       return;
     }
-
     const isFinalApprovalAction = ['APPROVE', 'APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED'].includes(action);
-
-    // [NEW] Advanced CAD Warning Logic
     if (isFinalApprovalAction) {
       const CAD_EXTENSIONS = ['.dwg', '.zip', '.rar'];
-      const hasCadFile = successfulFiles.some(f => 
-         CAD_EXTENSIONS.some(ext => f.file.name.toLowerCase().endsWith(ext))
+      const hasCadFile = successfulFiles.some(f =>
+        CAD_EXTENSIONS.some(ext => f.file.name.toLowerCase().endsWith(ext))
       );
-
       if (!hasCadFile) {
         let cadMeta = null;
         if (document?.workflow) {
@@ -856,34 +798,13 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
             }
           }
         }
-
+        // บังคับใช้ CAD Warning Modal กับการ Approve ทุกรูปแบบ (แทน window.confirm)
         const isHighRisk = action === 'APPROVE_WITH_COMMENTS' || action === 'APPROVE_REVISION_REQUIRED';
-        
-        if (!isHighRisk) {
-          // Low Risk -> Light confirm
-          const confirmProceed = window.confirm(
-            '⚠️ คุณไม่ได้แนบไฟล์ CAD ใหม่มาด้วย\n\n' +
-            'ระบบตรวจพบว่ามี "ไฟล์ CAD ต้นฉบับที่ส่งมาจากฝั่ง BIM"\n' +
-            'ระบบจะเผยแพร่ไฟล์ CAD ต้นฉบับนี้ให้หน้างานโดยอัตโนมัติ\n\n' +
-            '- กด [OK] เพื่อยินยอมและเผยแพร่ CAD ต้นฉบับ\n' +
-            '- กด [Cancel] เพื่อย้อนกลับและแนบไฟล์ CAD ใหม่'
-          );
-          if (!confirmProceed) return;
-        } else {
-          // High Risk -> Show custom CAD Warning Modal and halt execution here
-          setCadWarningChecked(false);
-          setCadWarningModalData({
-            isOpen: true,
-            action,
-            cadMeta,
-            isHighRisk: true
-          });
-          return; // Stop execution, wait for user to click confirm in the modal
-        }
+        setCadWarningChecked(false);
+        setCadWarningModalData({ isOpen: true, action, cadMeta, isHighRisk });
+        return;
       }
     }
-
-    // If no CAD warning or if low-risk accepted, proceed:
     await executeAction(action);
   };
 
@@ -914,9 +835,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       const result = await response.json();
       if (result.success) {
         isSuccess = true;
-        setActionSuccess(true);
-        showNotification('success', 'สร้าง Revision สำเร็จ', `เอกสารฉบับใหม่: ${newDocumentNumber} - ${document?.title} ถูกสร้างแล้ว`);
-        setTimeout(() => triggerClose(), 900);
+        executeSuccessFlow(`สร้าง Revision ${newDocumentNumber} สำเร็จ`);
       } else {
         throw new Error(result.error || 'เกิดข้อผิดพลาดในการสร้าง Revision');
       }
@@ -971,19 +890,9 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       const result = await response.json();
       if (result.success) {
         isSuccess = true;
-        setActionSuccess(true);
-        // DO NOT set showSupersedeModal to false here, so we can see the green takeover
-        // setSupersedeComment('');
-        // setSupersedeFiles([]);
         const isBimDoc = result.data?.originalDocument?.isBimDocument;
-        if (isBimDoc) {
-          // BIM: ระบบส่ง Signal ไป BIM Tracking แล้ว ให้แสดง message รอ BIM มาส่งใหม่
-          showNotification('success', 'ส่งคำขอแก้ไขสำเร็จ', `เอกสาร: ${document?.documentNumber ? `${document?.documentNumber} - ` : ''}${document?.title} (รอทาง BIM ส่งเอกสาร Rev. ใหม่)`);
-        } else {
-          // Non-BIM: ให้ผู้ใช้กลับไปแนบ Rev ใหม่เองเมื่อพร้อม
-          showNotification('success', 'ส่งคำขอแก้ไขสำเร็จ', `เอกสาร: ${document?.documentNumber ? `${document?.documentNumber} - ` : ''}${document?.title} (รอส่ง Rev. ใหม่)`);
-        }
-        setTimeout(() => triggerClose(), 900);
+        const detailSuffix = isBimDoc ? '(รอทาง BIM ส่งเอกสาร Rev. ใหม่)' : '(รอส่ง Rev. ใหม่)';
+        executeSuccessFlow(`ส่งคำขอแก้ไขสำเร็จ ${detailSuffix}`);
       } else {
         throw new Error(result.error || 'เกิดข้อผิดพลาด');
       }
@@ -1006,30 +915,27 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const needsDocNumber = isSiteReviewing && !document.documentNumber;
 
   // ── Reusable Loading/Success Overlay function ──
-  const renderLoadingOrSuccessOverlay = (loading: boolean, success: boolean) => {
-    if (!loading && !success) return null;
+  const renderLoadingOrSuccessOverlay = (loading: boolean, successMessage: string | null | false) => {
+    if (!loading && !successMessage) return null;
     return (
       <div
-        className={`absolute inset-0 z-[100] flex items-center justify-center rounded-lg transition-colors duration-300 ${
-          success ? 'bg-green-600' : 'bg-white/70 backdrop-blur-sm'
-        }`}
+        className={`absolute inset-0 z-[100] flex items-center justify-center rounded-lg transition-colors duration-300 ${successMessage ? 'bg-white/80 backdrop-blur-sm' : 'bg-white/70 backdrop-blur-sm'
+          }`}
       >
-        {success ? (
-          // Success: full-color green takeover
+        {successMessage ? (
           <div
-            className="flex flex-col items-center text-white"
+            className="flex flex-col items-center p-8 bg-green-600 rounded-2xl shadow-2xl text-white text-center"
             style={{ animation: 'overlayFadeInUp 0.2s ease-out forwards' }}
           >
             <div className="w-20 h-20 rounded-full bg-white/20 flex items-center justify-center mb-5 ring-4 ring-white/30">
               <Check className="w-11 h-11 text-white" strokeWidth={2.5} />
             </div>
-            <p className="font-bold text-2xl tracking-tight">ดำเนินการสำเร็จ</p>
-            <p className="text-green-100 text-sm mt-1.5 font-medium">กำลังปิดหน้าต่าง...</p>
-            {/* Progress bar — synced with 900ms setTimeout */}
+            <p className="font-bold text-xl md:text-2xl tracking-tight max-w-sm" dangerouslySetInnerHTML={{ __html: String(successMessage).replace(/ \(/g, '<br/><span class="text-green-200 text-lg font-normal">(').replace(/\)/g, ')</span>') }}></p>
+            <p className="text-green-100 text-sm mt-3 font-medium">กำลังปิดหน้าต่าง...</p>
             <div className="mt-6 w-40 h-1 rounded-full bg-white/20 overflow-hidden">
               <div
                 className="h-full bg-white rounded-full"
-                style={{ animation: 'shrinkProgress 0.9s linear forwards' }}
+                style={{ animation: 'shrinkProgress 1.4s linear forwards' }}
               />
             </div>
           </div>
@@ -1049,7 +955,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
 
   return (
     <>
-      {/* Global keyframes for overlay animations — injected once per component mount */}
       <style>{`
         @keyframes shrinkProgress {
           from { width: 100%; }
@@ -1061,21 +966,20 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
         }
       `}</style>
       <div
-        className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-opacity duration-200 ${isClosing ? 'opacity-0' : 'opacity-100'
-          } ${overlayClasses}`}
+        className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-opacity duration-200 ${isClosing ? 'opacity-0' : 'opacity-100'} ${overlayClasses}`}
         onClick={handleBackdropClick}
       >
         <div
-          className={`rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col transition-all duration-200 relative transform ${isClosing ? 'scale-95 translate-y-2 opacity-0' : 'scale-100 translate-y-0 opacity-100'
-            } ${document.supersededStatus === 'SUSPENDED' ? 'bg-red-50' : 'bg-white'
-            }`}
-          onClick={(e) => e.stopPropagation()} // ป้องกันการคลิกทะลุไปถึง backdrop
+          className={`rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col transition-all duration-200 relative transform ${isClosing ? 'scale-95 translate-y-2 opacity-0' : 'scale-100 translate-y-0 opacity-100'} ${document.supersededStatus === 'SUSPENDED' ? 'bg-red-50' : 'bg-white'}`}
+          onClick={(e) => e.stopPropagation()}
         >
 
-          {/* 🔒 Loading/Success Overlay for Main Modal */}
-          {renderLoadingOrSuccessOverlay(
-            (isSubmitting || isSupersedeSubmitting) && !showSupersedeModal && !cadWarningModalData.isOpen,
-            actionSuccess && !showSupersedeModal && !cadWarningModalData.isOpen
+          {/* 🔒 Loading Overlay for Main Modal */}
+          {(isSubmitting || isSupersedeSubmitting) && !showSupersedeModal && !cadWarningModalData.isOpen && (
+            <div className="absolute inset-0 bg-white/70 backdrop-blur-[2px] z-[100] flex flex-col items-center justify-center rounded-lg gap-3">
+              <Spinner className="w-10 h-10 text-blue-600" />
+              <p className="text-sm font-medium text-gray-600">กำลังดำเนินการ...</p>
+            </div>
           )}
 
           {/* Header */}
@@ -1118,9 +1022,8 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
             </div>
           </div>
 
-          {/* Scrollable Container for both Content and Action Panels */}
+          {/* Scrollable Container */}
           <div className="flex-1 overflow-y-auto min-h-0 w-full">
-
             <div className="p-6 space-y-6">
               <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
@@ -1165,9 +1068,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 </div>
               )}
 
-
-              {/* Revision Visual Banner Removed As Per User Request */}
-
               <div>
                 <h4 className="text-md font-semibold mb-2 flex items-center text-slate-800">
                   <Paperclip size={16} className="mr-2" /> ไฟล์แนบ (ฉบับล่าสุด)
@@ -1185,8 +1085,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                             <FileText className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
                           )}
                           <div className="flex flex-col min-w-0">
-                            <span className={`text-sm font-medium truncate ${isSuspended ? 'text-red-500 group-hover:text-red-700 group-hover:underline' : 'text-blue-600 group-hover:text-blue-800 group-hover:underline'
-                              }`}>{file.fileName}</span>
+                            <span className={`text-sm font-medium truncate ${isSuspended ? 'text-red-500 group-hover:text-red-700 group-hover:underline' : 'text-blue-600 group-hover:text-blue-800 group-hover:underline'}`}>{file.fileName}</span>
                             <span className="text-xs text-gray-500">{formatFileSize(file.fileSize)}</span>
                           </div>
                         </div>
@@ -1256,7 +1155,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                   <div className="pb-3 border-b border-slate-200">
                     <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (Site)</h3>
                   </div>
-
                   {needsDocNumber && (
                     <div className="p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded-r-md">
                       <label className="text-sm font-bold text-yellow-800 mb-2 block">
@@ -1273,8 +1171,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                       <p className="text-xs text-yellow-700 mt-1">เอกสารนี้ยังไม่มีเลขที่เอกสาร คุณต้องกำหนดก่อนส่งต่อไปยัง CM</p>
                     </div>
                   )}
-
-                  {/* Step 1: File Upload */}
                   <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
                     <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
                       <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">1</span>
@@ -1291,20 +1187,15 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                           คลิกเพื่อเลือกไฟล์
                         </label>
                       </div>
-
                       {renderFileList(newFiles, 'action')}
-
                     </div>
                   </div>
-
-                  {/* Step 2 (Optional): Suspend Old Document */}
                   {document.previousRevisionId && !document.isFromSupersedeRequest && (
                     <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
                       <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
                         <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">2</span>
                         <h4 className="font-semibold text-slate-800 text-base">จัดการเอกสารฉบับเดิม</h4>
                       </div>
-
                       <div className="space-y-3">
                         <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
                           <span className="text-blue-500 text-sm flex-shrink-0">ℹ️</span>
@@ -1315,8 +1206,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                         <p className="text-sm font-semibold text-gray-700">
                           กรุณาเลือกสถานะของเอกสาร (ฉบับเดิม) ในระหว่างดำเนินการตรวจสอบ
                         </p>
-
-                        {/* Option 1: ยังใช้งานได้ */}
                         <label className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${!suspendPreviousRevision ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
                           <input
                             type="radio"
@@ -1330,8 +1219,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                             <p className="text-xs text-gray-500 mt-0.5">หน้างานยังดาวน์โหลดและใช้อ้างอิงฉบับเดิมได้ระหว่างรอฉบับแก้ไขนี้อนุมัติ</p>
                           </div>
                         </label>
-
-                        {/* Option 2: ระงับทันที */}
                         <label className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${suspendPreviousRevision ? 'border-red-400 bg-red-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
                           <input
                             type="radio"
@@ -1348,8 +1235,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                       </div>
                     </div>
                   )}
-
-                  {/* Step 3: Comments & Action */}
                   <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
                     <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
                       <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">
@@ -1357,7 +1242,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                       </span>
                       <h4 className="font-semibold text-slate-800 text-base">ความคิดเห็น</h4>
                     </div>
-
                     <div>
                       <label className="text-sm font-medium text-gray-700 mb-1.5 block">แสดงความคิดเห็น (Optional)</label>
                       <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ (Optional)..." className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white text-gray-900 focus:ring-blue-500 focus:border-blue-500 transition-colors" rows={3} />
@@ -1388,8 +1272,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                   <div className="pb-3 border-b border-slate-200">
                     <h3 className="text-lg font-bold text-slate-800">ส่งเอกสารฉบับแก้ไข</h3>
                   </div>
-
-                  {/* Step 1: File Upload */}
                   <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
                     <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
                       <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">1</span>
@@ -1405,8 +1287,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                     </div>
                     {renderFileList(newFiles, 'resubmission')}
                   </div>
-
-                  {/* Step 2: Comment & Submit */}
                   <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
                     <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
                       <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">2</span>
@@ -1428,7 +1308,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 </div>
               )}
 
-              {/* ✅ Supersede Request Button (สำหรับ Approved Docที่ยังไม่มีคำสั่งแก้) */}
+              {/* Supersede Request Button */}
               {(canRequestSupersede && !document.supersededComment) && (
                 <div className="flex justify-end mb-4">
                   <button
@@ -1441,7 +1321,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 </div>
               )}
 
-              {/* Warning Box (View Only) - สำหรับคนที่ไม่มีสิทธิ์สร้าง Rev ใหม่ แต่ต้องเห็นคำสั่ง */}
+              {/* Warning Box (View Only) */}
               {!!document.supersededComment && !isRevisionFlow && (
                 <div className="bg-orange-50 p-6 rounded-lg border border-orange-200 shadow-sm space-y-4 mb-4">
                   <h3 className="text-lg font-bold text-orange-800 flex items-center border-b border-orange-200 pb-2">
@@ -1460,8 +1340,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                   <div className="pb-3 border-b border-slate-200">
                     <h3 className="text-lg font-bold text-slate-800">สร้างเอกสารฉบับแก้ไข</h3>
                   </div>
-
-                  {/* Supersede Comment Banner */}
                   {!!document.supersededComment && (
                     <div className="bg-orange-50 p-4 rounded-xl border border-orange-200 shadow-sm">
                       <h4 className="text-sm font-bold text-orange-800 flex items-center mb-2">
@@ -1471,8 +1349,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                       <p className="whitespace-pre-wrap text-sm text-orange-900 font-medium">{document.supersededComment}</p>
                     </div>
                   )}
-
-                  {/* BIM Verification Status */}
                   {requiresBimVerification && (isVerifyingTask || verificationError) && (
                     <div className="p-3 rounded-lg text-sm font-medium flex items-center border bg-slate-50">
                       {isVerifyingTask && (
@@ -1491,10 +1367,8 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                       )}
                     </div>
                   )}
-
                   {(!requiresBimVerification || isTaskVerified) && (
                     <>
-                      {/* Step 1: File Upload */}
                       <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
                         <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
                           <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">1</span>
@@ -1510,8 +1384,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                         </div>
                         {renderFileList(revisionFiles, 'revision')}
                       </div>
-
-                      {/* Step 2: Comment & Submit */}
                       <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
                         <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
                           <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">2</span>
@@ -1530,8 +1402,8 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                             onClick={handleCreateRevision}
                             disabled={isSubmitting || revisionFiles.filter(f => f.status === 'success').length === 0}
                             className={`flex items-center px-6 py-2.5 text-sm font-medium text-white rounded-lg transition-colors shadow-sm disabled:cursor-not-allowed ${!!document.supersededComment
-                                ? 'bg-orange-600 hover:bg-orange-700 disabled:bg-orange-300'
-                                : 'bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300'
+                              ? 'bg-orange-600 hover:bg-orange-700 disabled:bg-orange-300'
+                              : 'bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300'
                               }`}
                           >
                             {isSubmitting ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />}
@@ -1544,14 +1416,11 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 </div>
               )}
 
-
               {isApproving && (
                 <div className="space-y-6">
                   <div className="pb-3 border-b border-slate-200">
                     <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (อนุมัติ)</h3>
                   </div>
-
-                  {/* Step 1: File Upload */}
                   <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
                     <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
                       <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">1</span>
@@ -1567,8 +1436,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                     </div>
                     {renderFileList(newFiles, 'action')}
                   </div>
-
-                  {/* Step 2: Comment & Decision */}
                   <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
                     <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
                       <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">2</span>
@@ -1576,10 +1443,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                     </div>
                     <label className="text-sm font-medium text-gray-700 mb-1.5 block">แสดงความคิดเห็น (Optional)</label>
                     <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..." className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white text-gray-900 focus:ring-blue-500 focus:border-blue-500 transition-colors" rows={3} />
-
-                    {/* H7: Improved button hierarchy — REJECT far left outline, approve actions far right solid */}
                     <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200">
-                      {/* Destructive action — left, outline style */}
                       <button
                         onClick={() => handleAction('REJECT')}
                         disabled={isActionDisabled}
@@ -1587,21 +1451,20 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                       >
                         {loadingAction === 'REJECT' ? <Spinner className="w-4 h-4 mr-2" /> : <ThumbsDown size={16} className="mr-2" />} ไม่อนุมัติ
                       </button>
-                      {/* Approval actions — right, solid (ascending visual weight) */}
                       <div className="flex flex-wrap gap-2">
                         <button
                           onClick={() => handleAction('APPROVE_REVISION_REQUIRED')}
                           disabled={isActionDisabled}
                           className="flex items-center px-4 py-2 text-sm font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-amber-400 outline-none transition-colors"
                         >
-                          {loadingAction === 'APPROVE_REVISION_REQUIRED' ? <Spinner className="w-4 h-4 mr-2" /> : <Edit3 size={16} className="mr-2" />} อนุมัติ (ต้องแก้ไข)
+                          {loadingAction === 'APPROVE_REVISION_REQUIRED' ? <Spinner className="w-4 h-4 mr-2" /> : <Edit3 size={16} className="mr-2" />} อนุมัติตามคอมเมนต์ (ต้องแก้ไข)
                         </button>
                         <button
                           onClick={() => handleAction('APPROVE_WITH_COMMENTS')}
                           disabled={isActionDisabled}
                           className="flex items-center px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-teal-500 outline-none transition-colors"
                         >
-                          {loadingAction === 'APPROVE_WITH_COMMENTS' ? <Spinner className="w-4 h-4 mr-2" /> : <MessageSquare size={16} className="mr-2" />} อนุมัติ (มีคอมเมนต์)
+                          {loadingAction === 'APPROVE_WITH_COMMENTS' ? <Spinner className="w-4 h-4 mr-2" /> : <MessageSquare size={16} className="mr-2" />} อนุมัติตามคอมเมนต์ (ไม่ต้องแก้ไข)
                         </button>
                         <button
                           onClick={() => handleAction('APPROVE')}
@@ -1620,6 +1483,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
           </div>
         </div>
       </div>
+
       {showHistory && (
         <WorkflowHistoryModal
           workflow={document.workflow || []}
@@ -1635,12 +1499,10 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
 
       {/* Modal #1: ขอแก้ไข Rev. ใหม่ */}
       {showSupersedeModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 z-[60] flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg relative overflow-hidden">
-            
-            {/* 🔒 Loading/Success Overlay for Supersede Modal */}
-            {renderLoadingOrSuccessOverlay(isSupersedeSubmitting, actionSuccess)}
-
+        <div className={`fixed inset-0 bg-black bg-opacity-60 z-[60] flex items-center justify-center p-4 transition-opacity duration-200 ${isSupersedeModalClosing ? 'opacity-0' : 'opacity-100'}`}>
+          <div className={`bg-white rounded-lg shadow-xl w-full max-w-lg relative overflow-hidden transition-all duration-200 ${isSupersedeModalClosing ? 'scale-95 opacity-0' : 'scale-100 opacity-100'}`}>
+            {/* 🔒 Spinner overlay เท่านั้น ไม่มี success บน Modal ย่อย */}
+            {isSupersedeSubmitting && renderLoadingOrSuccessOverlay(true, false)}
             <div className="flex justify-between items-center p-4 border-b">
               <h3 className="text-lg font-bold text-orange-700 flex items-center">
                 <RefreshCw size={18} className="mr-2" />
@@ -1654,8 +1516,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-800">
                 <strong>{document.documentNumber}</strong> Rev.{String(document.revisionNumber || 0).padStart(2, '0')} (อนุมัติ) จะถูกขอแก้ไข
               </div>
-
-              {/* Comment — บังคับ */}
               <div>
                 <label className="text-sm font-semibold text-gray-700 mb-1 block">
                   เหตุผล / คำสั่งแก้ไข <span className="text-red-600">*</span>
@@ -1668,8 +1528,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                   rows={3}
                 />
               </div>
-
-              {/* File Upload — บังคับ */}
               <div>
                 <label className="text-sm font-semibold text-gray-700 mb-1 block">
                   แนบไฟล์หลักฐานคำสั่ง <span className="text-red-600">*</span>
@@ -1713,10 +1571,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                   </div>
                 )}
               </div>
-
-              {/* Suspend Option — Radio Buttons */}
               <div className="space-y-2">
-                {/* Info Banner */}
                 <div className="flex items-start gap-2 p-2.5 bg-amber-50 border border-amber-200 rounded-md">
                   <span className="text-amber-500 text-sm flex-shrink-0">⚠️</span>
                   <p className="text-xs text-amber-700">
@@ -1726,8 +1581,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 <p className="text-sm font-semibold text-gray-700">
                   กรุณาเลือกสถานะของเอกสาร <span className="text-orange-600">{document?.documentNumber}</span> ในระหว่างดำเนินการขอแก้ไข
                 </p>
-
-                {/* Option 1: ยังใช้งานได้ */}
                 <label className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${!suspendOldDoc ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
                   <input
                     type="radio"
@@ -1741,8 +1594,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                     <p className="text-xs text-gray-500 mt-0.5">หน้างานยังดาวน์โหลดและใช้เอกสารฉบับนี้ได้ระหว่างรอฉบับแก้ไข</p>
                   </div>
                 </label>
-
-                {/* Option 2: ระงับทันที */}
                 <label className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${suspendOldDoc ? 'border-red-400 bg-red-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
                   <input
                     type="radio"
@@ -1757,7 +1608,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                   </div>
                 </label>
               </div>
-
             </div>
             <div className="flex justify-end gap-3 p-4 border-t bg-slate-50">
               <button
@@ -1781,96 +1631,124 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
 
       {/* Modal #2: Advanced CAD Warning Modal */}
       {cadWarningModalData.isOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 z-[70] flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg relative overflow-hidden">
-            
-            {/* 🔒 Loading/Success Overlay for CAD Warning Modal */}
-            {renderLoadingOrSuccessOverlay(isSubmitting, actionSuccess)}
+        <div className={`fixed inset-0 bg-black bg-opacity-60 z-[70] flex items-center justify-center p-4 transition-opacity duration-200 ${isCadModalClosing ? 'opacity-0' : 'opacity-100'}`}>
+          <div className={`bg-white rounded-lg shadow-xl w-full max-w-lg relative overflow-hidden transition-all duration-200 ${isCadModalClosing ? 'scale-95 opacity-0' : 'scale-100 opacity-100'}`}>
+
+            {/* 🔒 Spinner overlay เท่านั้น ไม่มี success บน CAD Modal */}
+            {isSubmitting && renderLoadingOrSuccessOverlay(true, false)}
 
             <div className="flex justify-between items-center p-4 border-b">
               <h3 className="text-lg font-bold text-amber-600 flex items-center">
                 <AlertTriangle size={20} className="mr-2" />
-                ต้องการการยืนยัน
+                {cadWarningModalData.cadMeta
+                  ? 'ไม่มีไฟล์ CAD ใหม่ — ใช้ต้นฉบับเดิมแทน?'
+                  : 'ยืนยันการอนุมัติโดยไม่มีไฟล์ CAD?'}
               </h3>
-              <button 
+              <button
                 onClick={() => setCadWarningModalData({ isOpen: false, action: '', cadMeta: null, isHighRisk: false })}
                 className="text-gray-400 hover:text-gray-600 outline-none"
               >
                 <X size={22} />
               </button>
             </div>
-            
+
             <div className="p-6 space-y-4">
-              <div className="text-sm text-gray-800 font-medium">
-                เอกสารนี้มีความเห็นแนบ (Approved {cadWarningModalData.action === 'APPROVE_REVISION_REQUIRED' ? 'Revision Required' : 'with Comments'}) 
-                <span className="text-red-600 ml-1">แต่ระบบไม่พบไฟล์ CAD ใหม่จากคุณ</span>
-              </div>
-              
-              <div className="p-4 bg-slate-50 border border-slate-200 rounded-md">
-                <p className="text-sm font-semibold text-gray-700 mb-2">ระบบจะเผยแพร่ไฟล์ CAD ต้นฉบับล่าสุด:</p>
-                <div className="text-sm text-gray-600 space-y-1">
-                  <div className="flex">
-                    <span className="w-20 font-medium text-gray-500">ไฟล์:</span> 
-                    {cadWarningModalData.cadMeta?.fileUrl ? (
-                      <a 
-                        href={cadWarningModalData.cadMeta.fileUrl} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="font-semibold text-blue-600 truncate flex-1 hover:underline hover:text-blue-800" 
-                        title={`คลิกเพื่อดาวน์โหลด: ${cadWarningModalData.cadMeta?.fileName}`}
-                        onClick={() => {
-                          logActivity({
-                            action: 'DOWNLOAD_FILE',
-                            resourceType: 'RFA',
-                            resourceId: document?.id,
-                            resourceName: document?.documentNumber || document?.title,
-                            siteId: document?.site?.id,
-                            siteName: document?.site?.name,
-                            description: `ดาวน์โหลดไฟล์อ้างอิง "${cadWarningModalData.cadMeta?.fileName}" จากหน้าต่างยืนยันความเสี่ยง CAD`
-                          });
-                        }}
-                      >
-                        {cadWarningModalData.cadMeta?.fileName || 'ไม่พบในประวัติ'}
-                      </a>
-                    ) : (
-                      <span className="font-semibold text-blue-600 truncate flex-1" title={cadWarningModalData.cadMeta?.fileName || 'Unknown'}>
-                        {cadWarningModalData.cadMeta?.fileName || 'ไม่พบในประวัติ'}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex"><span className="w-20 font-medium text-gray-500">ส่งโดย:</span> <span>{cadWarningModalData.cadMeta?.uploader || '-'}</span></div>
-                  <div className="flex"><span className="w-20 font-medium text-gray-500">เมื่อ:</span> <span>{cadWarningModalData.cadMeta?.date || '-'}</span></div>
-                  <div className="flex"><span className="w-20 font-medium text-gray-500">Rev:</span> <span>{cadWarningModalData.cadMeta?.rev !== undefined ? String(cadWarningModalData.cadMeta.rev).padStart(2, '0') : '-'}</span></div>
-                </div>
-                <div className="mt-2 text-xs text-red-600 font-medium flex items-start">
-                  <AlertTriangle size={14} className="mr-1 flex-shrink-0 mt-0.5" />
-                  คำเตือน: ไฟล์ต้นฉบับนี้ "อาจยังไม่สะท้อนข้อผิดพลาดหรือความเห็น" ที่คุณเพิ่งคอมเมนต์ไป
-                </div>
+
+              {/* Status badge */}
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-500 font-medium">สถานะ:</span>
+                <span className="px-2.5 py-0.5 text-xs font-semibold bg-amber-100 text-amber-800 rounded-full">
+                  {STATUS_LABELS[({
+                    'APPROVE': 'APPROVED',
+                    'APPROVE_WITH_COMMENTS': 'APPROVED_WITH_COMMENTS',
+                    'APPROVE_REVISION_REQUIRED': 'APPROVED_REVISION_REQUIRED',
+                  } as Record<string, string>)[cadWarningModalData.action]] || cadWarningModalData.action}
+                </span>
               </div>
 
-              <label className="flex items-start gap-3 p-3 mt-4 rounded-lg border-2 border-amber-200 bg-amber-50 cursor-pointer hover:bg-amber-100 transition-colors">
-                <input
-                  type="checkbox"
-                  checked={cadWarningChecked}
-                  onChange={(e) => setCadWarningChecked(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 text-amber-600 rounded border-amber-300 focus:ring-amber-500 cursor-pointer"
-                />
-                <span className="text-sm font-bold text-amber-900">
-                  ฉันยืนยันว่า "ไฟล์ CAD ต้นฉบับนี้" ยังคงสามารถให้หน้างานนำไปใช้อ้างอิงได้ โดยไม่ต้องแก้ไขเพิ่มเติม
-                </span>
-              </label>
+              {cadWarningModalData.cadMeta ? (
+                // ─── Case A: มีไฟล์ CAD ในประวัติ → แสดงข้อมูลไฟล์ + checkbox ยืนยัน ───
+                <>
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-md">
+                    <p className="text-sm font-semibold text-gray-700 mb-2">ไฟล์ CAD ที่จะเผยแพร่:</p>
+                    <div className="text-sm text-gray-600 space-y-1">
+                      <div className="flex">
+                        <span className="w-20 font-medium text-gray-500">ไฟล์:</span>
+                        {cadWarningModalData.cadMeta?.fileUrl ? (
+                          <a
+                            href={cadWarningModalData.cadMeta.fileUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-semibold text-blue-600 truncate flex-1 hover:underline hover:text-blue-800"
+                            title={`คลิกเพื่อดาวน์โหลด: ${cadWarningModalData.cadMeta?.fileName}`}
+                            onClick={() => {
+                              logActivity({
+                                action: 'DOWNLOAD_FILE',
+                                resourceType: 'RFA',
+                                resourceId: document?.id,
+                                resourceName: document?.documentNumber || document?.title,
+                                siteId: document?.site?.id,
+                                siteName: document?.site?.name,
+                                description: `ดาวน์โหลดไฟล์อ้างอิง "${cadWarningModalData.cadMeta?.fileName}" จากหน้าต่างยืนยันความเสี่ยง CAD`
+                              });
+                            }}
+                          >
+                            {cadWarningModalData.cadMeta?.fileName}
+                          </a>
+                        ) : (
+                          <span className="font-semibold text-blue-600 truncate flex-1">
+                            {cadWarningModalData.cadMeta?.fileName}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex"><span className="w-20 font-medium text-gray-500">ส่งโดย:</span> <span>{cadWarningModalData.cadMeta?.uploader || '-'}</span></div>
+                      <div className="flex"><span className="w-20 font-medium text-gray-500">เมื่อ:</span> <span>{cadWarningModalData.cadMeta?.date || '-'}</span></div>
+                      <div className="flex"><span className="w-20 font-medium text-gray-500">Rev:</span> <span>{cadWarningModalData.cadMeta?.rev !== undefined ? String(cadWarningModalData.cadMeta.rev).padStart(2, '0') : '-'}</span></div>
+                    </div>
+                    {cadWarningModalData.isHighRisk && (
+                      <div className="mt-2 text-xs text-red-600 font-medium flex items-start">
+                        <AlertTriangle size={14} className="mr-1 flex-shrink-0 mt-0.5" />
+                        ไฟล์นี้อาจยังไม่ได้รับการแก้ไขตามความเห็นล่าสุด
+                      </div>
+                    )}
+                  </div>
+
+                  <label className="flex items-center gap-3 p-3 rounded-lg border-2 border-amber-200 bg-amber-50 cursor-pointer hover:bg-amber-100 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={cadWarningChecked}
+                      onChange={(e) => setCadWarningChecked(e.target.checked)}
+                      className="h-4 w-4 flex-shrink-0 text-amber-600 rounded border-amber-300 focus:ring-amber-500 cursor-pointer"
+                    />
+                    <span className="text-sm font-bold text-amber-900">
+                      ยืนยันว่าไฟล์ CAD นี้ใช้อ้างอิงในหน้างานได้
+                    </span>
+                  </label>
+                </>
+              ) : (
+                // ─── Case B: ไม่มีไฟล์ CAD ในประวัติเลย → แจ้งเตือนสั้นตรงประเด็น ───
+                <div className="p-4 bg-orange-50 border border-orange-200 rounded-md space-y-1">
+                  <div className="flex items-start gap-2 text-sm text-orange-800 font-semibold">
+                    <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" />
+                    ไม่พบไฟล์ CAD ในประวัติทั้งหมด
+                  </div>
+                  <p className="text-sm text-orange-700 pl-6">
+                    หากต้องการแนบไฟล์ก่อน ให้กด "ย้อนกลับ"
+                  </p>
+                </div>
+              )}
             </div>
-            
+
             <div className="flex justify-between items-center p-4 border-t bg-slate-50">
               <button
                 onClick={() => setCadWarningModalData({ isOpen: false, action: '', cadMeta: null, isHighRisk: false })}
                 className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
               >
-                <CornerUpLeft size={16} className="mr-2" /> ย้อนกลับ (เพื่อไปแนบไฟล์)
+                <CornerUpLeft size={16} className="mr-2" /> ย้อนกลับ
               </button>
               <button
                 onClick={() => executeAction(cadWarningModalData.action)}
-                disabled={!cadWarningChecked || isSubmitting}
+                disabled={(cadWarningModalData.cadMeta != null && !cadWarningChecked) || isSubmitting}
                 className="flex items-center px-4 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 focus-visible:ring-2 focus-visible:ring-amber-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {isSubmitting ? <Spinner className="w-4 h-4 mr-2" /> : <Check size={16} className="mr-2" />}

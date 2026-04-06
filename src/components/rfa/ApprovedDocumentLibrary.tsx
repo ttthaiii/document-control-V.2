@@ -82,6 +82,16 @@ const getNumericSuffix = (str: string): number => {
   return match ? parseInt(match[0], 10) : 0;
 };
 
+// ─── File Classification Constants ───────────────────────────────────────────
+const CAD_EXTENSIONS = ['.dwg', '.zip', '.rar'];
+const APPROVAL_STATUSES = [
+  'APPROVED',
+  'APPROVED_WITH_COMMENTS',
+  'APPROVED_REVISION_REQUIRED',
+];
+const isCadExtension = (fileName: string) =>
+  CAD_EXTENSIONS.some(ext => fileName.toLowerCase().endsWith(ext));
+
 export default function ApprovedDocumentLibrary() {
   const { user, firebaseUser } = useAuth();
   const { logActivity } = useLogActivity();
@@ -303,6 +313,15 @@ export default function ApprovedDocumentLibrary() {
     if (cad.fileUrl) window.open(cad.fileUrl, '_blank');
   };
 
+  // เปิดไฟล์เอกสาร: PDF → preview modal, อื่นๆ → เปิด tab ใหม่
+  const handleOpenDocFile = (file: RFAFile, doc: RFADocument) => {
+    if (file.fileName.toLowerCase().endsWith('.pdf')) {
+      handlePreviewPdf(file, doc);
+    } else if (file.fileUrl) {
+      window.open(file.fileUrl, '_blank');
+    }
+  };
+
   return (
     <>
       <div className="bg-white rounded-lg shadow flex flex-col h-full">
@@ -407,12 +426,24 @@ export default function ApprovedDocumentLibrary() {
               {sortedDocuments.map(doc => {
                 const isSuspended = doc.supersededStatus === 'SUSPENDED';
                 const isRevisionInProgress = doc.supersededStatus === 'ACTIVE' || isSuspended;
-                const cadFiles: any[] = (doc as any).cadFiles || [];
-                const lastStep = doc.workflow && doc.workflow.length > 0 ? doc.workflow[doc.workflow.length - 1] : null;
-                const currentActiveFiles = lastStep?.files && lastStep.files.length > 0 ? lastStep.files : (doc.files || []);
-                const pdfFiles = currentActiveFiles.filter(
-                  f => f.contentType === 'application/pdf' || f.fileName.toLowerCase().endsWith('.pdf')
-                );
+                // เอกสาร: ดูจาก step อนุมัติล่าสุด (ไม่ใช่ step สุดท้ายที่อาจเป็น REVISION_REQUESTED)
+                const lastApprovalStep = doc.workflow && doc.workflow.length > 0
+                  ? [...doc.workflow].reverse().find(w => APPROVAL_STATUSES.includes(w.status))
+                  : null;
+                const approvalFiles: RFAFile[] = (lastApprovalStep?.files && lastApprovalStep.files.length > 0
+                  ? lastApprovalStep.files
+                  : (doc.files || [])) as RFAFile[];
+                const docFiles = approvalFiles.filter(f => !isCadExtension(f.fileName));
+
+                // CAD: ค้นหาย้อนหลังผ่านทุก step เพื่อหา step ล่าสุดที่มีไฟล์ CAD (เช่น BIM submission)
+                const lastCadStep = doc.workflow && doc.workflow.length > 0
+                  ? [...doc.workflow].reverse().find(w =>
+                      w.files && w.files.some((f: any) => isCadExtension(f.fileName))
+                    )
+                  : null;
+                const cadFiles: RFAFile[] = lastCadStep?.files
+                  ? (lastCadStep.files as RFAFile[]).filter(f => isCadExtension(f.fileName))
+                  : [];
 
                 let revisionComment = (doc as any).supersededComment || '';
                 if (!revisionComment && doc.workflow) {
@@ -466,29 +497,35 @@ export default function ApprovedDocumentLibrary() {
                       </div>
                     ) : (
                       <div className="flex gap-2">
-                        {/* PDF Button (mobile) */}
+                        {/* เอกสาร Button (mobile) */}
                         <button
                           onClick={() => {
-                            if (pdfFiles.length === 1) {
-                              handlePreviewPdf(pdfFiles[0], doc);
-                            } else if (pdfFiles.length > 1) {
-                              toggleExpanded(`pdf-${doc.id}`);
+                            if (docFiles.length === 1) {
+                              handleOpenDocFile(docFiles[0], doc);
+                            } else if (docFiles.length > 1) {
+                              toggleExpanded(`doc-${doc.id}`);
                             }
                           }}
-                          disabled={pdfFiles.length === 0}
+                          disabled={docFiles.length === 0}
                           className={`flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded text-xs font-semibold border transition-colors ${
-                            pdfFiles.length === 0
+                            docFiles.length === 0
                               ? 'text-gray-300 border-gray-200 cursor-not-allowed'
                               : 'text-red-600 border-red-200 bg-red-50 hover:bg-red-100'
                           }`}
                         >
                           <FileText className="w-3.5 h-3.5" />
-                          PDF ({pdfFiles.length})
+                          เอกสาร ({docFiles.length})
                         </button>
 
                         {/* CAD Button (mobile) */}
                         <button
-                          onClick={() => cadFiles.length > 0 && toggleExpanded(`cad-${doc.id}`)}
+                          onClick={() => {
+                            if (cadFiles.length === 1) {
+                              handleDownloadCad(cadFiles[0], doc);
+                            } else if (cadFiles.length > 1) {
+                              toggleExpanded(`cad-${doc.id}`);
+                            }
+                          }}
                           disabled={cadFiles.length === 0}
                           className={`flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded text-xs font-semibold border transition-colors ${
                             cadFiles.length === 0
@@ -502,26 +539,26 @@ export default function ApprovedDocumentLibrary() {
                       </div>
                     )}
 
-                    {/* PDF dropdown (mobile) */}
-                    {!isSuspended && expandedIds.has(`pdf-${doc.id}`) && pdfFiles.length > 1 && (
+                    {/* เอกสาร dropdown (mobile) */}
+                    {!isSuspended && expandedIds.has(`doc-${doc.id}`) && docFiles.length > 1 && (
                       <div className="space-y-1 pl-1 border-l-2 border-red-100">
-                        {pdfFiles.map((pdf, i) => (
+                        {docFiles.map((file, i) => (
                           <button
                             key={i}
-                            onClick={() => handlePreviewPdf(pdf, doc)}
+                            onClick={() => handleOpenDocFile(file, doc)}
                             className="flex items-center gap-1.5 text-xs text-red-600 hover:underline py-0.5 w-full text-left"
                           >
                             <Eye className="w-3 h-3 flex-shrink-0" />
-                            <span className="truncate">{pdf.fileName}</span>
+                            <span className="truncate">{file.fileName}</span>
                           </button>
                         ))}
                       </div>
                     )}
 
                     {/* CAD dropdown (mobile) */}
-                    {!isSuspended && expandedIds.has(`cad-${doc.id}`) && cadFiles.length > 0 && (
+                    {!isSuspended && expandedIds.has(`cad-${doc.id}`) && cadFiles.length > 1 && (
                       <div className="space-y-1 pl-1 border-l-2 border-blue-100">
-                        {cadFiles.map((cad: any, i: number) => (
+                        {cadFiles.map((cad, i) => (
                           <button
                             key={i}
                             onClick={() => handleDownloadCad(cad, doc)}
@@ -596,15 +633,24 @@ export default function ApprovedDocumentLibrary() {
                   {sortedDocuments.map(doc => {
                     const isSuspended = doc.supersededStatus === 'SUSPENDED';
                     const isRevisionInProgress = doc.supersededStatus === 'ACTIVE' || isSuspended;
-                    const cadFiles: any[] = (doc as any).cadFiles || [];
-                    
-                    // Use the latest workflow step files to avoid showing accumulated historical files 
-                    const lastStep = doc.workflow && doc.workflow.length > 0 ? doc.workflow[doc.workflow.length - 1] : null;
-                    const currentActiveFiles = lastStep?.files && lastStep.files.length > 0 ? lastStep.files : (doc.files || []);
-                    
-                    const pdfFiles = currentActiveFiles.filter(
-                      f => f.contentType === 'application/pdf' || f.fileName.toLowerCase().endsWith('.pdf')
-                    );
+                    // เอกสาร: ดูจาก step อนุมัติล่าสุด (ไม่ใช่ step สุดท้ายที่อาจเป็น REVISION_REQUESTED)
+                    const lastApprovalStep = doc.workflow && doc.workflow.length > 0
+                      ? [...doc.workflow].reverse().find(w => APPROVAL_STATUSES.includes(w.status))
+                      : null;
+                    const approvalFiles: RFAFile[] = (lastApprovalStep?.files && lastApprovalStep.files.length > 0
+                      ? lastApprovalStep.files
+                      : (doc.files || [])) as RFAFile[];
+                    const docFiles = approvalFiles.filter(f => !isCadExtension(f.fileName));
+
+                    // CAD: ค้นหาย้อนหลังผ่านทุก step เพื่อหา step ล่าสุดที่มีไฟล์ CAD (เช่น BIM submission)
+                    const lastCadStep = doc.workflow && doc.workflow.length > 0
+                      ? [...doc.workflow].reverse().find(w =>
+                          w.files && w.files.some((f: any) => isCadExtension(f.fileName))
+                        )
+                      : null;
+                    const cadFiles: RFAFile[] = lastCadStep?.files
+                      ? (lastCadStep.files as RFAFile[]).filter(f => isCadExtension(f.fileName))
+                      : [];
 
                     let revisionComment = (doc as any).supersededComment || '';
                     if (!revisionComment && doc.workflow) {
@@ -701,29 +747,35 @@ export default function ApprovedDocumentLibrary() {
                             </div>
                           ) : (
                             <div className="flex items-center gap-2">
-                              {/* PDF Button */}
+                              {/* เอกสาร Button */}
                               <button
                                 onClick={() => {
-                                  if (pdfFiles.length === 1) {
-                                    handlePreviewPdf(pdfFiles[0], doc);
-                                  } else if (pdfFiles.length > 1) {
-                                    toggleExpanded(`pdf-${doc.id}`);
+                                  if (docFiles.length === 1) {
+                                    handleOpenDocFile(docFiles[0], doc);
+                                  } else if (docFiles.length > 1) {
+                                    toggleExpanded(`doc-${doc.id}`);
                                   }
                                 }}
-                                disabled={pdfFiles.length === 0}
+                                disabled={docFiles.length === 0}
                                 className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold border transition-colors ${
-                                  pdfFiles.length === 0
+                                  docFiles.length === 0
                                     ? 'text-gray-300 border-gray-200 cursor-not-allowed'
                                     : 'text-red-600 border-red-200 bg-red-50 hover:bg-red-100'
                                 }`}
                               >
                                 <FileText className="w-3.5 h-3.5" />
-                                PDF ({pdfFiles.length})
+                                เอกสาร ({docFiles.length})
                               </button>
 
                               {/* CAD Button */}
                               <button
-                                onClick={() => cadFiles.length > 0 && toggleExpanded(`cad-${doc.id}`)}
+                                onClick={() => {
+                                  if (cadFiles.length === 1) {
+                                    handleDownloadCad(cadFiles[0], doc);
+                                  } else if (cadFiles.length > 1) {
+                                    toggleExpanded(`cad-${doc.id}`);
+                                  }
+                                }}
                                 disabled={cadFiles.length === 0}
                                 className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold border transition-colors ${
                                   cadFiles.length === 0
@@ -737,26 +789,26 @@ export default function ApprovedDocumentLibrary() {
                             </div>
                           )}
 
-                          {/* PDF dropdown (ถ้า > 1 ไฟล์) */}
-                          {!isSuspended && expandedIds.has(`pdf-${doc.id}`) && pdfFiles.length > 1 && (
+                          {/* เอกสาร dropdown (ถ้า > 1 ไฟล์) */}
+                          {!isSuspended && expandedIds.has(`doc-${doc.id}`) && docFiles.length > 1 && (
                             <div className="mt-2 space-y-1 pl-1 border-l-2 border-red-100">
-                              {pdfFiles.map((pdf, i) => (
+                              {docFiles.map((file, i) => (
                                 <button
                                   key={i}
-                                  onClick={() => handlePreviewPdf(pdf, doc)}
+                                  onClick={() => handleOpenDocFile(file, doc)}
                                   className="flex items-center gap-1.5 text-xs text-red-600 hover:text-red-800 hover:underline py-0.5 w-full text-left"
                                 >
                                   <Eye className="w-3 h-3 flex-shrink-0" />
-                                  <span className="truncate max-w-[200px]">{pdf.fileName}</span>
+                                  <span className="truncate max-w-[200px]">{file.fileName}</span>
                                 </button>
                               ))}
                             </div>
                           )}
 
                           {/* CAD dropdown */}
-                          {!isSuspended && expandedIds.has(`cad-${doc.id}`) && cadFiles.length > 0 && (
+                          {!isSuspended && expandedIds.has(`cad-${doc.id}`) && cadFiles.length > 1 && (
                             <div className="mt-2 space-y-1 pl-1 border-l-2 border-blue-100">
-                              {cadFiles.map((cad: any, i: number) => (
+                              {cadFiles.map((cad, i) => (
                                 <button
                                   key={i}
                                   onClick={() => handleDownloadCad(cad, doc)}

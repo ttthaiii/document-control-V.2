@@ -331,7 +331,8 @@ export default function CreateRFAForm({
         showNotification(
           'success',
           'สร้างเอกสารสำเร็จ',
-          `เอกสาร: ${formData.documentNumber ? `${formData.documentNumber} - ` : ''}${formData.title}`
+          `เอกสาร: ${formData.documentNumber ? `${formData.documentNumber} - ` : ''}${formData.title}`,
+          true  // auto-close after 5s
         );
         if (onClose) onClose();
       } else {
@@ -525,14 +526,11 @@ export default function CreateRFAForm({
         {onClose && <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X /></button>}
       </div>
 
-      {/* Bug 3 Fix: Loading overlay during form submission */}
+      {/* Unified Loading Overlay — Spinner ลอยๆ (เหมือนกันทั้งระบบ) */}
       {isSubmitting && (
-        <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] z-[100] flex items-center justify-center rounded-lg">
-          <div className="flex flex-col items-center bg-white p-6 rounded-xl shadow-lg border border-gray-100">
-            <Spinner className="w-10 h-10 text-blue-600 mb-4" />
-            <p className="text-gray-800 font-semibold text-lg">กำลังสร้างเอกสาร...</p>
-            <p className="text-gray-500 text-sm mt-1">กรุณารอสักครู่ ระบบกำลังบันทึกข้อมูล</p>
-          </div>
+        <div className="absolute inset-0 bg-white/70 backdrop-blur-[2px] z-[100] flex flex-col items-center justify-center rounded-lg gap-3">
+          <Spinner className="w-10 h-10 text-blue-600" />
+          <p className="text-sm font-medium text-gray-600">กำลังดำเนินการ...</p>
         </div>
       )}
 

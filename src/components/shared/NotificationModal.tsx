@@ -12,6 +12,7 @@ interface NotificationModalProps {
   title: string;
   message: string | null;
   onClose: () => void;
+  autoClose?: boolean;
 }
 
 const ICONS = {
@@ -38,7 +39,7 @@ const BUTTON_TEXT = {
   warning: 'รับทราบ',
 };
 
-const NotificationModal: React.FC<NotificationModalProps> = ({ isOpen, type, title, message, onClose }) => {
+const NotificationModal: React.FC<NotificationModalProps> = ({ isOpen, type, title, message, onClose, autoClose = false }) => {
   if (!isOpen) return null;
 
   return (
@@ -56,12 +57,14 @@ const NotificationModal: React.FC<NotificationModalProps> = ({ isOpen, type, tit
           {message && (
             <p className="text-text-secondary text-sm mb-5 whitespace-pre-wrap text-center">{message}</p>
           )}
-          <button
-            onClick={onClose}
-            className={`w-full px-4 py-2.5 text-white font-semibold rounded-lg transition-colors text-sm focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-brand ${BUTTON_STYLES[type]}`}
-          >
-            {BUTTON_TEXT[type]}
-          </button>
+          {!autoClose && (
+            <button
+              onClick={onClose}
+              className={`w-full px-4 py-2.5 text-white font-semibold rounded-lg transition-colors text-sm focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-brand ${BUTTON_STYLES[type]}`}
+            >
+              {BUTTON_TEXT[type]}
+            </button>
+          )}
         </div>
       </div>
     </div>
