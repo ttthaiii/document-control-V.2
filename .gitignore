@@ -40,6 +40,8 @@ next-env.d.ts
 .env.production
 .env.development
 .env
+.env.ttsdocumentcontrol
+.env.*
 
 # Firebase service accounts
 **/service-account-key.json
