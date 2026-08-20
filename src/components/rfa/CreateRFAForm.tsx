@@ -7,6 +7,7 @@ import { FileText, Upload, X, Check, AlertTriangle, Info, Paperclip, Loader2, Ha
 import { useBimTracking } from '@/lib/hooks/useBimTracking'
 import { useAuth } from '@/lib/auth/useAuth'
 import Spinner from '@/components/shared/Spinner'
+import LoadingOverlay from '@/components/shared/LoadingOverlay'
 import { ROLES, Role } from '@/lib/config/workflow';
 import { useNotification } from '@/lib/context/NotificationContext';
 
@@ -175,6 +176,23 @@ export default function CreateRFAForm({
     const checkDuplicate = async () => {
       setIsCheckingDocNum(true);
       setIsDocNumAvailable(null);
+
+      const revPattern = /[_\-]r[ev]*\.?\s*\d*$/i;
+      if (revPattern.test(debouncedDocNum.trim())) {
+        setIsCheckingDocNum(false);
+        setIsDocNumAvailable(false);
+        setErrors(prev => ({ ...prev, documentNumber: 'ไม่อนุญาตให้ระบุ Revision ในช่องนี้ หากต้องการอัปเดตเอกสาร กรุณาไปที่เอกสารเดิมแล้วกด "สร้าง Revision"' }));
+        return;
+      } else {
+        setErrors(prev => {
+          const newErr = { ...prev };
+          if (newErr.documentNumber === 'ไม่อนุญาตให้ระบุ Revision ในช่องนี้ หากต้องการอัปเดตเอกสาร กรุณาไปที่เอกสารเดิมแล้วกด "สร้าง Revision"') {
+              delete newErr.documentNumber;
+          }
+          return newErr;
+        });
+      }
+
       try {
         const response = await fetch('/api/rfa/check-duplicate', {
           method: 'POST',
@@ -256,7 +274,11 @@ export default function CreateRFAForm({
     if (!formData.title.trim()) newErrors.title = 'กรุณาใส่หัวข้อเอกสาร';
     if (!formData.revisionNumber.trim()) newErrors.revisionNumber = 'กรุณาใส่ Rev. No.';
     if (!selectedSite) newErrors.site = 'กรุณาเลือกโครงการ';
-    if (formData.documentNumber.trim() && isDocNumAvailable === false) {
+
+    const revPattern = /[_\-]r[ev]*\.?\s*\d*$/i;
+    if (formData.documentNumber.trim() && revPattern.test(formData.documentNumber.trim())) {
+      newErrors.documentNumber = 'ไม่อนุญาตให้ระบุ Revision ในช่องนี้ หากต้องการอัปเดตเอกสาร กรุณาไปที่เอกสารเดิมแล้วกด "สร้าง Revision"';
+    } else if (formData.documentNumber.trim() && isDocNumAvailable === false) {
       newErrors.documentNumber = 'เลขที่เอกสารนี้ถูกใช้ไปแล้ว';
     }
     if (isManualFlow) {
@@ -527,12 +549,7 @@ export default function CreateRFAForm({
       </div>
 
       {/* Unified Loading Overlay — Spinner ลอยๆ (เหมือนกันทั้งระบบ) */}
-      {isSubmitting && (
-        <div className="absolute inset-0 bg-white/70 backdrop-blur-[2px] z-[100] flex flex-col items-center justify-center rounded-lg gap-3">
-          <Spinner className="w-10 h-10 text-blue-600" />
-          <p className="text-sm font-medium text-gray-600">กำลังดำเนินการ...</p>
-        </div>
-      )}
+      {isSubmitting && <LoadingOverlay />}
 
       <div className="flex-1 p-4 sm:p-6 overflow-y-auto bg-slate-50 space-y-6">
 

@@ -125,3 +125,23 @@ export const STATUS_COLORS: { [key: string]: string } = {
   [WR_STATUSES.REVISION_REQUESTED]: '#F97316',
   [WR_STATUSES.COMPLETED]: '#22C55E',
 };
+
+/**
+ * The RFA-SHOP categories BIM Tracking may offer. These name the DISCIPLINES, which is
+ * why the RFI module derives its own discipline list from this array rather than
+ * declaring a second one (see rfi-workflow.ts deriveRfiDisciplines).
+ *
+ * Moved here from api/bim-tracking/categories/route.ts so RFA and RFI read one array.
+ * A third copy is still inline in components/rfa/CreateRFAForm.tsx:480 — switching it
+ * over is roadmap task T-001 (site 7); it is untouched because it is live RFA UI.
+ */
+export const RFA_SHOP_CATEGORIES: string[] = [
+  'Structural Drawings',
+  'Architectural Drawings',
+  'Landscape Drawings',
+  'Structural Asbuilt',
+  'Architectural Asbuilt',
+  'Landscape Asbuilt',
+  'Interior Drawings',
+  'Interior Drawings Asbuilt',
+];

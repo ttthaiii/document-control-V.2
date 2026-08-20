@@ -3,7 +3,7 @@ import { onDocumentWritten } from "firebase-functions/v2/firestore";
 
 import { logger } from "firebase-functions";
 import { defineString, defineSecret } from 'firebase-functions/params';
-import { getBimTrackingDb, getAdminDb } from "./lib/firebase/admin";
+import { getBimTrackingDb, getAdminDb, getAdminMessaging } from "./lib/firebase/admin";
 import fetch from "node-fetch";
 import * as admin from "firebase-admin";
 import { FieldValue } from 'firebase-admin/firestore';
@@ -72,6 +72,12 @@ export const onRfaUpdate = onDocumentWritten(
       await sendRfaLineNotification(event);
     } catch (error) {
       logger.error(`[RFA LINE/${docId}] Error sending notification:`, error);
+    }
+
+    try {
+      await sendFcmToSiteUsers(event);
+    } catch (error) {
+      logger.error(`[RFA FCM/${docId}] Error sending FCM notification:`, error);
     }
 
     return null;
@@ -216,6 +222,155 @@ async function sendRfaLineNotification(event: any) {
     }
   } catch (error) {
     logger.error(`[RFA LINE/${docId}] Error fetching Line API:`, error);
+  }
+}
+
+// --- sendFcmToSiteUsers: ส่ง FCM push notification ไปยัง SE และ FM ของ site ---
+async function sendFcmToSiteUsers(event: any) {
+  const docId = event.params.docId;
+  if (!event.data?.after.exists) return; // ถูกลบ
+
+  const newData = event.data.after.data();
+  const beforeData = event.data.before.data();
+
+  if (newData?.isMigration === true) return; // ข้าม migration
+
+  const siteId = newData?.siteId;
+  if (!siteId) {
+    logger.warn(`[RFA FCM/${docId}] siteId missing, skipping FCM.`);
+    return;
+  }
+
+  // --- ตรวจสอบ trigger conditions ---
+  const APPROVAL_STATUSES = ['APPROVED', 'APPROVED_WITH_COMMENTS', 'APPROVED_REVISION_REQUIRED'];
+  const SUPERSEDED_STATUSES = ['SUSPENDED', 'ACTIVE'];
+
+  const isApproval =
+    APPROVAL_STATUSES.includes(newData?.status) &&
+    newData?.isLatest === true &&
+    beforeData?.status !== newData?.status;
+
+  const isSupersede =
+    SUPERSEDED_STATUSES.includes(newData?.supersededStatus) &&
+    beforeData?.supersededStatus !== newData?.supersededStatus;
+
+  if (!isApproval && !isSupersede) {
+    logger.log(`[RFA FCM/${docId}] No FCM trigger condition matched. Skipping.`);
+    return;
+  }
+
+  // --- ดึงข้อมูล site ---
+  const adminDb = getAdminDb();
+  const siteDoc = await adminDb.collection('sites').doc(siteId).get();
+  const siteName = siteDoc.data()?.name || 'ไม่ระบุโครงการ';
+
+  // --- เตรียม message ---
+  let title = '';
+  let body = '';
+  const docNumber = newData?.documentNumber || 'N/A';
+  const docTitle = newData?.title || 'ไม่มีหัวข้อ';
+  const revNo = String(newData?.revisionNumber || 0).padStart(2, '0');
+  const appUrl = process.env.TTSDOC_APP_URL || '';
+
+  if (isApproval) {
+    const statusLabel = RFA_STATUS_LABELS[newData.status] || newData.status;
+    title = '✅ เอกสารได้รับการอนุมัติ';
+    body = `โครงการ: ${siteName}\nเลขที่: ${docNumber}\nหัวข้อ: ${docTitle}\nRev: ${revNo}\nสถานะ: ${statusLabel}\n🔗 ดูเอกสาร: ${appUrl}/rfa/${docId}`;
+  } else {
+    // isSupersede
+    const supersededLabel = newData.supersededStatus === 'SUSPENDED'
+      ? 'ถูกระงับการใช้งาน'
+      : 'กำลัง revision ฉบับใหม่';
+    const comment = newData?.supersededComment ? `\nหมายเหตุ: ${newData.supersededComment}` : '';
+    title = '⚠️ เอกสารมีการเปลี่ยนแปลง';
+    body = `โครงการ: ${siteName}\nเลขที่: ${docNumber}\nหัวข้อ: ${docTitle}\nRev: ${revNo}\nสถานะ: ${supersededLabel}${comment}\n🔗 ดูเอกสาร: ${appUrl}/rfa/${docId}`;
+  }
+
+  // --- Query users ที่อยู่ใน site นี้ (หริอทุกคนที่มีส่วนเกี่ยวข้อง) ---
+  const usersSnap = await adminDb.collection('users')
+    .where('sites', 'array-contains', siteId)
+    .get();
+
+  if (usersSnap.empty) {
+    logger.log(`[RFA FCM/${docId}] No users found for site ${siteId}.`);
+    return;
+  }
+
+  // --- รวบรวม tokens และ map กลับ uid ---
+  // tokenMap: token -> uid (เพื่อใช้ลบ invalid token ภายหลัง)
+  const tokenMap: Map<string, string> = new Map();
+  usersSnap.docs.forEach(userDoc => {
+    const tokens: string[] = userDoc.data().fcmTokens || [];
+    tokens.forEach(token => {
+      if (token) tokenMap.set(token, userDoc.id);
+    });
+  });
+
+  const allTokens = Array.from(tokenMap.keys());
+  if (allTokens.length === 0) {
+    logger.log(`[RFA FCM/${docId}] No FCM tokens found for SE/FM users in site ${siteId}.`);
+    return;
+  }
+
+  logger.log(`[RFA FCM/${docId}] Sending to ${allTokens.length} token(s) across ${usersSnap.size} user(s).`);
+
+  const messaging = getAdminMessaging();
+
+  // --- ส่งแบบ batch ละไม่เกิน 500 tokens ---
+  const BATCH_SIZE = 500;
+  const invalidTokensByUid: Map<string, string[]> = new Map();
+
+  for (let i = 0; i < allTokens.length; i += BATCH_SIZE) {
+    const batchTokens = allTokens.slice(i, i + BATCH_SIZE);
+
+    const batchResponse = await messaging.sendEachForMulticast({
+      tokens: batchTokens,
+      data: {
+        title,
+        body,
+        url: `/rfa/${docId}`,
+      },
+    });
+
+    batchResponse.responses.forEach((resp, idx) => {
+      if (!resp.success) {
+        const errorCode = resp.error?.code || '';
+        const failedToken = batchTokens[idx];
+        const isInvalid =
+          errorCode === 'messaging/registration-token-not-registered' ||
+          errorCode === 'messaging/invalid-registration-token';
+
+        if (isInvalid) {
+          const uid = tokenMap.get(failedToken);
+          if (uid) {
+            if (!invalidTokensByUid.has(uid)) invalidTokensByUid.set(uid, []);
+            invalidTokensByUid.get(uid)!.push(failedToken);
+          }
+        } else {
+          logger.warn(`[RFA FCM/${docId}] Send failed for token: ${errorCode}`);
+        }
+      }
+    });
+
+    logger.log(
+      `[RFA FCM/${docId}] Batch ${Math.floor(i / BATCH_SIZE) + 1}: ` +
+      `${batchResponse.successCount} sent, ${batchResponse.failureCount} failed.`
+    );
+  }
+
+  // --- ลบ invalid tokens ออกจาก Firestore ---
+  if (invalidTokensByUid.size > 0) {
+    const cleanupPromises: Promise<any>[] = [];
+    invalidTokensByUid.forEach((tokens, uid) => {
+      logger.log(`[RFA FCM/${docId}] Removing ${tokens.length} invalid token(s) for user ${uid}`);
+      cleanupPromises.push(
+        adminDb.collection('users').doc(uid).update({
+          fcmTokens: FieldValue.arrayRemove(...tokens)
+        })
+      );
+    });
+    await Promise.all(cleanupPromises);
+    logger.log(`[RFA FCM/${docId}] Cleaned up invalid tokens for ${invalidTokensByUid.size} user(s).`);
   }
 }
 

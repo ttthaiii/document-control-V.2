@@ -7,6 +7,7 @@ import { STATUSES, APPROVER_ROLES, ROLES } from '@/lib/config/workflow';
 import { getFileUrl } from '@/lib/utils/storage';
 import { Role } from '@/lib/config/workflow';
 import { logActivity } from '@/lib/utils/activityLogger';
+import { PERMISSION_KEYS } from '@/lib/config/permissions';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,8 +64,7 @@ export async function POST(req: Request) {
     const userRole = userData.role as Role;
 
     // --- Permission Check ---
-    // เฉพาะ Site (Approver roles) และ Admin เท่านั้นที่ขอแก้ไขเอกสารที่อนุมัติแล้วได้
-    // BIM ไม่มีสิทธิ์ ไม่ว่าเอกสารนั้นจะสร้างโดย BIM หรือไม่
+    // เฉพาะ Site (Approver roles), Admin และผู้ที่ได้รับ Override พิเศษเท่านั้นที่ขอแก้ไขได้
     const isBimDocument =
       rfaData.workflow?.[0]?.role === ROLES.BIM ||
       rfaData.createdByInfo?.role === ROLES.BIM;
@@ -72,13 +72,18 @@ export async function POST(req: Request) {
     const isAdmin = userRole === ROLES.ADMIN;
     const isApprover = (APPROVER_ROLES as readonly string[]).includes(userRole);
 
-    const hasPermission =
-      isAdmin ||
-      isApprover;
+    // ตรวจสอบ Override พิเศษรายบุคคล
+    const siteDoc = await adminDb.collection('sites').doc(rfaData.siteId).get();
+    const siteData = siteDoc.data();
+    const userOverrides = siteData?.userOverrides?.[uid] || {};
+    const overrideKey = PERMISSION_KEYS.RFA.CAN_REQUEST_SUPERSEDE;
+    const hasOverride = userOverrides?.['RFA']?.[overrideKey] === true;
+
+    const hasPermission = isAdmin || isApprover || hasOverride;
 
     if (!hasPermission) {
       return NextResponse.json(
-        { error: 'เฉพาะทีม Site เท่านั้นที่มีสิทธิ์ขอแก้ไขเอกสารที่อนุมัติแล้ว' },
+        { error: 'เฉพาะทีม Site หรือผู้ที่ได้รับสิทธิ์พิเศษเท่านั้นที่มีสิทธิ์ขอแก้ไขเอกสารที่อนุมัติแล้ว' },
         { status: 403 }
       );
     }
@@ -143,13 +148,13 @@ export async function POST(req: Request) {
       })
     });
 
-    const supersedeSiteDoc = await adminDb.collection('sites').doc(rfaData.siteId).get();
+    const supersedeSiteName = siteData?.name || '';
     logActivity({
       userId: uid,
       userEmail: userData.email || '',
       userRole,
       siteId: rfaData.siteId,
-      siteName: supersedeSiteDoc.data()?.name || '',
+      siteName: supersedeSiteName,
       action: 'REQUEST_REVISION',
       resourceType: 'RFA',
       resourceId: docId,

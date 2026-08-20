@@ -3,6 +3,7 @@ import './globals.css'
 import { AuthProvider } from '@/lib/auth/useAuth'
 import { LoadingProvider } from '@/lib/context/LoadingContext'
 import { NotificationProvider } from '@/lib/context/NotificationContext'
+import CampaignPopup from '@/components/shared/CampaignPopup'
 
 if (typeof Promise.withResolvers === 'undefined' && typeof window !== 'undefined') {
   // @ts-expect-error Polyfill logic
@@ -54,6 +55,7 @@ export default function RootLayout({
           <AuthProvider>
             <LoadingProvider>
               {children}
+              <CampaignPopup />
             </LoadingProvider>
           </AuthProvider>
         </NotificationProvider>

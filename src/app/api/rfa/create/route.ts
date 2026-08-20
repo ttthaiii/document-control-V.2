@@ -90,15 +90,25 @@ export async function POST(req: Request) {
     }
 
     if (documentNumber) {
+      const trimmedDocNum = documentNumber.trim();
+      const revPattern = /[_\-]r[ev]*\.?\s*\d*$/i;
+      
+      if (revPattern.test(trimmedDocNum)) {
+        return NextResponse.json(
+          { success: false, error: `ไม่อนุญาตให้สร้าง Revision ใหม่ ("${trimmedDocNum}") จากหน้านี้ กรุณาเข้าไปที่เอกสารต้นฉบับแล้วกดปุ่ม "สร้าง Revision"` },
+          { status: 400 } 
+        );
+      }
+
       const existingDocQuery = adminDb.collection('rfaDocuments')
         .where('siteId', '==', siteId)
-        .where('documentNumber', '==', documentNumber.trim());
+        .where('documentNumber', '==', trimmedDocNum);
 
       const existingDocSnapshot = await existingDocQuery.get();
 
       if (!existingDocSnapshot.empty) {
         return NextResponse.json(
-          { success: false, error: `เลขที่เอกสาร "${documentNumber.trim()}" นี้ถูกใช้ไปแล้วในโครงการนี้` },
+          { success: false, error: `เลขที่เอกสาร "${trimmedDocNum}" นี้ถูกใช้ไปแล้วในโครงการนี้` },
           { status: 409 } // 409 Conflict เป็น HTTP Status ที่เหมาะสม
         );
       }

@@ -62,28 +62,12 @@ export default function SmartRFAModal({ documentId, onClose }: SmartRFAModalProp
     fetchDocument()
   }, [documentId, onClose])
 
-  // Effect สำหรับจัดการ URL และปุ่ม Back ของเบราว์เซอร์
-  useEffect(() => {
-    const currentQuery = searchParams.toString();
-    const newUrl = `/dashboard/rfa?${currentQuery.replace(/&?docId=[^&]*/, '')}&docId=${documentId}`;
 
-    const handlePopState = (event: PopStateEvent) => {
-      onClose()
-    }
-
-    if (documentId) {
-      // เปลี่ยน URL โดยไม่โหลดหน้าใหม่
-      window.history.pushState({ docId: documentId }, '', newUrl);
-      window.addEventListener('popstate', handlePopState)
-    }
-
-    return () => {
-      window.removeEventListener('popstate', handlePopState)
-    }
-  }, [documentId, onClose, searchParams])
 
   // ถ้าไม่มี documentId ก็ไม่ต้องแสดงอะไรเลย
   if (!documentId) return null
+
+
 
   return (
     <RFADetailModal

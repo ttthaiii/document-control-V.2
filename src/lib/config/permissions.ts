@@ -1,19 +1,29 @@
 // src/lib/config/permissions.ts
 
 import { ROLES, Role } from '@/lib/config/workflow';
+import { RFI_CREATOR_ROLES } from '@/lib/config/rfi-workflow';
 
 export const PERMISSION_KEYS = {
   RFA: {
     VIEW_SHOP: 'view_shop',
     CREATE_SHOP: 'create_shop',
-    
+
     VIEW_GEN: 'view_gen',
     CREATE_GEN: 'create_gen',
-    
+
     VIEW_MAT: 'view_mat',
     CREATE_MAT: 'create_mat',
-    
+
     APPROVE: 'can_approve',
+
+    // --- สิทธิ์พิเศษแบบ Override รายบุคคล ---
+    CAN_SEND_TO_CM: 'can_send_to_cm',           // ให้ส่งเอกสาร (PENDING_REVIEW → CM) ได้
+    CAN_REQUEST_REVISION: 'can_request_revision', // ให้ขอแก้ไขจาก PENDING_REVIEW ได้
+    CAN_REQUEST_SUPERSEDE: 'can_request_supersede', // ให้ขอแก้ไขเอกสารที่อนุมัติแล้วได้
+  },
+  RFI: {
+    VIEW: 'view_rfi',
+    CREATE: 'create_rfi',
   },
   WORK_REQUEST: {
     VIEW: 'view_wr',
@@ -66,9 +76,21 @@ export const PERMISSION_DEFAULTS: Record<string, Role[]> = {
   // --- RFA: Approval ---
   // Approve: CM, Site Admin, PM, PE, OE, Admin
   [`RFA.${PERMISSION_KEYS.RFA.APPROVE}`]: [
-    ROLES.CM, ROLES.ADMIN, 
+    ROLES.CM, ROLES.ADMIN,
     ROLES.SITE_ADMIN, ROLES.PM, ROLES.PE, ROLES.OE
   ],
+
+  // --- RFA: Override พิเศษ (Default: ไม่มีใครได้ ต้องตั้ง Override เอง) ---
+  [`RFA.${PERMISSION_KEYS.RFA.CAN_SEND_TO_CM}`]: [],
+  [`RFA.${PERMISSION_KEYS.RFA.CAN_REQUEST_REVISION}`]: [],
+  [`RFA.${PERMISSION_KEYS.RFA.CAN_REQUEST_SUPERSEDE}`]: [],
+
+  // --- RFI ---
+  [`RFI.${PERMISSION_KEYS.RFI.VIEW}`]: SIDEBAR_VIEWERS,
+  // Create: NOT a hand-written list. RFI_CREATOR_ROLES is derived from the same arrays
+  // getOriginForRole uses, so the button and the API always agree — add a role there
+  // (rfi-workflow.ts) and it appears here too. A list typed out again would drift.
+  [`RFI.${PERMISSION_KEYS.RFI.CREATE}`]: RFI_CREATOR_ROLES,
 
   // --- Work Request ---
   [`WR.${PERMISSION_KEYS.WORK_REQUEST.VIEW}`]: SIDEBAR_VIEWERS,
@@ -103,6 +125,21 @@ export const PERMISSION_GROUPS = [
     title: 'RFA - Approval',
     permissions: [
       { key: `RFA.${PERMISSION_KEYS.RFA.APPROVE}`, label: 'อนุมัติเอกสาร (Approve)' },
+    ]
+  },
+  {
+    title: 'RFA - สิทธิ์พิเศษ (Override)',
+    permissions: [
+      { key: `RFA.${PERMISSION_KEYS.RFA.CAN_SEND_TO_CM}`, label: 'ส่งเอกสารให้ CM ได้ (Send to CM)' },
+      { key: `RFA.${PERMISSION_KEYS.RFA.CAN_REQUEST_REVISION}`, label: 'ขอแก้ไขเอกสาร (Request Revision)' },
+      { key: `RFA.${PERMISSION_KEYS.RFA.CAN_REQUEST_SUPERSEDE}`, label: 'ขอแก้ไขเอกสารที่อนุมัติแล้ว (Request Supersede)' },
+    ]
+  },
+  {
+    title: 'RFI - ขอข้อมูลเพิ่มเติม',
+    permissions: [
+      { key: `RFI.${PERMISSION_KEYS.RFI.VIEW}`, label: 'เข้าดู (View)' },
+      { key: `RFI.${PERMISSION_KEYS.RFI.CREATE}`, label: 'สร้าง (Create)' },
     ]
   },
   {

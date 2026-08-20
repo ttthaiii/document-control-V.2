@@ -715,7 +715,7 @@ export default function ApprovedDocumentLibrary() {
                           {isSuspended ? (
                             <p className="flex items-start gap-1 mt-1.5 text-xs text-red-600 font-medium">
                               <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
-                              ห้ามใช้ไฟล์ฉบับนี้
+                              <span><span className="font-semibold">สาเหตุที่ระงับ: </span>{revisionComment || 'ห้ามใช้ไฟล์ฉบับนี้'}</span>
                             </p>
                           ) : isRevisionInProgress && revisionComment ? (
                             <p
@@ -723,12 +723,12 @@ export default function ApprovedDocumentLibrary() {
                               title={revisionComment}
                             >
                               <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
-                              {revisionComment}
+                              <span><span className="font-semibold">กำลังแก้ไข: </span>{revisionComment}</span>
                             </p>
                           ) : isRevisionInProgress ? (
                             <p className="flex items-start gap-1 mt-1.5 text-xs text-amber-600">
                               <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
-                              อยู่ระหว่างการสร้าง Rev. ใหม่
+                              <span><span className="font-semibold">กำลังแก้ไข: </span>อยู่ระหว่างการสร้าง Rev. ใหม่</span>
                             </p>
                           ) : null}
                         </td>

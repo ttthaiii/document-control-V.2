@@ -38,3 +38,4 @@ const getBimTrackingApp = () => {
 
 export const getAdminDb = () => getTtsdocApp().firestore();
 export const getBimTrackingDb = () => getBimTrackingApp().firestore();
+export const getAdminMessaging = () => getTtsdocApp().messaging();

@@ -64,7 +64,15 @@ service cloud.firestore {
       allow read, create, update: if isUserActive();
       allow delete: if isAdmin();
     }
-    
+
+    // RFI Documents (Request For Information)
+    // Client reads this collection directly via onSnapshot on the RFI dashboard,
+    // so it must be declared here or the catch-all deny at the bottom blocks it.
+    match /rfiDocuments/{docId} {
+      allow read, create, update: if isUserActive();
+      allow delete: if isAdmin();
+    }
+
     // 4. Others
     match /constructionInfo/{docId} {
       allow read: if isUserActive();

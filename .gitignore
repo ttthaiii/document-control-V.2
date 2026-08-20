@@ -66,3 +66,30 @@ migrate/
 
 # Logs
 *.log
+
+# Harness/agent scaffolding (not part of the app)
+/.agents/
+/.sessions/
+/AGENTS.md
+/CLAUDE.md
+/CODING_FAILURE_PATTERNS.md
+/INVARIANTS.md
+/REPO_MAP.md
+/VERSION
+/docs/
+/domain/
+/error_index.md
+/knowledge/
+
+# One-off investigation/data-fix scratch (not app code)
+/rfa-034-merge-backup.json
+/unlinked_bim_documents.csv
+/unlinked_site_documents.csv
+/scripts/_tmp-*.ts
+/scripts/backup-rfa-034-merge.ts
+/scripts/check-unlinked-bim-investigate.ts
+/scripts/check-unlinked-bim.ts
+/scripts/export-unlinked-bim.ts
+/scripts/export-unlinked-site.ts
+/scripts/inspect-rfa-034-case.ts
+/scripts/merge-rfa-034.ts

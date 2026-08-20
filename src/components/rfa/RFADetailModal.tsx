@@ -5,6 +5,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react'
 import { RFADocument, RFAPermissions, RFAWorkflowStep, RFAFile, RFASite } from '@/types/rfa'
 import { X, Paperclip, Clock, User, Check, Send, AlertTriangle, FileText, Download, History, MessageSquare, Edit3, Upload, ThumbsUp, ThumbsDown, Eye, CornerUpLeft, RefreshCw, EyeOff, Lock, CheckCircle2, XCircle, RotateCcw, Hourglass } from 'lucide-react'
 import Spinner from '@/components/shared/Spinner';
+import LoadingOverlay from '@/components/shared/LoadingOverlay';
 import { useAuth } from '@/lib/auth/useAuth'
 import { Role, STATUS_LABELS, STATUSES, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUS_COLORS, ROLES } from '@/lib/config/workflow'
 import PDFPreviewModal from './PDFPreviewModal'
@@ -286,7 +287,11 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     if (isActionActiveRef.current) return; // ข้ามการโหลดหน้าใหม่ถ้ากำลังโชว์กล่องเขียว หรือกำลังโหลด Submit อยู่
 
     const fetchFullDocument = async () => {
-      if (!initialDoc || !firebaseUser) {
+      if (!initialDoc) {
+        // ให้รอโหลดข้อมูลจาก SmartRFAModal ก่อน
+        return;
+      }
+      if (!firebaseUser) {
         setIsLoading(false);
         return;
       }
@@ -349,14 +354,16 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const canRequestSupersede =
     isApprovedStatus &&
     document?.supersededStatus !== 'SUSPENDED' &&
-    (isAdmin || isApprover);
+    (isAdmin || isApprover || !!document?.permissions?.canRequestSupersede);
 
   const canEditPDF = useMemo(() => {
     if (!document || !user) return false;
     const { status } = document;
     const permissions = document.permissions || {} as RFAPermissions;
     const userRole = user.role;
-    const isSiteReviewing = REVIEWER_ROLES.includes(userRole as Role) && status === STATUSES.PENDING_REVIEW;
+    // ใช้ permissions จาก API เพื่อรองรับ Override รายบุคคล
+    const isSiteReviewing = !!(permissions.canSendToCm || permissions.canRequestRevision) ||
+      (REVIEWER_ROLES.includes(userRole as Role) && status === STATUSES.PENDING_REVIEW);
     const isApproving = permissions.canApprove;
     const isResubmissionFlow = status === STATUSES.REVISION_REQUIRED && document.createdBy === user.id;
     const isDocRevisionFlow = (status === STATUSES.REJECTED || !!document.supersededComment) && canRevise && document.isLatest;
@@ -470,7 +477,8 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const displayLabel = latestCommentItem ? `ความคิดเห็นล่าสุด` : 'รายละเอียดเพิ่มเติม';
   const { role: userRole } = user || {};
   const { status } = document;
-  const isSiteReviewing = REVIEWER_ROLES.includes(userRole as Role) && status === STATUSES.PENDING_REVIEW;
+  // isSiteReviewing: ใช้ permissions.canSendToCm จาก API ซึ่งรวม override แล้ว
+  const isSiteReviewing = !!(permissions.canSendToCm || permissions.canRequestRevision);
   const isApproving = permissions.canApprove;
 
   // 6. File Handling Functions
@@ -917,38 +925,28 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   // ── Reusable Loading/Success Overlay function ──
   const renderLoadingOrSuccessOverlay = (loading: boolean, successMessage: string | null | false) => {
     if (!loading && !successMessage) return null;
+    if (loading) return <LoadingOverlay subText="กรุณารอสักครู่" />;
+
     return (
       <div
-        className={`absolute inset-0 z-[100] flex items-center justify-center rounded-lg transition-colors duration-300 ${successMessage ? 'bg-white/80 backdrop-blur-sm' : 'bg-white/70 backdrop-blur-sm'
-          }`}
+        className="absolute inset-0 z-[100] flex items-center justify-center rounded-lg transition-colors duration-300 bg-white/80 backdrop-blur-sm"
       >
-        {successMessage ? (
-          <div
-            className="flex flex-col items-center p-8 bg-green-600 rounded-2xl shadow-2xl text-white text-center"
-            style={{ animation: 'overlayFadeInUp 0.2s ease-out forwards' }}
-          >
-            <div className="w-20 h-20 rounded-full bg-white/20 flex items-center justify-center mb-5 ring-4 ring-white/30">
-              <Check className="w-11 h-11 text-white" strokeWidth={2.5} />
-            </div>
-            <p className="font-bold text-xl md:text-2xl tracking-tight max-w-sm" dangerouslySetInnerHTML={{ __html: String(successMessage).replace(/ \(/g, '<br/><span class="text-green-200 text-lg font-normal">(').replace(/\)/g, ')</span>') }}></p>
-            <p className="text-green-100 text-sm mt-3 font-medium">กำลังปิดหน้าต่าง...</p>
-            <div className="mt-6 w-40 h-1 rounded-full bg-white/20 overflow-hidden">
-              <div
-                className="h-full bg-white rounded-full"
-                style={{ animation: 'shrinkProgress 1.4s linear forwards' }}
-              />
-            </div>
+        <div
+          className="flex flex-col items-center p-8 bg-green-600 rounded-2xl shadow-2xl text-white text-center"
+          style={{ animation: 'overlayFadeInUp 0.2s ease-out forwards' }}
+        >
+          <div className="w-20 h-20 rounded-full bg-white/20 flex items-center justify-center mb-5 ring-4 ring-white/30">
+            <Check className="w-11 h-11 text-white" strokeWidth={2.5} />
           </div>
-        ) : (
-          <div className="flex flex-col items-center">
-            <div className="relative w-14 h-14 mb-4">
-              <div className="absolute inset-0 rounded-full border-4 border-blue-100" />
-              <div className="absolute inset-0 rounded-full border-4 border-blue-500 border-t-transparent animate-spin" />
-            </div>
-            <p className="text-gray-700 font-semibold text-base">กำลังดำเนินการ...</p>
-            <p className="text-gray-400 text-xs mt-1">กรุณารอสักครู่</p>
+          <p className="font-bold text-xl md:text-2xl tracking-tight max-w-sm" dangerouslySetInnerHTML={{ __html: String(successMessage).replace(/ \(/g, '<br/><span class="text-green-200 text-lg font-normal">(').replace(/\)/g, ')</span>') }}></p>
+          <p className="text-green-100 text-sm mt-3 font-medium">กำลังปิดหน้าต่าง...</p>
+          <div className="mt-6 w-40 h-1 rounded-full bg-white/20 overflow-hidden">
+            <div
+              className="h-full bg-white rounded-full"
+              style={{ animation: 'shrinkProgress 1.4s linear forwards' }}
+            />
           </div>
-        )}
+        </div>
       </div>
     );
   };
@@ -976,10 +974,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
 
           {/* 🔒 Loading Overlay for Main Modal */}
           {(isSubmitting || isSupersedeSubmitting) && !showSupersedeModal && !cadWarningModalData.isOpen && (
-            <div className="absolute inset-0 bg-white/70 backdrop-blur-[2px] z-[100] flex flex-col items-center justify-center rounded-lg gap-3">
-              <Spinner className="w-10 h-10 text-blue-600" />
-              <p className="text-sm font-medium text-gray-600">กำลังดำเนินการ...</p>
-            </div>
+            <LoadingOverlay />
           )}
 
           {/* Header */}
@@ -1641,7 +1636,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
               <h3 className="text-lg font-bold text-amber-600 flex items-center">
                 <AlertTriangle size={20} className="mr-2" />
                 {cadWarningModalData.cadMeta
-                  ? 'ไม่มีไฟล์ CAD ใหม่ — ใช้ต้นฉบับเดิมแทน?'
+                  ? 'ยืนยันการใช้ไฟล์ CAD เดิมในการเผยแพร่'
                   : 'ยืนยันการอนุมัติโดยไม่มีไฟล์ CAD?'}
               </h3>
               <button
@@ -1670,10 +1665,10 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 // ─── Case A: มีไฟล์ CAD ในประวัติ → แสดงข้อมูลไฟล์ + checkbox ยืนยัน ───
                 <>
                   <div className="p-4 bg-slate-50 border border-slate-200 rounded-md">
-                    <p className="text-sm font-semibold text-gray-700 mb-2">ไฟล์ CAD ที่จะเผยแพร่:</p>
-                    <div className="text-sm text-gray-600 space-y-1">
+                    <p className="text-sm font-semibold text-gray-700 mb-3">เนื่องจากไม่มีการอัปโหลดไฟล์ CAD ใหม่ ระบบจะใช้ไฟล์เวอร์ชันล่าสุดที่มีอยู่ในระบบ:</p>
+                    <div className="text-sm text-gray-600 space-y-1.5 bg-white p-3 rounded border border-slate-200">
                       <div className="flex">
-                        <span className="w-20 font-medium text-gray-500">ไฟล์:</span>
+                        <span className="w-20 font-medium text-gray-500">ชื่อไฟล์:</span>
                         {cadWarningModalData.cadMeta?.fileUrl ? (
                           <a
                             href={cadWarningModalData.cadMeta.fileUrl}
@@ -1701,27 +1696,32 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                           </span>
                         )}
                       </div>
+                      <div className="flex"><span className="w-20 font-medium text-gray-500">เวอร์ชัน:</span> <span className="font-semibold">Revision {cadWarningModalData.cadMeta?.rev !== undefined ? String(cadWarningModalData.cadMeta.rev).padStart(2, '0') : '-'} <span className="text-gray-500 font-normal">(ล่าสุดในระบบ)</span></span></div>
                       <div className="flex"><span className="w-20 font-medium text-gray-500">ส่งโดย:</span> <span>{cadWarningModalData.cadMeta?.uploader || '-'}</span></div>
-                      <div className="flex"><span className="w-20 font-medium text-gray-500">เมื่อ:</span> <span>{cadWarningModalData.cadMeta?.date || '-'}</span></div>
-                      <div className="flex"><span className="w-20 font-medium text-gray-500">Rev:</span> <span>{cadWarningModalData.cadMeta?.rev !== undefined ? String(cadWarningModalData.cadMeta.rev).padStart(2, '0') : '-'}</span></div>
+                      <div className="flex"><span className="w-20 font-medium text-gray-500">วันที่:</span> <span>{cadWarningModalData.cadMeta?.date || '-'}</span></div>
                     </div>
                     {cadWarningModalData.isHighRisk && (
-                      <div className="mt-2 text-xs text-red-600 font-medium flex items-start">
-                        <AlertTriangle size={14} className="mr-1 flex-shrink-0 mt-0.5" />
-                        ไฟล์นี้อาจยังไม่ได้รับการแก้ไขตามความเห็นล่าสุด
+                      <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                        <div className="flex items-start text-sm text-red-700 font-bold mb-1">
+                          <AlertTriangle size={16} className="mr-1.5 flex-shrink-0 mt-0.5 text-red-600" />
+                          ไฟล์นี้ยังไม่ผ่านการแก้ไขตามคอมเมนต์
+                        </div>
+                        <p className="text-xs text-red-600 font-medium pl-5.5">
+                          สถานะปัจจุบันคือ "อนุมัติตามคอมเมนต์" หากเผยแพร่ทันที ทีมหน้างานจะได้รับไฟล์เวอร์ชันที่ยังไม่ได้ปรับปรุงไปใช้งาน
+                        </p>
                       </div>
                     )}
                   </div>
 
-                  <label className="flex items-center gap-3 p-3 rounded-lg border-2 border-amber-200 bg-amber-50 cursor-pointer hover:bg-amber-100 transition-colors">
+                  <label className="flex items-start gap-3 p-3 rounded-lg border-2 border-amber-200 bg-amber-50 cursor-pointer hover:bg-amber-100 transition-colors">
                     <input
                       type="checkbox"
                       checked={cadWarningChecked}
                       onChange={(e) => setCadWarningChecked(e.target.checked)}
-                      className="h-4 w-4 flex-shrink-0 text-amber-600 rounded border-amber-300 focus:ring-amber-500 cursor-pointer"
+                      className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-600 rounded border-amber-300 focus:ring-amber-500 cursor-pointer"
                     />
-                    <span className="text-sm font-bold text-amber-900">
-                      ยืนยันว่าไฟล์ CAD นี้ใช้อ้างอิงในหน้างานได้
+                    <span className="text-sm font-bold text-amber-900 leading-tight">
+                      ยืนยันการเผยแพร่ไฟล์ Revision {cadWarningModalData.cadMeta?.rev !== undefined ? String(cadWarningModalData.cadMeta.rev).padStart(2, '0') : '-'} นี้ เพื่อใช้อ้างอิงในการปฏิบัติงานจริง
                     </span>
                   </label>
                 </>

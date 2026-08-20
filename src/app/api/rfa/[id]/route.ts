@@ -83,9 +83,12 @@ export async function GET(
         const userRole = userData.role;
         const status = rfaData.status;
 
+        const APPROVED_STATUSES = [STATUSES.APPROVED, STATUSES.APPROVED_WITH_COMMENTS, STATUSES.APPROVED_REVISION_REQUIRED];
+
         const isReviewer = REVIEWER_ROLES.includes(userRole as Role);
         const isCM = userRole === ROLES.CM || userRole === ROLES.ADMIN;
         const canApproveOverride = checkPermission(userRole, userOverrides, 'RFA', PERMISSION_KEYS.RFA.APPROVE, APPROVER_ROLES);
+
 
         let canApprove = false;
         let canReject = false;
@@ -110,14 +113,22 @@ export async function GET(
             }
         }
 
+        const canSendToCmOverride = checkPermission(userRole, userOverrides, 'RFA', PERMISSION_KEYS.RFA.CAN_SEND_TO_CM, []);
+        const canRequestRevisionOverride = checkPermission(userRole, userOverrides, 'RFA', PERMISSION_KEYS.RFA.CAN_REQUEST_REVISION, []);
+        const canRequestSupersedeOverride = checkPermission(userRole, userOverrides, 'RFA', PERMISSION_KEYS.RFA.CAN_REQUEST_SUPERSEDE, []);
+
         const permissions = {
             canView: true,
             canEdit: CREATOR_ROLES.includes(userData.role as Role) && rfaData.status === STATUSES.REVISION_REQUIRED,
-            canSendToCm: isReviewer && rfaData.status === STATUSES.PENDING_REVIEW,
-            canRequestRevision: isReviewer && rfaData.status === STATUSES.PENDING_REVIEW,
+            canSendToCm: (isReviewer || canSendToCmOverride) && rfaData.status === STATUSES.PENDING_REVIEW,
+            canRequestRevision: (isReviewer || canRequestRevisionOverride) && rfaData.status === STATUSES.PENDING_REVIEW,
             canApprove,
             canReject,
-            canDownloadFiles: true
+            canDownloadFiles: true,
+            canRequestSupersede:
+                APPROVED_STATUSES.includes(rfaData.status) &&
+                rfaData.supersededStatus !== 'SUSPENDED' &&
+                (isCM || canApproveOverride || canRequestSupersedeOverride),
         };
 
         let isFromSupersedeRequest = rfaData.isFromSupersedeRequest || false;
@@ -192,12 +203,14 @@ export async function PUT(
         let newStatus = docData.status;
         let canPerformAction = false;
 
-        // 1. Reviewer Actions (ส่งไป CM)
+        // 1. Reviewer Actions (ส่งไป CM / ขอแก้ไข)
         const isReviewer = REVIEWER_ROLES.includes(userRole as Role);
-        if (isReviewer && docData.status === STATUSES.PENDING_REVIEW) {
-            if (['SEND_TO_CM', 'REQUEST_REVISION'].includes(action)) {
-                canPerformAction = true;
-            }
+        const canSendToCmOverride = checkPermission(userRole, userOverrides, 'RFA', PERMISSION_KEYS.RFA.CAN_SEND_TO_CM, []);
+        const canRequestRevisionOverride = checkPermission(userRole, userOverrides, 'RFA', PERMISSION_KEYS.RFA.CAN_REQUEST_REVISION, []);
+
+        if (docData.status === STATUSES.PENDING_REVIEW) {
+            if (action === 'SEND_TO_CM' && (isReviewer || canSendToCmOverride)) canPerformAction = true;
+            if (action === 'REQUEST_REVISION' && (isReviewer || canRequestRevisionOverride)) canPerformAction = true;
         }
 
         // 2. Creator Actions (แก้ไขงาน)

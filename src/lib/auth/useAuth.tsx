@@ -4,7 +4,7 @@
 
 import React, { useState, useEffect, useContext, createContext, ReactNode, useCallback } from 'react';
 import { User, onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, onSnapshot, setDoc, getDoc, FirestoreError } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, updateDoc, getDoc, arrayUnion, arrayRemove, FirestoreError } from 'firebase/firestore';
 // เพิ่ม Unsubscribe ใน import
 import { getToken, deleteToken, onMessage, MessagePayload, Unsubscribe } from 'firebase/messaging';
 // ใช้ getMessagingInstance แทน messaging
@@ -65,51 +65,96 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ═══════════════════════════════════════════════════════════════════════════
   // FCM TOKEN MANAGEMENT
   // ═══════════════════════════════════════════════════════════════════════════
+  // Helper: ลบ token ที่ invalid/หมดอายุออกจาก Firestore
+  const cleanupFCMToken = useCallback(async (uid: string, token: string) => {
+    try {
+      await updateDoc(doc(db, 'users', uid), {
+        fcmTokens: arrayRemove(token)
+      });
+      console.log('🧹 Removed invalid FCM token from Firestore');
+    } catch (e) {
+      console.error('❌ Failed to cleanup FCM token:', e);
+    }
+  }, []);
+
   const handleFCMToken = useCallback(async (uid: string, action: 'SAVE' | 'REMOVE') => {
     if (!isMobileDevice()) return;
 
     try {
-      // 1. เรียกใช้ messaging ผ่านฟังก์ชัน Async เพื่อความชัวร์
+      // 1. เรียกใช้ messaging ผ่านฟังก์ชัน Async
       const messaging = await getMessagingInstance();
       if (!messaging) {
         console.log('❌ FCM not supported on this device');
         return;
       }
 
+      // 2. ✅ iOS FIX: รอ Service Worker Ready ก่อนเสมอ
+      let registration: ServiceWorkerRegistration | undefined;
+      try {
+        if ('serviceWorker' in navigator) {
+          registration = await navigator.serviceWorker.ready;
+        }
+      } catch (e) {
+        console.error('❌ Service Worker not ready:', e);
+      }
+
       if (action === 'SAVE') {
-        // 2. เช็ค Permission
+        // 3. เช็ค Permission
         const currentPermission = Notification.permission;
         if (currentPermission !== 'granted') {
           console.log('⚠️ Notification permission not granted yet. Waiting for user gesture.');
           return;
         }
 
-        // 3. ✅ iOS FIX: ต้องรอ Service Worker Ready และส่ง registration ไปให้ getToken
-        let registration;
+        // 4. ขอ Token
+        let currentToken: string | null = null;
         try {
-          if ('serviceWorker' in navigator) {
-            registration = await navigator.serviceWorker.ready;
+          currentToken = await getToken(messaging, {
+            vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY,
+            serviceWorkerRegistration: registration
+          });
+        } catch (tokenErr: any) {
+          // Token หมดอายุหรือ invalid — ไม่สามารถดึง token ใหม่ได้
+          const code = tokenErr?.code || '';
+          if (code === 'messaging/token-unsubscribed' || code === 'messaging/invalid-registration-token') {
+            console.warn('⚠️ FCM token is invalid or unsubscribed. Cannot refresh.');
+          } else {
+            console.error('🔥 FCM getToken error:', tokenErr);
           }
-        } catch (e) {
-          console.error('❌ Service Worker not ready:', e);
+          return;
         }
 
-        // 4. ขอ Token
-        const currentToken = await getToken(messaging, {
-          vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY,
-          serviceWorkerRegistration: registration
-        });
-
         if (currentToken) {
-          await setDoc(doc(db, 'users', uid), {
-            fcmTokens: [currentToken],
+          // ✅ ใช้ arrayUnion แทน overwrite เพื่อรองรับหลายอุปกรณ์
+          await updateDoc(doc(db, 'users', uid), {
+            fcmTokens: arrayUnion(currentToken),
             lastLogin: new Date()
-          }, { merge: true });
-          console.log('✅ FCM Token Updated');
+          });
+          console.log('✅ FCM Token saved with arrayUnion');
+        } else {
+          console.warn('⚠️ getToken returned empty — permission may have been revoked');
         }
 
       } else if (action === 'REMOVE') {
+        // 5. ดึง token ปัจจุบันก่อน แล้วจึงลบออกจากทั้ง FCM และ Firestore
+        let tokenToRemove: string | null = null;
+        try {
+          tokenToRemove = await getToken(messaging, {
+            vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY,
+            serviceWorkerRegistration: registration
+          });
+        } catch {
+          // ไม่สามารถดึง token ได้ ก็ยังคง deleteToken ต่อ
+        }
+
         await deleteToken(messaging);
+
+        if (tokenToRemove) {
+          await updateDoc(doc(db, 'users', uid), {
+            fcmTokens: arrayRemove(tokenToRemove)
+          });
+          console.log('✅ FCM Token removed from Firestore');
+        }
       }
     } catch (err) {
       console.error('🔥 FCM Token Error:', err);

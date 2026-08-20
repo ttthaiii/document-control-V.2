@@ -8,7 +8,7 @@ import { useLoading } from '@/lib/context/LoadingContext'
 import {
   FileText, BarChart3, ChevronDown,
   ChevronRight, LogOut, X, Users, Wrench, UserCog, HardHat, ClipboardList, BrickWall,
-  BrickWallIcon, FolderKanban
+  BrickWallIcon, FolderKanban, HelpCircle
 } from 'lucide-react'
 import { Role } from '@/lib/config/workflow'
 import { db } from '@/lib/firebase/client'
@@ -106,16 +106,19 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
 
   const {
     canViewShop, canViewGen, canViewMat,
-    hasRfaAccess, hasWorkRequestAccess, isAdminAccess, hasActivityLogAccess
+    hasRfaAccess, hasRfiAccess, hasWorkRequestAccess, isAdminAccess, hasActivityLogAccess
   } = useMemo(() => {
     if (!user) return {
       canViewShop: false, canViewGen: false, canViewMat: false,
-      hasRfaAccess: false, hasWorkRequestAccess: false, isAdminAccess: false, hasActivityLogAccess: false
+      hasRfaAccess: false, hasRfiAccess: false, hasWorkRequestAccess: false, isAdminAccess: false, hasActivityLogAccess: false
     };
 
     const canViewShop = checkPerm(`RFA.${PERMISSION_KEYS.RFA.VIEW_SHOP}`);
     const canViewGen = checkPerm(`RFA.${PERMISSION_KEYS.RFA.VIEW_GEN}`);
     const canViewMat = checkPerm(`RFA.${PERMISSION_KEYS.RFA.VIEW_MAT}`);
+
+    // RFI has one type, so it is a single menu item rather than a dropdown.
+    const canViewRfi = checkPerm(`RFI.${PERMISSION_KEYS.RFI.VIEW}`);
 
     // Work Request Access
     const canViewWR = checkPerm(`WR.${PERMISSION_KEYS.WORK_REQUEST.VIEW}`);
@@ -125,6 +128,7 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
       canViewGen,
       canViewMat,
       hasRfaAccess: canViewShop || canViewGen || canViewMat,
+      hasRfiAccess: canViewRfi,
       hasWorkRequestAccess: canViewWR,
       isAdminAccess: user.role === 'Admin',
       hasActivityLogAccess: ['Admin', 'PM', 'PD'].includes(user.role)
@@ -223,6 +227,12 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
                 </div>
               )}
             </div>
+          )}
+
+          {hasRfiAccess && (
+            <Link href="/dashboard/rfi" onClick={showLoader} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors duration-200 ${isPathActive('/dashboard/rfi') ? 'bg-blue-100 text-blue-900' : 'text-gray-700 hover:bg-blue-50 hover:text-blue-800'}`}>
+              <HelpCircle size={18} /><span>RFI Documents</span>
+            </Link>
           )}
 
           {hasWorkRequestAccess && (

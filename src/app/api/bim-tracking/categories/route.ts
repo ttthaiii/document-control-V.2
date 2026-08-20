@@ -1,21 +1,14 @@
 // app/api/bim-tracking/categories/route.ts (แก้ไขตามชื่อหมวดงาน)
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth, bimTrackingDb } from '@/lib/firebase/admin';
+import { ALLOWED_RFI_CATEGORIES } from '@/lib/config/rfi-workflow';
+import { RFA_SHOP_CATEGORIES } from '@/lib/config/workflow';
 
 export const dynamic = 'force-dynamic';
 
-// --- 👇 [เพิ่ม] รายชื่อหมวดงานที่อนุญาตสำหรับ RFA-SHOP ---
-const ALLOWED_SHOP_CATEGORIES = [
-  "Structural Drawings",
-  "Architectural Drawings",
-  "Landscape Drawings",
-  "Structural Asbuilt",
-  "Architectural Asbuilt",
-  "Landscape Asbuilt",
-  "Interior Drawings",
-  "Interior Drawings Asbuilt"
-];
-// --- 👆 สิ้นสุดการเพิ่ม ---
+// รายชื่อหมวดงานที่อนุญาตสำหรับ RFA-SHOP — ย้ายไปอยู่ที่ lib/config/workflow.ts
+// เพราะ RFI ต้องใช้ลิสต์เดียวกันนี้มาแปลงเป็นสาขางาน (ตัดคำ Drawings/Asbuilt ออก)
+const ALLOWED_SHOP_CATEGORIES = RFA_SHOP_CATEGORIES;
 
 
 export async function POST(request: NextRequest) {
@@ -101,6 +94,13 @@ export async function POST(request: NextRequest) {
       // ถ้าเป็น RFA-GEN ให้ใช้ Logic เดิม (กรอง Prefix gen_)
       filteredCategories = allCategoriesInProject.filter((category: string) =>
         category.toLowerCase().startsWith('gen_')
+      );
+    } else if (rfaType === 'RFI') {
+      // RFI: งานถูกลงไว้ใต้หมวด 'Documents' ใน BIM Tracking
+      // whitelist อยู่ที่ ALLOWED_RFI_CATEGORIES (lib/config/rfi-workflow.ts) ที่เดียว
+      // ฟอร์มจะเลือกให้อัตโนมัติเมื่อเหลือหมวดเดียว — เพิ่มหมวดที่นี่ dropdown จะกลับมาเอง
+      filteredCategories = allCategoriesInProject.filter((category: string) =>
+        ALLOWED_RFI_CATEGORIES.includes(category)
       );
     } else {
       // กรณีอื่นๆ (เช่น RFA Type ไม่ถูกต้อง) ให้คืนค่าว่าง

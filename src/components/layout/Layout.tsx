@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useAuth } from '@/lib/auth/useAuth'
 import Sidebar from './Sidebar'
 import { Menu, Bell, Building2, HardHat } from 'lucide-react'
@@ -11,6 +11,25 @@ interface LayoutProps extends React.PropsWithChildren {}
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth < 1024) {
+        setIsSidebarOpen(false)
+      } else {
+        setIsSidebarOpen(true)
+      }
+    }
+
+    // Set initial state based on current window size
+    handleResize()
+
+    // Add event listener for window resize
+    window.addEventListener('resize', handleResize)
+
+    // Cleanup listener on unmount
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
   
   // 1. ✅ ดึง requestNotificationPermission มาใช้
   const { user, requestNotificationPermission } = useAuth()

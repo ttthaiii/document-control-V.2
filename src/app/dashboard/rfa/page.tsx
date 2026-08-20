@@ -62,6 +62,8 @@ function RFAContent() {
         const docIdFromUrl = searchParams.get('docId');
         if (docIdFromUrl) {
             setSelectedDocumentId(docIdFromUrl);
+        } else {
+            setSelectedDocumentId(null);
         }
     }, [searchParams]);
 
@@ -225,8 +227,29 @@ function RFAContent() {
             return nextFilters;
         });
     };
-    const handleDocumentClick = (doc: RFADocument) => { setSelectedDocumentId(doc.id); };
-    const handleCloseModal = () => { setSelectedDocumentId(null); router.push(`/dashboard/rfa?${new URLSearchParams(window.location.search).toString().replace(/&?docId=[^&]*/, '')}`, { scroll: false }); };
+    useEffect(() => {
+        const handlePopState = () => {
+            const params = new URLSearchParams(window.location.search);
+            const docIdFromUrl = params.get('docId');
+            setSelectedDocumentId(docIdFromUrl || null);
+        };
+        window.addEventListener('popstate', handlePopState);
+        return () => window.removeEventListener('popstate', handlePopState);
+    }, []);
+
+    const handleDocumentClick = (doc: RFADocument) => { 
+        setSelectedDocumentId(doc.id); 
+        const params = new URLSearchParams(window.location.search);
+        params.set('docId', doc.id);
+        window.history.pushState({}, '', `/dashboard/rfa?${params.toString()}`);
+    };
+    const handleCloseModal = () => { 
+        setSelectedDocumentId(null); 
+        const params = new URLSearchParams(window.location.search);
+        params.delete('docId');
+        const newUrl = params.toString() ? `/dashboard/rfa?${params.toString()}` : '/dashboard/rfa';
+        window.history.pushState({}, '', newUrl); 
+    };
     const handleCreateClick = () => { setIsCreateModalOpen(true); };
     const handleModalClose = () => { setIsCreateModalOpen(false); };
     const handleChartFilter = (key: string, value: string) => {

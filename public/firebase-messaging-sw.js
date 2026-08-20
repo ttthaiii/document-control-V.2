@@ -30,10 +30,10 @@ messaging.onBackgroundMessage((payload) => {
     data: {
         url: notificationUrl // ส่ง url ไปใช้ตอน click
     },
-    // เพิ่ม tag เพื่อไม่ให้ noti ซ้อนกันเยอะเกินไป (Optional)
-    // tag: 'rfa-notification', 
+    // เพิ่ม tag เพื่อให้ browser รู้ว่าเป็นกลุ่มแจ้งเตือนเดียวกัน (บังคับต้องมีถ้าใช้ renotify: true)
+    tag: 'rfa-notification', 
     renotify: true,
-    interaction: true // บังคับให้ browser แสดงจนกว่า user จะกด (ช่วยแก้ปัญหา noti หายไว)
+    requireInteraction: true // เปลี่ยน interaction เป็น requireInteraction ให้ถูก spec
   };
 
   return self.registration.showNotification(notificationTitle, notificationOptions);

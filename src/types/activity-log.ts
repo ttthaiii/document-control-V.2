@@ -21,7 +21,7 @@ export type LogAction =
   | 'INVITE_USER'
   | 'UPDATE_USER';
 
-export type ResourceType = 'RFA' | 'WORK_REQUEST' | 'USER' | 'SYSTEM';
+export type ResourceType = 'RFA' | 'RFI' | 'WORK_REQUEST' | 'USER' | 'SYSTEM';
 
 export interface ActivityLog {
   id: string;

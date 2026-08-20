@@ -46,12 +46,14 @@ export interface RFAPermissions {
   canForward: boolean // อันนี้อาจจะไม่ได้ใช้แล้ว แต่เก็บไว้ก่อนได้
   canAddFiles: boolean
   canDownloadFiles: boolean
-  // --- ✅ 1. เพิ่ม Permissions สำหรับ Workflow ใหม่ ---
-  canSendToCm?: boolean 
+  // --- ✅ 1. Permissions สำหรับ Workflow ---
+  canSendToCm?: boolean
   canRequestRevision?: boolean
   canSubmitRevision?: boolean
   canApproveWithComments?: boolean
   canApproveRevisionRequired?: boolean
+  // --- ✅ 2. สิทธิ์พิเศษแบบ Override รายบุคคล ---
+  canRequestSupersede?: boolean // ขอแก้ไขเอกสารที่อนุมัติแล้ว
 }
 
 export interface RFACurrentUser {
