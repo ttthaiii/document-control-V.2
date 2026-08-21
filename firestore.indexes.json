@@ -41,6 +41,24 @@
                     "order": "ASCENDING"
                 }
             ]
+        },
+        {
+            "collectionGroup": "rfiDocuments",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "siteId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "cmInvolved",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "updatedAt",
+                    "order": "DESCENDING"
+                }
+            ]
         }
     ],
     "fieldOverrides": []

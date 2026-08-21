@@ -16,8 +16,8 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import { RFIDocument, RFIPermissions, RFIWorkflowStep, RFIFile } from '@/types/rfi'
 import {
-  X, Paperclip, Clock, Check, Send, AlertTriangle, FileText, History,
-  Upload, ThumbsUp, CornerUpLeft, Hourglass, CalendarClock,
+  X, Paperclip, Check, Send, AlertTriangle, FileText, History,
+  Upload, CornerUpLeft, Hourglass, CalendarClock, Split,
 } from 'lucide-react'
 import Spinner from '@/components/shared/Spinner'
 import LoadingOverlay from '@/components/shared/LoadingOverlay'
@@ -57,6 +57,40 @@ const formatFileSize = (bytes: number): string => {
 const badgeStyle = (hex: string) => ({ backgroundColor: `${hex}1A`, color: hex });
 
 const AUDIENCE_LABEL: Record<string, string> = { BIM: 'ส่งถึง BIM', CM: 'ส่งถึง CM' };
+
+const SITE_MODE_META: Record<'answer' | 'forward' | 'both', {
+  icon: typeof CornerUpLeft;
+  label: string;
+  activeClass: string;
+  iconActiveClass: string;
+  defaultClass: string;
+  iconDefaultClass: string;
+}> = {
+  answer: {
+    icon: CornerUpLeft,
+    label: 'มีข้อมูล — ตอบกลับ BIM',
+    activeClass: 'border-blue-600 bg-blue-600 text-white shadow-sm',
+    iconActiveClass: 'text-white',
+    defaultClass: 'border-slate-200 bg-white text-slate-800 hover:border-blue-300 hover:shadow-md',
+    iconDefaultClass: 'text-blue-600',
+  },
+  forward: {
+    icon: Send,
+    label: 'ไม่มีข้อมูล — ต้องส่งต่อ CM',
+    activeClass: 'border-orange-600 bg-orange-600 text-white shadow-sm',
+    iconActiveClass: 'text-white',
+    defaultClass: 'border-slate-200 bg-white text-slate-800 hover:border-orange-300 hover:shadow-md',
+    iconDefaultClass: 'text-orange-600',
+  },
+  both: {
+    icon: Split,
+    label: 'บางส่วนมี บางส่วนไม่มี — ตอบกลับ + ส่งต่อ CM',
+    activeClass: 'border-teal-600 bg-teal-600 text-white shadow-sm',
+    iconActiveClass: 'text-white',
+    defaultClass: 'border-slate-200 bg-white text-slate-800 hover:border-teal-300 hover:shadow-md',
+    iconDefaultClass: 'text-teal-600',
+  },
+};
 
 // --- Workflow history (timeline) ---
 function WorkflowHistoryModal({
@@ -159,6 +193,10 @@ export default function RFIDetailModal({ document: initialDoc, onClose, showOver
   const [comment, setComment] = useState('');
   const [docNumberInput, setDocNumberInput] = useState('');
   const [filesByTarget, setFilesByTarget] = useState<FilesByTarget>(EMPTY_FILES);
+  // SITE picks HOW it's handling the question before any upload field appears — asking
+  // for a BIM-reply file and a CM-forward file at once (the old layout) reads as "attach
+  // both", which is wrong for the common case of only one applying.
+  const [siteMode, setSiteMode] = useState<'answer' | 'forward' | 'both' | null>(null);
 
   useScrollLock(true);
 
@@ -199,7 +237,11 @@ export default function RFIDetailModal({ document: initialDoc, onClose, showOver
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialDoc, firebaseUser]);
 
-  const orderedFiles = useMemo(() => document?.files || [], [document]);
+  // Only the current step's files — full history lives in the "ประวัติ" modal (WorkflowHistoryModal).
+  const currentStepFiles = useMemo(() => {
+    const workflow = document?.workflow || [];
+    return workflow[workflow.length - 1]?.files || [];
+  }, [document]);
 
   // 2. Loading skeleton
   if (isLoading) {
@@ -231,8 +273,16 @@ export default function RFIDetailModal({ document: initialDoc, onClose, showOver
 
   const showSitePanel = permissions.canAnswer || permissions.canForwardToCm || permissions.canAnswerAndForward;
   const showCmPanel = permissions.canRecordCmReply;
-  const showAskerPanel = permissions.canAcknowledge || permissions.canRequestMoreInfo;
+  const showAskerPanel = permissions.canRequestMoreInfo;
   const needsDocNumber = !document.documentNumber && (permissions.canForwardToCm || permissions.canAnswerAndForward);
+
+  // Mode-select-first: skip the selector entirely when SITE only has one option anyway.
+  const allowedSiteModes: Array<'answer' | 'forward' | 'both'> = [
+    ...(permissions.canAnswer ? (['answer'] as const) : []),
+    ...(permissions.canForwardToCm ? (['forward'] as const) : []),
+    ...(permissions.canAnswerAndForward ? (['both'] as const) : []),
+  ];
+  const effectiveSiteMode = siteMode ?? (allowedSiteModes.length === 1 ? allowedSiteModes[0] : null);
 
   // 3. File handling — one temp-upload path per target, tagged with its audience only
   //    when the action is actually submitted (see buildPayloadFiles).
@@ -391,7 +441,6 @@ export default function RFIDetailModal({ document: initialDoc, onClose, showOver
   const handleForwardToCm = () => executeAction(RFI_ACTIONS.FORWARD_TO_CM, buildPayloadFiles('cm'), { documentNumber: trimmedDocNumber || undefined });
   const handleAnswerAndForward = () => executeAction(RFI_ACTIONS.ANSWER_AND_FORWARD, buildPayloadFiles('bim', 'cm'), { documentNumber: trimmedDocNumber || undefined });
   const handleCmReply = () => executeAction(RFI_ACTIONS.CM_REPLY, buildPayloadFiles('action'));
-  const handleAcknowledge = () => executeAction(RFI_ACTIONS.ACKNOWLEDGE, []);
   const handleRequestMoreInfo = () => executeAction(RFI_ACTIONS.REQUEST_MORE_INFO, buildPayloadFiles('action'));
 
   const docNumberReady = !needsDocNumber || trimmedDocNumber.length > 0;
@@ -424,15 +473,9 @@ export default function RFIDetailModal({ document: initialDoc, onClose, showOver
           <div className="flex justify-between items-start p-4 border-b border-gray-200">
             <div>
               <div className="flex items-center gap-2 flex-wrap mb-1">
-                <h3 className="text-lg font-bold text-blue-600">{document.runningNumber}</h3>
                 {document.documentNumber && (
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">
-                    {document.documentNumber}
-                  </span>
+                  <h3 className="text-lg font-bold text-blue-600">{document.documentNumber}</h3>
                 )}
-                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium" style={badgeStyle(getRfiStatusColor(document))}>
-                  {getRfiStatusLabel(document)}
-                </span>
                 {document.awaitingCm && document.status !== RFI_STATUSES.PENDING_CM && (
                   <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium" style={badgeStyle(RFI_AWAITING_CM_COLOR)}>
                     + {RFI_AWAITING_CM_LABEL}
@@ -440,6 +483,7 @@ export default function RFIDetailModal({ document: initialDoc, onClose, showOver
                 )}
               </div>
               <h2 className="text-xl font-semibold text-gray-800">{document.title}</h2>
+              <p className="text-xs text-gray-500 mt-1">{document.runningNumber}</p>
               <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                 {responsibleParties.map(party => (
                   <span key={party} className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium" style={badgeStyle(RFI_PARTY_COLORS[party])}>
@@ -462,7 +506,13 @@ export default function RFIDetailModal({ document: initialDoc, onClose, showOver
           <div className="flex-1 overflow-y-auto min-h-0">
             <div className="p-6 space-y-6">
               <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
+                  <div>
+                    <strong className="text-gray-700 font-semibold block mb-1">สถานะ:</strong>
+                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium" style={badgeStyle(getRfiStatusColor(document))}>
+                      {getRfiStatusLabel(document)}
+                    </span>
+                  </div>
                   <div>
                     <strong className="text-gray-700 font-semibold block mb-1">หมวดงาน:</strong>
                     <span className="text-gray-900 font-medium">{document.category?.categoryCode || '-'}</span>
@@ -491,14 +541,14 @@ export default function RFIDetailModal({ document: initialDoc, onClose, showOver
                 )}
               </div>
 
-              {/* Attached files so far — an RFI is a conversation, so every file stays visible */}
+              {/* Current step's files only — older steps' files stay in the "ประวัติ" (history) modal */}
               <div>
                 <h4 className="text-md font-semibold mb-2 flex items-center text-slate-800">
-                  <Paperclip size={16} className="mr-2" /> ไฟล์แนบทั้งหมด
+                  <Paperclip size={16} className="mr-2" /> ไฟล์แนบล่าสุด
                 </h4>
                 <ul className="space-y-2">
-                  {orderedFiles.length > 0 ? (
-                    orderedFiles.map((file, index) => (
+                  {currentStepFiles.length > 0 ? (
+                    currentStepFiles.map((file, index) => (
                       <li key={index} className="border rounded-md bg-slate-50 border-slate-200 hover:bg-slate-100">
                         <a
                           href={file.fileUrl}
@@ -537,49 +587,99 @@ export default function RFIDetailModal({ document: initialDoc, onClose, showOver
             {/* Action panels */}
             <div className="p-6 border-t bg-slate-50">
 
-              {/* SITE: answer BIM, forward to CM, or both at once */}
+              {/* SITE: pick how the question is being handled first, THEN show only the
+                  upload field(s) that mode actually needs. */}
               {showSitePanel && (
                 <div className="space-y-4 bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                   <div className="pb-3 border-b border-slate-100">
                     <h3 className="text-base font-bold text-slate-800">ดำเนินการ (SITE)</h3>
                   </div>
-                  {needsDocNumber && (
-                    <div className="p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded-r-md">
-                      <label className="text-sm font-bold text-yellow-800 mb-2 block">
-                        <AlertTriangle size={16} className="inline mr-2" /> เลขที่เอกสารสำหรับ CM (Required เมื่อจะส่งต่อ)
-                      </label>
-                      <input
-                        type="text"
-                        value={docNumberInput}
-                        onChange={(e) => setDocNumberInput(e.target.value)}
-                        placeholder="กรอกเลขที่เอกสารที่นี่..."
-                        className="w-full p-2 border rounded-md text-sm border-yellow-300 bg-white text-gray-900"
-                      />
-                    </div>
-                  )}
-                  {(permissions.canAnswer || permissions.canAnswerAndForward) && uploadSlot('bim', 'ไฟล์คำตอบให้ BIM', 'rfi-upload-bim')}
-                  {(permissions.canForwardToCm || permissions.canAnswerAndForward) && uploadSlot('cm', 'ไฟล์ส่งต่อให้ CM', 'rfi-upload-cm')}
+
                   <div>
-                    <label className="text-sm font-medium text-gray-700 mb-1.5 block">ความคิดเห็น (Optional)</label>
-                    <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={3} className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white text-gray-900" placeholder="เพิ่มความคิดเห็น..." />
+                    <p className="text-sm text-gray-600 mb-2">เลือกวิธีดำเนินการกับคำถามนี้:</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      {allowedSiteModes.map((mode) => {
+                        const meta = SITE_MODE_META[mode];
+                        const Icon = meta.icon;
+                        const isActive = effectiveSiteMode === mode;
+                        const isLocked = !!effectiveSiteMode && !isActive;
+                        return (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => setSiteMode(mode)}
+                            disabled={isLocked}
+                            className={`flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border text-center transition-all focus-visible:ring-2 outline-none ${
+                              isActive
+                                ? meta.activeClass
+                                : isLocked
+                                ? 'border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed'
+                                : meta.defaultClass
+                            }`}
+                          >
+                            <Icon size={20} className={isActive ? meta.iconActiveClass : isLocked ? 'text-slate-300' : meta.iconDefaultClass} />
+                            <span className="text-sm font-bold leading-tight">{meta.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <div className="flex flex-wrap justify-end gap-3 pt-2 border-t border-slate-200">
-                    {permissions.canAnswer && (
-                      <button onClick={handleAnswer} disabled={isSubmitting || successCount('bim') === 0} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed">
-                        {loadingAction === RFI_ACTIONS.ANSWER ? <Spinner className="w-4 h-4 mr-2" /> : <CornerUpLeft size={16} className="mr-2" />} ตอบกลับ BIM
-                      </button>
-                    )}
-                    {permissions.canForwardToCm && (
-                      <button onClick={handleForwardToCm} disabled={isSubmitting || successCount('cm') === 0 || !docNumberReady} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:bg-violet-300 disabled:cursor-not-allowed">
-                        {loadingAction === RFI_ACTIONS.FORWARD_TO_CM ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />} ส่งต่อ CM
-                      </button>
-                    )}
-                    {permissions.canAnswerAndForward && (
-                      <button onClick={handleAnswerAndForward} disabled={isSubmitting || successCount('bim') === 0 || successCount('cm') === 0 || !docNumberReady} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-teal-300 disabled:cursor-not-allowed">
-                        {loadingAction === RFI_ACTIONS.ANSWER_AND_FORWARD ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />} ตอบกลับ + ส่งต่อ CM
-                      </button>
-                    )}
-                  </div>
+
+                  {!effectiveSiteMode ? (
+                    <div>
+                      <label className="text-sm font-medium text-gray-400 mb-1 block">แนบไฟล์</label>
+                      <div className="border-2 border-dashed border-slate-200 rounded-lg p-4 text-center bg-slate-50">
+                        <span className="text-slate-400 font-medium flex items-center justify-center">
+                          <Upload size={16} className="mr-2" /> เลือกวิธีดำเนินการด้านบนก่อน
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {allowedSiteModes.length > 1 && (
+                        <button type="button" onClick={() => setSiteMode(null)} className="text-xs text-gray-500 hover:text-blue-600 flex items-center">
+                          <CornerUpLeft size={12} className="mr-1" /> เปลี่ยนวิธีดำเนินการ
+                        </button>
+                      )}
+                      {(effectiveSiteMode === 'forward' || effectiveSiteMode === 'both') && needsDocNumber && (
+                        <div className="p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded-r-md">
+                          <label className="text-sm font-bold text-yellow-800 mb-2 block">
+                            <AlertTriangle size={16} className="inline mr-2" /> เลขที่เอกสารสำหรับ CM (Required เมื่อจะส่งต่อ)
+                          </label>
+                          <input
+                            type="text"
+                            value={docNumberInput}
+                            onChange={(e) => setDocNumberInput(e.target.value)}
+                            placeholder="กรอกเลขที่เอกสารที่นี่..."
+                            className="w-full p-2 border rounded-md text-sm border-yellow-300 bg-white text-gray-900"
+                          />
+                        </div>
+                      )}
+                      {(effectiveSiteMode === 'answer' || effectiveSiteMode === 'both') && uploadSlot('bim', 'ไฟล์คำตอบให้ BIM', 'rfi-upload-bim')}
+                      {(effectiveSiteMode === 'forward' || effectiveSiteMode === 'both') && uploadSlot('cm', 'ไฟล์ส่งต่อให้ CM', 'rfi-upload-cm')}
+                      <div>
+                        <label className="text-sm font-medium text-gray-700 mb-1.5 block">ความคิดเห็น (Optional)</label>
+                        <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={3} className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white text-gray-900" placeholder="เพิ่มความคิดเห็น..." />
+                      </div>
+                      <div className="flex flex-wrap justify-end gap-3 pt-2 border-t border-slate-200">
+                        {effectiveSiteMode === 'answer' && (
+                          <button onClick={handleAnswer} disabled={isSubmitting || successCount('bim') === 0} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-blue-500 outline-none transition-colors">
+                            {loadingAction === RFI_ACTIONS.ANSWER ? <Spinner className="w-4 h-4 mr-2" /> : <CornerUpLeft size={16} className="mr-2" />} ตอบกลับ BIM
+                          </button>
+                        )}
+                        {effectiveSiteMode === 'forward' && (
+                          <button onClick={handleForwardToCm} disabled={isSubmitting || successCount('cm') === 0 || !docNumberReady} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-orange-600 rounded-lg hover:bg-orange-700 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-orange-500 outline-none transition-colors">
+                            {loadingAction === RFI_ACTIONS.FORWARD_TO_CM ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />} ส่งต่อ CM
+                          </button>
+                        )}
+                        {effectiveSiteMode === 'both' && (
+                          <button onClick={handleAnswerAndForward} disabled={isSubmitting || successCount('bim') === 0 || successCount('cm') === 0 || !docNumberReady} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-teal-500 outline-none transition-colors">
+                            {loadingAction === RFI_ACTIONS.ANSWER_AND_FORWARD ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />} ตอบกลับ + ส่งต่อ CM
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -595,7 +695,7 @@ export default function RFIDetailModal({ document: initialDoc, onClose, showOver
                     <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={3} className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white text-gray-900" placeholder="เพิ่มความคิดเห็น..." />
                   </div>
                   <div className="flex justify-end pt-2 border-t border-slate-200">
-                    <button onClick={handleCmReply} disabled={isSubmitting || successCount('action') === 0} className="flex items-center px-5 py-2.5 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:bg-violet-300 disabled:cursor-not-allowed">
+                    <button onClick={handleCmReply} disabled={isSubmitting || successCount('action') === 0} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-blue-500 outline-none transition-colors">
                       {loadingAction === RFI_ACTIONS.CM_REPLY ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />} บันทึกคำตอบ
                     </button>
                   </div>
@@ -619,20 +719,10 @@ export default function RFIDetailModal({ document: initialDoc, onClose, showOver
                         {loadingAction === RFI_ACTIONS.REQUEST_MORE_INFO ? <Spinner className="w-4 h-4 mr-2" /> : <Hourglass size={16} className="mr-2" />} ขอข้อมูลเพิ่ม
                       </button>
                     )}
-                    {permissions.canAcknowledge && (
-                      <button onClick={handleAcknowledge} disabled={isSubmitting} className="flex items-center px-5 py-2 text-sm font-bold text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm">
-                        {loadingAction === RFI_ACTIONS.ACKNOWLEDGE ? <Spinner className="w-4 h-4 mr-2" /> : <ThumbsUp size={16} className="mr-2" />} รับทราบ / ปิดงาน
-                      </button>
-                    )}
                   </div>
                 </div>
               )}
 
-              {!showSitePanel && !showCmPanel && !showAskerPanel && (
-                <div className="flex items-center justify-center text-sm text-gray-500 py-6">
-                  <Clock size={16} className="mr-2" /> ไม่มีรายการที่ต้องดำเนินการในสถานะนี้
-                </div>
-              )}
             </div>
           </div>
         </div>

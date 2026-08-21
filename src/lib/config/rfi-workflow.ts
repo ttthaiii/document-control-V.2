@@ -19,6 +19,7 @@ import {
   REVIEWER_ROLES,
   RFA_SHOP_CATEGORIES,
 } from '@/lib/config/workflow';
+import { MUTED_PALETTE } from '@/lib/config/chartColors';
 
 type ObjectValues<T> = T[keyof T];
 
@@ -31,15 +32,6 @@ export const RFI_STATUSES = {
   PENDING_SITE: 'PENDING_SITE',
   /** BIM acknowledged but asked for more information. Back to SITE. */
   PENDING_SITE_MORE_INFO: 'PENDING_SITE_MORE_INFO',
-  /**
-   * Answered. Waiting for the side that RAISED the question to acknowledge and close.
-   *
-   * Named for the ASKER, not for BIM, because three different sides can raise an RFI:
-   * BIM asks SITE, while ME / SN / SITE ask CM directly. A key called PENDING_BIM
-   * would be a lie on three quarters of the documents. The label shown to the user is
-   * origin-aware (see getRfiStatusLabel).
-   */
-  PENDING_ASKER: 'PENDING_ASKER',
   /** Forwarded to CM (or raised by SITE straight to CM) and nothing else is pending. */
   PENDING_CM: 'PENDING_CM',
   /** BIM closed the question. Note: not "finished" unless awaitingCm is false too. */
@@ -49,21 +41,31 @@ export const RFI_STATUSES = {
 export type RFIStatus = ObjectValues<typeof RFI_STATUSES>;
 
 export const RFI_STATUS_LABELS: Record<string, string> = {
-  [RFI_STATUSES.PENDING_SITE]: 'รอ SITE ตอบ',
-  [RFI_STATUSES.PENDING_SITE_MORE_INFO]: 'รอ SITE ให้ข้อมูลเพิ่ม',
-  [RFI_STATUSES.PENDING_ASKER]: 'รอผู้ถามรับทราบ',
-  [RFI_STATUSES.PENDING_CM]: 'รอ CM ตอบ',
-  [RFI_STATUSES.CLOSED]: 'ปิดงาน',
+  [RFI_STATUSES.PENDING_SITE]: 'รอตรวจสอบ',
+  [RFI_STATUSES.PENDING_SITE_MORE_INFO]: 'รอข้อมูลเพิ่มเติม',
+  [RFI_STATUSES.PENDING_CM]: 'รอคำตอบ',
+  [RFI_STATUSES.CLOSED]: 'ตอบกลับแล้ว',
 };
 
-// Values are taken from the RFA STATUS_COLORS palette so both modules look like one system.
+// Same muted/earthy theme as RFA's status chart (via MUTED_PALETTE, '@/lib/config/chartColors')
+// instead of a separate bright Tailwind palette, so the two modules read as one system.
 export const RFI_STATUS_COLORS: Record<string, string> = {
-  [RFI_STATUSES.PENDING_SITE]: '#3B82F6',           // Blue-500
-  [RFI_STATUSES.PENDING_SITE_MORE_INFO]: '#F97316', // Orange-500
-  [RFI_STATUSES.PENDING_ASKER]: '#F59E0B',            // Amber-500
-  [RFI_STATUSES.PENDING_CM]: '#8B5CF6',             // Violet-500
-  [RFI_STATUSES.CLOSED]: '#22C55E',                 // Green-500
+  [RFI_STATUSES.PENDING_SITE]: MUTED_PALETTE.slateGrey,
+  [RFI_STATUSES.PENDING_SITE_MORE_INFO]: MUTED_PALETTE.terracotta,
+  [RFI_STATUSES.PENDING_CM]: MUTED_PALETTE.deepSlate,
+  [RFI_STATUSES.CLOSED]: MUTED_PALETTE.mossGreen,
 };
+
+/**
+ * Statuses a NEW document can actually reach. Status pickers and count strips that
+ * should reflect the live pipeline read from this, not from RFI_STATUSES directly.
+ */
+export const RFI_ACTIVE_STATUSES: RFIStatus[] = [
+  RFI_STATUSES.PENDING_SITE,
+  RFI_STATUSES.PENDING_SITE_MORE_INFO,
+  RFI_STATUSES.PENDING_CM,
+  RFI_STATUSES.CLOSED,
+];
 
 /** Colour for the parallel CM track badge, shown alongside the status badge. */
 export const RFI_AWAITING_CM_COLOR = '#8B5CF6';
@@ -72,17 +74,14 @@ export const RFI_AWAITING_CM_LABEL = 'รอ CM ตอบ';
 /**
  * The label to render for a document's current state.
  *
- * PENDING_ASKER needs the document's `origin` to be readable: "รอผู้ถามรับทราบ" is
- * accurate but vague, and the user wants to know WHICH team is holding it.
+ * Describes the STEP only — who is holding it is a separate concern, shown by the
+ * responsible-party badges (getResponsibleParties), not this label.
  */
 export function getRfiStatusLabel(doc: {
   status?: string;
   awaitingCm?: boolean;
   origin?: string;
 }): string {
-  if (doc.status === RFI_STATUSES.PENDING_ASKER) {
-    return `รอ ${askerParty(doc.origin)} รับทราบ`;
-  }
   return RFI_STATUS_LABELS[doc.status || ''] || doc.status || '-';
 }
 
@@ -130,8 +129,6 @@ export const RFI_PARTY_COLORS: Record<RFIParty, string> = {
   DONE: '#22C55E',
 };
 
-// PENDING_ASKER is absent on purpose: which party it means depends on the document's
-// origin, so it is resolved in askerParty() below rather than by a static lookup.
 const STATUS_TO_PARTY: Record<string, RFIParty> = {
   [RFI_STATUSES.PENDING_SITE]: RFI_PARTIES.SITE,
   [RFI_STATUSES.PENDING_SITE_MORE_INFO]: RFI_PARTIES.SITE,
@@ -162,11 +159,6 @@ export function getResponsibleParties(doc: {
 }): RFIParty[] {
   const parties: RFIParty[] = [];
   let fromStatus = doc.status ? STATUS_TO_PARTY[doc.status] : undefined;
-
-  // Waiting on the asker — who that is depends on who raised it.
-  if (doc.status === RFI_STATUSES.PENDING_ASKER) {
-    fromStatus = askerParty(doc.origin);
-  }
 
   // Defensive: PENDING_CM with the CM track settled should not normally exist, because
   // CM_REPLY moves the status off PENDING_CM (toStatusWhenFrom). If a document ever
@@ -225,7 +217,26 @@ export function toRfiDate(value: unknown): Date | null {
   return null;
 }
 
-/** Overdue = past the due date and still waiting on someone. */
+/**
+ * dueDate is stored as UTC midnight of the calendar date the user picked (native
+ * <input type="date"> parsed with `new Date("YYYY-MM-DD")`). "Overdue" has to mean
+ * past the END of that day for the team actually using it — Asia/Bangkok, UTC+7 —
+ * not past UTC midnight, or every document reads overdue ~17 hours too early.
+ */
+const BANGKOK_UTC_OFFSET_HOURS = 7;
+
+/** 23:59:59.999 Asia/Bangkok on the stored due-date, expressed as a UTC epoch ms. */
+function bangkokEndOfDayMs(due: Date): number {
+  return due.getTime() + (24 - BANGKOK_UTC_OFFSET_HOURS) * 60 * 60 * 1000 - 1;
+}
+
+/** "Today" in Asia/Bangkok, as a UTC-midnight epoch ms — comparable to dueDate directly. */
+function bangkokTodayUTCMidnightMs(): number {
+  const bangkokNow = new Date(Date.now() + BANGKOK_UTC_OFFSET_HOURS * 60 * 60 * 1000);
+  return Date.UTC(bangkokNow.getUTCFullYear(), bangkokNow.getUTCMonth(), bangkokNow.getUTCDate());
+}
+
+/** Overdue = past the due date (Bangkok end-of-day) and still waiting on someone. */
 export function isOverdue(doc: {
   status?: string;
   awaitingCm?: boolean;
@@ -234,7 +245,36 @@ export function isOverdue(doc: {
   if (!doc.dueDate || isFullyClosed(doc)) return false;
   const due = toRfiDate(doc.dueDate);
   if (!due) return false;
-  return due.getTime() < Date.now();
+  return bangkokEndOfDayMs(due) < Date.now();
+}
+
+/**
+ * Whole calendar days remaining until the due date, Bangkok-anchored (negative once
+ * it's past). null when there's no due date or the document is fully closed — the
+ * single source RFIListTable and RFIDetailModal both read instead of each computing
+ * their own (browser-local) version, which is what let the two disagree near midnight.
+ */
+export function getDaysUntilDue(doc: {
+  status?: string;
+  awaitingCm?: boolean;
+  dueDate?: unknown;
+}): number | null {
+  if (!doc.dueDate || isFullyClosed(doc)) return null;
+  const due = toRfiDate(doc.dueDate);
+  if (!due) return null;
+  const dueMidnight = Date.UTC(due.getUTCFullYear(), due.getUTCMonth(), due.getUTCDate());
+  return Math.round((dueMidnight - bangkokTodayUTCMidnightMs()) / (24 * 60 * 60 * 1000));
+}
+
+/** Whole days past the due date. 0 when not overdue. */
+export function getDaysOverdue(doc: {
+  status?: string;
+  awaitingCm?: boolean;
+  dueDate?: unknown;
+}): number {
+  if (!isOverdue(doc)) return 0;
+  const remaining = getDaysUntilDue(doc);
+  return remaining === null ? 0 : Math.max(0, -remaining);
 }
 
 // ---------------------------------------------------------------------------
@@ -317,8 +357,12 @@ export interface RFITransition {
  */
 export const RFI_TRANSITIONS: Record<Exclude<RFIAction, 'CREATE'>, RFITransition> = {
   [RFI_ACTIONS.ANSWER]: {
+    // SITE answering directly now closes the document immediately — there is no more
+    // acknowledge step for the asker to press. `REQUEST_MORE_INFO` (below) stays
+    // available afterwards so the asker can still re-open this if the answer given
+    // was incomplete.
     from: [RFI_STATUSES.PENDING_SITE, RFI_STATUSES.PENDING_SITE_MORE_INFO],
-    toStatus: RFI_STATUSES.PENDING_ASKER,
+    toStatus: RFI_STATUSES.CLOSED,
     setAwaitingCm: null,
     actor: RFI_PARTIES.SITE,
     requiresFiles: true,
@@ -333,8 +377,11 @@ export const RFI_TRANSITIONS: Record<Exclude<RFIAction, 'CREATE'>, RFITransition
     requiresCmNumber: true,
   },
   [RFI_ACTIONS.ANSWER_AND_FORWARD]: {
+    // Rests at PENDING_CM, same as a plain forward — CM's reply is what closes it
+    // (below), not this step. SITE's own answer here is just the note that travels
+    // with the forward, not a closing event.
     from: [RFI_STATUSES.PENDING_SITE, RFI_STATUSES.PENDING_SITE_MORE_INFO],
-    toStatus: RFI_STATUSES.PENDING_ASKER,
+    toStatus: RFI_STATUSES.PENDING_CM,
     setAwaitingCm: true,
     actor: RFI_PARTIES.SITE,
     requiresFiles: true,
@@ -343,22 +390,27 @@ export const RFI_TRANSITIONS: Record<Exclude<RFIAction, 'CREATE'>, RFITransition
   [RFI_ACTIONS.CM_REPLY]: {
     // Gated on awaitingCm, not on status — see evaluateAction in the API route.
     from: null,
-    // Leaves `status` alone by default. That is the fix for the legacy bug where CM's
-    // answer overwrote the status and reopened a question BIM had already closed
-    // (rfiController.js:433). The one exception below is a document still sitting at
-    // PENDING_CM: there, CM's answer IS the event that moves it, and it goes back to
-    // whoever asked. In the legacy system that hand-back happened by copying the
-    // answer onto a second, linked document; with one document (D-02) there is nothing
-    // to copy, so the status change is all that is needed.
+    // Leaves `status` alone by default — see the PENDING_CM case below for the one
+    // exception. A document still sitting at PENDING_CM has never had anyone else
+    // decide anything yet, so CM's answer IS the closing event: no acknowledge step
+    // follows it anymore, and `REQUEST_MORE_INFO` does not apply either (see its
+    // block below evaluateAction in the API route) — once CM has answered, that is
+    // final.
     toStatus: null,
-    toStatusWhenFrom: { [RFI_STATUSES.PENDING_CM]: RFI_STATUSES.PENDING_ASKER },
+    toStatusWhenFrom: { [RFI_STATUSES.PENDING_CM]: RFI_STATUSES.CLOSED },
     setAwaitingCm: false,
     actor: RFI_PARTIES.CM,
     requiresFiles: true,
     requiresCmNumber: false,
   },
   [RFI_ACTIONS.ACKNOWLEDGE]: {
-    from: [RFI_STATUSES.PENDING_ASKER],
+    // No longer reachable from any status: ANSWER and CM_REPLY both close directly
+    // now, so nothing routes through this action anymore. Kept as a permanently
+    // inert entry (rather than deleted) because RFI_TRANSITIONS is typed as
+    // Record<Exclude<RFIAction, 'CREATE'>, RFITransition> — every action needs an
+    // entry. The action + label stay defined either way, so old workflow history
+    // still renders correctly (see RFI_ACTION_LABELS above).
+    from: [],
     toStatus: RFI_STATUSES.CLOSED,
     setAwaitingCm: null,
     // `actor` is the fallback for documents with no origin recorded; actorIsAsker is
@@ -371,7 +423,12 @@ export const RFI_TRANSITIONS: Record<Exclude<RFIAction, 'CREATE'>, RFITransition
     requiresCmNumber: false,
   },
   [RFI_ACTIONS.REQUEST_MORE_INFO]: {
-    from: [RFI_STATUSES.PENDING_ASKER],
+    // CLOSED is here so the asker can still send an incomplete SITE answer back for
+    // more detail after auto-close. This must NOT apply once CM has answered — that
+    // extra check (last workflow action === CM_REPLY) lives in evaluateAction in the
+    // API route, since it needs the document's workflow history, not just its
+    // current status.
+    from: [RFI_STATUSES.CLOSED],
     toStatus: RFI_STATUSES.PENDING_SITE_MORE_INFO,
     setAwaitingCm: null,
     actor: RFI_PARTIES.BIM,

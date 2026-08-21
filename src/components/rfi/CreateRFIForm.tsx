@@ -16,7 +16,7 @@
 //   4. There is a กำหนดวันตอบ field, which RFA has no equivalent of.
 
 import React, { useState, useEffect, useMemo } from 'react'
-import { FileText, Upload, X, Check, AlertTriangle, Loader2, Info, CalendarClock } from 'lucide-react'
+import { FileText, Upload, X, Check, AlertTriangle, Loader2, CalendarClock } from 'lucide-react'
 import { useBimTracking } from '@/lib/hooks/useBimTracking'
 import { useAuth } from '@/lib/auth/useAuth'
 import Spinner from '@/components/shared/Spinner'
@@ -480,13 +480,6 @@ export default function CreateRFIForm({
     updateFormData({ uploadedFiles: formData.uploadedFiles.filter((_, i) => i !== index) });
   };
 
-  // Says where the document goes without naming the routing (D-01: the words
-  // Internal/External never reach the screen).
-  // Only BIM's questions pass through SITE. ME, SN and SITE all go straight to CM.
-  const destinationText = origin === 'BIM'
-    ? 'เอกสารนี้จะถูกส่งไปที่ทีมไซต์ เพื่อตอบคำถามหรือส่งต่อให้ CM'
-    : 'เอกสารนี้จะถูกส่งไปที่ CM โดยตรง ไม่ผ่านทีมไซต์';
-
   const todayIso = new Date().toISOString().split('T')[0];
   const selectedSiteName = sites.find(s => s.id === selectedSite)?.name;
 
@@ -510,13 +503,6 @@ export default function CreateRFIForm({
           <div className="flex items-start gap-3 p-4 rounded-xl bg-red-50 border border-red-200 text-sm text-red-800">
             <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
             <p>บทบาทของคุณไม่มีสิทธิ์สร้างเอกสาร RFI</p>
-          </div>
-        )}
-
-        {origin && (
-          <div className="flex items-start gap-3 p-4 rounded-xl bg-blue-50 border border-blue-200 text-sm text-blue-900">
-            <Info className="w-5 h-5 flex-shrink-0 mt-0.5" />
-            <p>{destinationText}</p>
           </div>
         )}
 
@@ -621,7 +607,7 @@ export default function CreateRFIForm({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-medium text-gray-800 mb-2">
-                  เลขที่เอกสาร (สำหรับส่ง CM) {requiresDocNumber && <span className="text-red-500">*</span>}
+                  เลขที่เอกสาร {requiresDocNumber && <span className="text-red-500">*</span>}
                 </label>
                 <div className="relative">
                   <input
@@ -640,9 +626,6 @@ export default function CreateRFIForm({
                   </div>
                 </div>
                 {errors.documentNumber && <p className="text-red-600 text-sm mt-1">{errors.documentNumber}</p>}
-                {!requiresDocNumber && !errors.documentNumber && (
-                  <p className="text-gray-500 text-xs mt-1">ไม่ใส่ก็ได้ — ทีมไซต์จะเติมให้ตอนส่ง CM</p>
-                )}
               </div>
 
               <div>
@@ -656,7 +639,6 @@ export default function CreateRFIForm({
                   onChange={(e) => updateFormData({ dueDate: e.target.value })}
                   className={inputClassName}
                 />
-                <p className="text-gray-500 text-xs mt-1">ไม่ใส่ก็ได้ — ใส่แล้วจะเห็นว่าเกินกำหนดกี่วันในหน้ารายการ</p>
               </div>
             </div>
 
@@ -753,19 +735,9 @@ export default function CreateRFIForm({
               <div className="p-4 bg-gray-50 rounded-lg border space-y-2">
                 <p><strong className="font-medium text-gray-700 w-32 inline-block">โครงการ:</strong> {selectedSiteName}</p>
                 <p><strong className="font-medium text-gray-700 w-32 inline-block">หมวดงาน:</strong> {formData.discipline}</p>
-                {linksTask && (
-                  <p><strong className="font-medium text-gray-700 w-32 inline-block">งาน:</strong> {formData.selectedTask?.taskName}</p>
-                )}
                 <p><strong className="font-medium text-gray-700 w-32 inline-block">เลขที่เอกสาร:</strong> {formData.documentNumber || '(ไม่ได้ระบุ)'}</p>
                 <p><strong className="font-medium text-gray-700 w-32 inline-block">กำหนดวันตอบ:</strong> {formData.dueDate || '(ไม่ได้ระบุ)'}</p>
                 <p className="border-t pt-2 mt-2"><strong className="font-medium text-gray-700 block">หัวข้อคำถาม:</strong> {formData.title}</p>
-                {/* Running number is generated server-side in a transaction, so there is
-                    nothing to preview here — showing a guess would be a lie. */}
-                <p className="text-gray-600 text-xs pt-1">เลขรัน (RFI-...) ระบบจะออกให้ตอนสร้าง</p>
-              </div>
-              <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-900">
-                <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                <p>{destinationText}</p>
               </div>
               <div>
                 <h4 className="font-medium text-gray-700">

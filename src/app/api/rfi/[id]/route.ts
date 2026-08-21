@@ -21,6 +21,7 @@ import { ROLES, Role } from '@/lib/config/workflow';
 import {
   RFI_ACTIONS,
   RFI_ACTION_LABELS,
+  RFI_STATUSES,
   RFI_TRANSITIONS,
   RFI_PARTY_ROLES,
   RFI_SITE_ROLES,
@@ -76,6 +77,22 @@ interface ActionContext {
   origin: RFIOrigin;
   /** EXTERNAL projects have no CM user in the system; SITE records the reply instead. */
   cmSystemType: 'INTERNAL' | 'EXTERNAL';
+  /**
+   * The `action` of the most recent workflow entry, or `null` for a document with no
+   * history yet. Only used to tell apart the two ways a document can be CLOSED: a
+   * direct SITE answer (REQUEST_MORE_INFO should still work) vs. a CM reply
+   * (REQUEST_MORE_INFO must not — see the check in evaluateAction below). Both leave
+   * the document in the same { status, awaitingCm } shape, so status alone cannot
+   * tell them apart.
+   */
+  lastAction: WorkflowAction | null;
+}
+
+/** Reads ctx.lastAction off a document's workflow history. Last entry wins. */
+function getLastWorkflowAction(workflow: unknown): WorkflowAction | null {
+  if (!Array.isArray(workflow) || workflow.length === 0) return null;
+  const last = workflow[workflow.length - 1];
+  return (last?.action as WorkflowAction) ?? null;
 }
 
 interface Verdict {
@@ -143,6 +160,17 @@ function evaluateAction(action: WorkflowAction, ctx: ActionContext): Verdict {
     return { allowed: false, reason: 'เอกสารนี้ไม่ได้ผ่านทาง SITE' };
   }
 
+  // A CLOSED document can only be reopened with REQUEST_MORE_INFO if SITE's own answer
+  // closed it. If CM's reply closed it instead, that is final — see the CM_REPLY note
+  // in rfi-workflow.ts.
+  if (
+    action === RFI_ACTIONS.REQUEST_MORE_INFO &&
+    ctx.status === RFI_STATUSES.CLOSED &&
+    ctx.lastAction === RFI_ACTIONS.CM_REPLY
+  ) {
+    return { allowed: false, reason: 'เอกสารนี้ปิดจากคำตอบของ CM แล้ว ไม่สามารถขอข้อมูลเพิ่มเติมได้อีก' };
+  }
+
   return { allowed: true, reason: '' };
 }
 
@@ -205,6 +233,14 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Access denied' }, { status: 403 });
     }
 
+    // CM only ever sees documents that have reached them (roadmap T-007). This route
+    // uses the Admin SDK, which bypasses firestore.rules entirely, so the same check
+    // must be enforced here too — otherwise opening the URL directly would bypass the
+    // dashboard's query filter.
+    if (userRole === ROLES.CM && rfiData.cmInvolved !== true) {
+      return NextResponse.json({ success: false, error: 'Access denied' }, { status: 403 });
+    }
+
     let siteInfo = { id: rfiData.siteId, name: 'N/A', cmSystemType: 'INTERNAL' as const };
     let cmSystemType: 'INTERNAL' | 'EXTERNAL' = 'INTERNAL';
 
@@ -227,6 +263,7 @@ export async function GET(
       awaitingCm: rfiData.awaitingCm === true,
       origin: (rfiData.origin || 'BIM') as RFIOrigin,
       cmSystemType,
+      lastAction: getLastWorkflowAction(rfiData.workflow),
     });
 
     return NextResponse.json({
@@ -314,6 +351,7 @@ export async function PUT(
       awaitingCm: docData.awaitingCm === true,
       origin: (docData.origin || 'BIM') as RFIOrigin,
       cmSystemType,
+      lastAction: getLastWorkflowAction(docData.workflow),
     });
     if (!verdict.allowed) {
       return NextResponse.json({ success: false, error: verdict.reason }, { status: 403 });
@@ -413,6 +451,10 @@ export async function PUT(
     const newStatus: string = overrideStatus ?? transition.toStatus ?? docData.status;
     const newAwaitingCm: boolean =
       transition.setAwaitingCm === null ? docData.awaitingCm === true : transition.setAwaitingCm;
+    // Sticky once true (roadmap T-007 — CM dashboard filter): CM_REPLY clears
+    // awaitingCm back to false, so awaitingCm alone cannot tell "never involved CM"
+    // apart from "CM already answered". This flag never goes back to false.
+    const newCmInvolved: boolean = docData.cmInvolved === true || newAwaitingCm === true;
 
     const existingFiles: RFIFile[] = docData.files || [];
     const allFiles = [...existingFiles, ...movedFiles];
@@ -435,6 +477,7 @@ export async function PUT(
       status: newStatus,
       currentStep: newStatus,
       awaitingCm: newAwaitingCm,
+      cmInvolved: newCmInvolved,
       workflow: FieldValue.arrayUnion(workflowEntry),
       updatedBy: userId,
       updatedAt: FieldValue.serverTimestamp(),

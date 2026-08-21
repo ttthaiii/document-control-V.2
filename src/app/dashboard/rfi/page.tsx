@@ -19,12 +19,13 @@ import { AuthGuard } from '@/lib/components/shared/AuthGuard'
 import RFIListTable from '@/components/rfi/RFIListTable'
 import CreateRFIForm from '@/components/rfi/CreateRFIForm'
 import RFIDetailModal from '@/components/rfi/RFIDetailModal'
+import DashboardStats from '@/components/rfi/DashboardStats'
 import { RFIDocument } from '@/types/rfi'
 import { Role } from '@/lib/config/workflow'
 import {
   RFI_STATUS_LABELS,
+  RFI_ACTIVE_STATUSES,
   RFI_PARTY_LABELS,
-  RFI_PARTY_COLORS,
   RFI_DISCIPLINES,
   getResponsibleParties,
   isOverdue,
@@ -55,6 +56,35 @@ const INITIAL_FILTERS: Filters = {
 };
 
 const selectClass = "h-10 px-3 border border-gray-300 rounded-lg bg-white text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none";
+
+function matchesSearch(doc: RFIDocument, term: string): boolean {
+  if (!term.trim()) return true;
+  const search = term.toLowerCase();
+  return (
+    (doc.runningNumber || '').toLowerCase().includes(search) ||
+    (doc.documentNumber || '').toLowerCase().includes(search) ||
+    (doc.title || '').toLowerCase().includes(search)
+  );
+}
+
+/** Applies every Filters field EXCEPT the ones named in `skip` — lets each donut
+ * chart exclude its own dimension so it shows a true breakdown instead of
+ * collapsing to one slice when that same filter is active. */
+function applyFilters<T extends RFIDocument & { site: { id: string } }>(
+  docs: T[],
+  f: Filters,
+  skip: Partial<Record<keyof Filters, boolean>> = {}
+): T[] {
+  let out = docs;
+  if (!skip.status && f.status !== 'ALL') out = out.filter(d => d.status === f.status);
+  if (!skip.siteId && f.siteId !== 'ALL') out = out.filter(d => d.site.id === f.siteId);
+  if (!skip.categoryId && f.categoryId !== 'ALL') out = out.filter(d => d.category?.categoryCode === f.categoryId);
+  if (!skip.overdueOnly && f.overdueOnly) out = out.filter(d => isOverdue(d));
+  if (!skip.responsibleParty && f.responsibleParty !== 'ALL') {
+    out = out.filter(d => getResponsibleParties(d).includes(f.responsibleParty as RFIParty));
+  }
+  return out;
+}
 
 function RFIContent() {
   const { user, firebaseUser } = useAuth();
@@ -93,12 +123,23 @@ function RFIContent() {
     }
     setLoading(true);
 
-    // Needs the composite index siteId + updatedAt (firestore.indexes.json).
-    const q = query(
-      collection(db, 'rfiDocuments'),
-      where('siteId', 'in', user.sites),
-      orderBy('updatedAt', 'desc')
-    );
+    // CM only ever sees documents that have reached them (roadmap T-007). This filter
+    // MUST match firestore.rules exactly — the rule rejects the whole query for CM
+    // otherwise (see firestore.rules rfiDocuments). Needs the composite index
+    // siteId + cmInvolved + updatedAt (firestore.indexes.json); other roles use the
+    // plain siteId + updatedAt index.
+    const q = user.role === 'CM'
+      ? query(
+          collection(db, 'rfiDocuments'),
+          where('siteId', 'in', user.sites),
+          where('cmInvolved', '==', true),
+          orderBy('updatedAt', 'desc')
+        )
+      : query(
+          collection(db, 'rfiDocuments'),
+          where('siteId', 'in', user.sites),
+          orderBy('updatedAt', 'desc')
+        );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const docs: RFIDocument[] = snapshot.docs.map(d => {
@@ -153,52 +194,16 @@ function RFIContent() {
   }, [allDocuments, sites]);
 
   const filteredDocuments = useMemo(() => {
-    let docs = documentsWithSiteNames;
-
-    if (filters.status !== 'ALL') docs = docs.filter(d => d.status === filters.status);
-    if (filters.siteId !== 'ALL') docs = docs.filter(d => d.site.id === filters.siteId);
-    if (filters.categoryId !== 'ALL') docs = docs.filter(d => d.category?.categoryCode === filters.categoryId);
-    if (filters.overdueOnly) docs = docs.filter(d => isOverdue(d));
-
-    if (filters.responsibleParty !== 'ALL') {
-      // A document appears under EVERY party it is waiting on, so the two-party case
-      // (answer BIM + forward to CM) is not lost from either filter.
-      docs = docs.filter(d => getResponsibleParties(d).includes(filters.responsibleParty as RFIParty));
-    }
-
-    if (searchTerm.trim()) {
-      const search = searchTerm.toLowerCase();
-      docs = docs.filter(d =>
-        (d.runningNumber || '').toLowerCase().includes(search) ||
-        (d.documentNumber || '').toLowerCase().includes(search) ||
-        (d.title || '').toLowerCase().includes(search)
-      );
-    }
-
-    return docs;
+    return applyFilters(documentsWithSiteNames, filters).filter(d => matchesSearch(d, searchTerm));
   }, [documentsWithSiteNames, filters, searchTerm]);
 
-/**
-   * Counts run on the project-filtered set, so they match what the table shows.
-   *
-   * Party counts are computed for EVERY party and the empty ones are dropped when the
-   * cards render. There are five asking/answering parties now (BIM, ME, SN, SITE, CM)
-   * and showing all five on a project that only has BIM work would be noise.
-   */
-  const stats = useMemo(() => {
-    const base = documentsWithSiteNames.filter(d =>
-      filters.siteId === 'ALL' || d.site.id === filters.siteId
-    );
-    const byParty = {} as Record<RFIParty, number>;
-    (Object.keys(RFI_PARTY_LABELS) as RFIParty[]).forEach(party => {
-      byParty[party] = base.filter(d => getResponsibleParties(d).includes(party)).length;
-    });
-    return {
-      total: base.length,
-      byParty,
-      overdue: base.filter(d => isOverdue(d)).length,
-    };
-  }, [documentsWithSiteNames, filters.siteId]);
+  const statusChartDocuments = useMemo(() => {
+    return applyFilters(documentsWithSiteNames, filters, { status: true }).filter(d => matchesSearch(d, searchTerm));
+  }, [documentsWithSiteNames, filters, searchTerm]);
+
+  const categoryChartDocuments = useMemo(() => {
+    return applyFilters(documentsWithSiteNames, filters, { categoryId: true }).filter(d => matchesSearch(d, searchTerm));
+  }, [documentsWithSiteNames, filters, searchTerm]);
 
   /** Disciplines actually present, unioned with the standard list so filters stay stable. */
   const availableCategories = useMemo(() => {
@@ -219,26 +224,6 @@ function RFIContent() {
   };
 
   if (!user) return null;
-
-  // A card per party that actually has documents, between the total and the overdue
-  // count. A project with no MEP work simply never shows a "รอ ME" card.
-  const partyCards = (['BIM', 'ME', 'SN', 'SITE', 'CM'] as RFIParty[])
-    .filter(party => stats.byParty[party] > 0 || filters.responsibleParty === party)
-    .map(party => ({
-      label: RFI_PARTY_LABELS[party],
-      value: stats.byParty[party],
-      colour: RFI_PARTY_COLORS[party],
-      party,
-      overdue: false,
-    }));
-
-  const statCards: {
-    label: string; value: number; colour: string; party?: RFIParty; overdue?: boolean;
-  }[] = [
-    { label: 'ทั้งหมด', value: stats.total, colour: '#334155' },
-    ...partyCards,
-    { label: 'เกินกำหนด', value: stats.overdue, colour: '#DC2626', overdue: true },
-  ];
 
   return (
     <AuthGuard>
@@ -267,38 +252,12 @@ function RFIContent() {
           </div>
         </div>
 
-        {/* Stat strip. Each card is a filter shortcut — clicking "รอ CM" filters to it. */}
-        <div className="flex flex-wrap gap-3 mb-6">
-          {statCards.map(card => {
-            const isActive = card.overdue
-              ? filters.overdueOnly
-              : card.party
-                ? filters.responsibleParty === card.party
-                : filters.responsibleParty === 'ALL' && !filters.overdueOnly;
-            return (
-              <button
-                key={card.label}
-                onClick={() => {
-                  if (card.overdue) {
-                    setFilters(prev => ({ ...prev, overdueOnly: !prev.overdueOnly, responsibleParty: 'ALL' }));
-                  } else if (card.party) {
-                    setFilters(prev => ({
-                      ...prev,
-                      responsibleParty: prev.responsibleParty === card.party ? 'ALL' : card.party!,
-                      overdueOnly: false,
-                    }));
-                  } else {
-                    setFilters(prev => ({ ...prev, responsibleParty: 'ALL', overdueOnly: false }));
-                  }
-                }}
-                className={`bg-white rounded-xl border p-4 text-left transition-all hover:shadow-sm flex-1 min-w-[120px] ${isActive ? 'border-blue-500 ring-1 ring-blue-500' : 'border-gray-200'}`}
-              >
-                <p className="text-xs text-gray-500">{card.label}</p>
-                <p className="text-2xl font-bold mt-1" style={{ color: card.colour }}>{card.value}</p>
-              </button>
-            );
-          })}
-        </div>
+        <DashboardStats
+          allDocuments={statusChartDocuments}
+          categoryDocuments={categoryChartDocuments}
+          onChartFilter={(key, value) => handleFilterChange(key, value)}
+          activeFilters={{ status: filters.status, categoryId: filters.categoryId }}
+        />
 
         {/* Filters */}
         <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
@@ -326,8 +285,8 @@ function RFIContent() {
 
             <select value={filters.status} onChange={(e) => handleFilterChange('status', e.target.value)} className={selectClass}>
               <option value="ALL">ทุกสถานะ</option>
-              {Object.entries(RFI_STATUS_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
+              {RFI_ACTIVE_STATUSES.map(status => (
+                <option key={status} value={status}>{RFI_STATUS_LABELS[status]}</option>
               ))}
             </select>
 

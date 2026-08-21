@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { STATUS_LABELS, STATUSES } from '@/lib/config/workflow';
+import { getCategoryColor, MUTED_PALETTE } from '@/lib/config/chartColors';
 import { RFADocument } from '@/types/rfa';
 
 interface Category {
@@ -43,57 +44,28 @@ const CustomTooltip = ({ active, payload }: any) => {
   return null;
 };
 
-// Golden Angle hue distribution + earthy/muted saturation (60-65%, lightness 38-46%)
-// เข้ากับ theme ของระบบ: stone blue, moss green, terracotta, slate
-const CATEGORY_COLORS = [
-  '#B83232', // hue   0° – Muted Crimson    (แดงหม่น)
-  '#238C42', // hue 138° – Forest Green     (เขียวป่า)
-  '#7640A8', // hue 275° – Stone Violet     (ม่วงหิน)
-  '#A88C1A', // hue  52° – Warm Mustard     (เหลืองมัสตาร์ดอุ่น)
-  '#1779A0', // hue 190° – Steel Cerulean   (ฟ้าเหล็กกล้า)
-  '#A02868', // hue 328° – Dusty Rose       (กุหลาบฝุ่น)
-  '#3E8826', // hue 105° – Olive Green      (เขียวมะกอก)
-  '#3D44B0', // hue 242° – Denim Indigo     (ครามยีนส์)
-  '#B05618', // hue  20° – Sienna Brown     (น้ำตาลดินเผา)
-  '#1E8A60', // hue 157° – Jade             (หยก)
-  '#C2185B', // hue 336° – Deep Rose        (กุหลาบเข้ม)        [เดิม 295° ชนกับ 315°]
-  '#748C0A', // hue  72° – Olive Bark       (เปลือกต้นมะกอก)
-  '#1C6AAA', // hue 210° – River Blue       (ฟ้าแม่น้ำ)
-  '#B8620A', // hue  27° – Burnt Orange     (ส้มไหม้)           [เดิม 347° ชนกับ 0°]
-  '#1A7A40', // hue 145° – Emerald Muted    (มรกตหม่น)          [เดิม 125° ชนกับ 138°]
-  '#6248B0', // hue 263° – Slate Purple     (ม่วงหินชนวน)
-  '#A87612', // hue  40° – Burnished Gold   (ทองขัดเงา)
-  '#0F7A8C', // hue 188° – Deep Cyan        (ฟ้าเขียวเข้ม)      [เดิม 178° ชนกับ 190°]
-  '#9C2480', // hue 315° – Mulberry         (หม่อน)
-  '#7A9214', // hue  80° – Yellow Olive     (มะกอกเหลือง)       [เดิม 92° ชนกับ 105°]
-];
-
-/** Hash ชื่อ category → index คงที่ ทำให้สีไม่เปลี่ยนเมื่อ filter */
-function getCategoryColor(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
-  }
-  return CATEGORY_COLORS[hash % CATEGORY_COLORS.length];
-}
+// CATEGORY_COLORS + getCategoryColor now come from '@/lib/config/chartColors' —
+// single declared source so RFI's หมวดงาน chart uses the exact same palette.
 
 // ✅ [แก้ไข 1] กำหนดสีแยกรายสถานะให้ชัดเจน (ไม่ Group รวมกันแล้ว)
+// Values now reference MUTED_PALETTE (same hex as before — no visual change) so
+// another module's status enum can reuse these exact tones by name.
 const STATUS_CHART_COLORS: { [key: string]: string } = {
   // กลุ่มสีเทาอมฟ้า/หิน (รออนุมัติ - สงบ รอคอย)
-  [STATUSES.PENDING_REVIEW]: '#78909C',           // Slate Grey (เทาอมฟ้าตุ่นๆ)
-  [STATUSES.PENDING_CM_APPROVAL]: '#546E7A',      // Deep Slate (เทาเข้มขึ้นมาหน่อย)
-  [STATUSES.PENDING_FINAL_APPROVAL]: '#607D8B',   // Blue Grey (เทากลางๆ)
+  [STATUSES.PENDING_REVIEW]: MUTED_PALETTE.slateGrey,           // เทาอมฟ้าตุ่นๆ
+  [STATUSES.PENDING_CM_APPROVAL]: MUTED_PALETTE.deepSlate,      // เทาเข้มขึ้นมาหน่อย
+  [STATUSES.PENDING_FINAL_APPROVAL]: MUTED_PALETTE.blueGrey,    // เทากลางๆ
 
   // กลุ่มสีเขียวธรรมชาติ (ผ่าน - สำเร็จ)
-  [STATUSES.APPROVED]: '#558B2F',                 // Moss Green (เขียวมอส/เขียวใบไม้แก่)
-  [STATUSES.APPROVED_WITH_COMMENTS]: '#4DB6AC',   // Muted Teal / Sage (เขียวอมฟ้าปนเทา - ให้ดูต่างจากมอส)
+  [STATUSES.APPROVED]: MUTED_PALETTE.mossGreen,                 // เขียวมอส/เขียวใบไม้แก่
+  [STATUSES.APPROVED_WITH_COMMENTS]: MUTED_PALETTE.mutedTeal,   // เขียวอมฟ้าปนเทา - ให้ดูต่างจากมอส
 
   // กลุ่มสีดิน/ทราย (แก้ไข - แจ้งเตือน)
-  [STATUSES.REVISION_REQUIRED]: '#C0CA33',        // Muted Lime / Olive Yellow (เหลืองอมเขียวตุ่นๆ)
-  [STATUSES.APPROVED_REVISION_REQUIRED]: '#D87D4A', // Terracotta / Muted Orange (สีส้มอิฐ/ดินเผา - แจ้งเตือนเข้มข้นกว่า)
+  [STATUSES.REVISION_REQUIRED]: MUTED_PALETTE.mutedLime,        // เหลืองอมเขียวตุ่นๆ
+  [STATUSES.APPROVED_REVISION_REQUIRED]: MUTED_PALETTE.terracotta, // สีส้มอิฐ/ดินเผา - แจ้งเตือนเข้มข้นกว่า
 
   // กลุ่มสีแดงสนิม (ไม่ผ่าน - ปฏิเสธ)
-  [STATUSES.REJECTED]: '#A5574C',                 // Rust Red / Clay (แดงสนิม/ดินแดงเข้ม)
+  [STATUSES.REJECTED]: MUTED_PALETTE.rust,                      // แดงสนิม/ดินแดงเข้ม
 };
 
 const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFilter, activeFilters, categories, availableStatuses }) => {

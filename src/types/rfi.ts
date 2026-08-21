@@ -127,6 +127,10 @@ export interface RFIDocument {
   currentStep: string;
   /** The parallel CM track. True while an answer from CM is still outstanding. */
   awaitingCm: boolean;
+  /** Sticky once true: has this document ever reached CM? Drives the CM dashboard
+   * filter (roadmap T-007) — awaitingCm alone can't tell "never involved CM" apart
+   * from "CM already answered", since CM_REPLY clears it back to false. */
+  cmInvolved?: boolean;
 
   // --- Dates ---
   // Timestamp on read, Date on write, ISO string over an API boundary — read every one

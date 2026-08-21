@@ -270,6 +270,9 @@ export async function POST(req: Request) {
       status: route.status,
       currentStep: route.status,
       awaitingCm: route.awaitingCm,
+      // Sticky flag for the CM dashboard filter (roadmap T-007): true the moment the
+      // document is first relevant to CM, never reset back — see rfi/[id]/route.ts PUT.
+      cmInvolved: route.awaitingCm,
 
       dueDate: dueDate ? new Date(dueDate) : null,
       answeredAt: null,

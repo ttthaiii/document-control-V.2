@@ -27,7 +27,8 @@ import {
   RFI_STATUSES,
   getResponsibleParties,
   isOverdue,
-  isFullyClosed,
+  getDaysOverdue,
+  getDaysUntilDue,
   toRfiDate,
 } from '@/lib/config/rfi-workflow'
 import Spinner from '@/components/shared/Spinner'
@@ -45,16 +46,6 @@ const formatDate = (value: unknown): string => {
   const d = toRfiDate(value);
   if (!d) return '-';
   return d.toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: 'numeric' });
-};
-
-/** Whole days past the due date. 0 when not overdue. */
-const daysOverdue = (doc: RFIDocument): number => {
-  const due = toRfiDate(doc.dueDate);
-  if (!due || isFullyClosed(doc)) return 0;
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const dueDay = new Date(due); dueDay.setHours(0, 0, 0, 0);
-  const diff = Math.floor((today.getTime() - dueDay.getTime()) / (1000 * 60 * 60 * 24));
-  return Math.max(0, diff);
 };
 
 /** The colour maps hold hex, so badges are tinted inline instead of via Tailwind classes. */
@@ -106,18 +97,43 @@ function PartyBadges({ doc }: { doc: RFIDocument }) {
   );
 }
 
+/** 7-day/3-day/overdue warning bands. Nothing else beyond these three states. */
+type DueUrgency = 'red' | 'orange' | 'yellow';
+
+const dueUrgency = (doc: RFIDocument, overdue: boolean, remaining: number | null): DueUrgency | null => {
+  if (overdue || (remaining !== null && remaining <= 0)) return 'red';
+  if (remaining !== null && remaining <= 3) return 'orange';
+  if (remaining !== null && remaining <= 7) return 'yellow';
+  return null;
+};
+
+const DUE_URGENCY_TEXT_CLASS: Record<DueUrgency, string> = {
+  red: 'text-red-600',
+  orange: 'text-orange-600',
+  yellow: 'text-yellow-700',
+};
+
 function DueCell({ doc }: { doc: RFIDocument }) {
   const overdue = isOverdue(doc);
-  const late = daysOverdue(doc);
+  const late = getDaysOverdue(doc);
+  const remaining = getDaysUntilDue(doc);
   if (!doc.dueDate) return <span className="text-sm text-gray-400">ไม่ได้กำหนด</span>;
+
+  const urgency = dueUrgency(doc, overdue, remaining);
+
   return (
     <div className="flex flex-col items-center gap-0.5">
-      <span className={`text-sm ${overdue ? 'text-red-600 font-semibold' : 'text-gray-700'}`}>
+      <span className={`text-sm ${urgency ? `font-semibold ${DUE_URGENCY_TEXT_CLASS[urgency]}` : 'text-gray-700'}`}>
         {formatDate(doc.dueDate)}
       </span>
       {overdue && late > 0 && (
         <span className="inline-flex items-center gap-1 text-xs text-red-600 font-medium">
           <AlertTriangle className="w-3 h-3" /> เกิน {late} วัน
+        </span>
+      )}
+      {!overdue && urgency && remaining !== null && (
+        <span className={`inline-flex items-center gap-1 text-xs font-medium ${DUE_URGENCY_TEXT_CLASS[urgency]}`}>
+          <AlertTriangle className="w-3 h-3" /> {remaining <= 0 ? 'ถึงกำหนดวันนี้' : `เหลือ ${remaining} วัน`}
         </span>
       )}
     </div>
@@ -230,7 +246,7 @@ export default function RFIListTable({ documents, isLoading, onDocumentClick }: 
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-blue-600">{doc.runningNumber}</p>
                 <h3 className="font-medium text-gray-900 text-sm truncate mt-0.5">
-                  {doc.documentNumber || <span className="text-gray-400">ยังไม่มีเลขที่ส่ง CM</span>}
+                  {doc.documentNumber}
                 </h3>
                 <p className="text-sm text-gray-600 line-clamp-2 mt-1">{doc.title}</p>
               </div>
@@ -317,7 +333,7 @@ export default function RFIListTable({ documents, isLoading, onDocumentClick }: 
                 <td className="px-6 py-4">
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">
-                      {doc.documentNumber || <span className="text-gray-400 font-normal">ยังไม่มีเลขที่ส่ง CM</span>}
+                      {doc.documentNumber}
                     </p>
                     <p className="text-sm text-gray-600 line-clamp-2">{doc.title}</p>
                   </div>
