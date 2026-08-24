@@ -17,6 +17,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { FileText, Calendar, User, Building, Tag, ArrowUp, ArrowDown, CalendarClock, AlertTriangle } from 'lucide-react'
 import { RFIDocument } from '@/types/rfi'
+import { ROLES } from '@/lib/config/workflow'
 import {
   getRfiStatusLabel,
   getRfiStatusColor,
@@ -38,6 +39,10 @@ interface RFIListTableProps {
   isLoading: boolean
   /** Optional until the detail modal exists (file plan #11). Rows are inert without it. */
   onDocumentClick?: (document: RFIDocument) => void
+  /** CM only sees documents already filtered to their own status, so "รอใครอยู่"
+   * (which names internal parties like Site/BIM) is hidden entirely for CM — mirrors
+   * the same column removal in RFAListTable. */
+  userRole?: string
 }
 
 // Date conversion lives in rfi-workflow (toRfiDate) so this table and isOverdue can
@@ -140,7 +145,8 @@ function DueCell({ doc }: { doc: RFIDocument }) {
   );
 }
 
-export default function RFIListTable({ documents, isLoading, onDocumentClick }: RFIListTableProps) {
+export default function RFIListTable({ documents, isLoading, onDocumentClick, userRole }: RFIListTableProps) {
+  const showResponsibleParty = userRole !== ROLES.CM;
   const [isMobile, setIsMobile] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection } | null>(
     { key: 'updatedAt', direction: 'descending' }
@@ -255,9 +261,11 @@ export default function RFIListTable({ documents, isLoading, onDocumentClick }: 
             <div className="space-y-2 text-xs text-gray-600">
               <div className="flex items-center"><Building className="w-3 h-3 mr-2" />{doc.site?.name || '-'}</div>
               <div className="flex items-center"><Tag className="w-3 h-3 mr-2" />{doc.category?.categoryCode || '-'}</div>
-              <div className="flex items-center gap-2">
-                <User className="w-3 h-3" /> รอใครอยู่: <PartyBadges doc={doc} />
-              </div>
+              {showResponsibleParty && (
+                <div className="flex items-center gap-2">
+                  <User className="w-3 h-3" /> รอใครอยู่: <PartyBadges doc={doc} />
+                </div>
+              )}
               <div className="flex items-center gap-2">
                 <CalendarClock className="w-3 h-3" /> กำหนดตอบ: <DueCell doc={doc} />
               </div>
@@ -302,11 +310,13 @@ export default function RFIListTable({ documents, isLoading, onDocumentClick }: 
                   กำหนดตอบ <SortIcon columnKey="dueDate" />
                 </button>
               </th>
-              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                <button onClick={() => requestSort('responsibleParty')} className="flex items-center justify-center w-full">
-                  รอใครอยู่ <SortIcon columnKey="responsibleParty" />
-                </button>
-              </th>
+              {showResponsibleParty && (
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <button onClick={() => requestSort('responsibleParty')} className="flex items-center justify-center w-full">
+                    รอใครอยู่ <SortIcon columnKey="responsibleParty" />
+                  </button>
+                </th>
+              )}
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                 <button onClick={() => requestSort('updatedAt')} className="flex items-center justify-center w-full">
                   อัปเดตล่าสุด <SortIcon columnKey="updatedAt" />
@@ -340,7 +350,9 @@ export default function RFIListTable({ documents, isLoading, onDocumentClick }: 
                 </td>
                 <td className="px-6 py-4"><StatusBadges doc={doc} /></td>
                 <td className="px-6 py-4 text-center"><DueCell doc={doc} /></td>
-                <td className="px-6 py-4"><PartyBadges doc={doc} /></td>
+                {showResponsibleParty && (
+                  <td className="px-6 py-4"><PartyBadges doc={doc} /></td>
+                )}
                 <td className="px-6 py-4">
                   <p className="text-sm text-gray-600 text-center">{formatDate(doc.updatedAt)}</p>
                 </td>

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { FileText, Calendar, User, Clock, Building, Tag, ArrowUp, ArrowDown, Lock, AlertTriangle } from 'lucide-react'
 import { RFADocument } from '@/types/rfa'
 
-import { STATUSES } from '@/lib/config/workflow'
+import { ROLES, STATUSES } from '@/lib/config/workflow'
 import Spinner from '@/components/shared/Spinner'
 
 interface RFAListTableProps {
@@ -14,6 +14,12 @@ interface RFAListTableProps {
   getStatusColor: (status: string) => string
   statusLabels: { [key: string]: string }
   getRFATypeColor: (type: string) => string
+  /** CM only ever sees documents already filtered to their own status, so knowing
+   * whether a doc currently sits with Site or BIM internally is not their concern —
+   * this column is hidden entirely for CM rather than simplified, since even a
+   * simplified pending/done split hits an ambiguous case for REJECTED (a rejected
+   * doc's revision starts a brand-new document, so "done" doesn't quite fit either). */
+  userRole?: string
 }
 
 // ✅ [FIX 3] กำหนดสถานะที่ "ยังไม่เสร็จสิ้น" ทั้งหมด เพื่อใช้คำนวณวันค้าง
@@ -53,8 +59,10 @@ export default function RFAListTable({
   onDocumentClick,
   getStatusColor,
   statusLabels,
-  getRFATypeColor
+  getRFATypeColor,
+  userRole
 }: RFAListTableProps) {
+  const showResponsibleParty = userRole !== ROLES.CM
   const [isMobile, setIsMobile] = useState(false)
 
   // ✅ [CHANGE 1] เพิ่ม State สำหรับจัดการการเรียงลำดับ
@@ -254,10 +262,12 @@ export default function RFAListTable({
                   <Tag className="w-3 h-3 mr-2" />
                   <span>{doc.category?.categoryCode || 'N/A'}</span>
                 </div>
-                <div className="flex items-center">
-                  <User className="w-3 h-3 mr-2" />
-                  <span>ผู้รับผิดชอบ: {responsible.name}</span>
-                </div>
+                {showResponsibleParty && (
+                  <div className="flex items-center">
+                    <User className="w-3 h-3 mr-2" />
+                    <span>ผู้รับผิดชอบ: {responsible.name}</span>
+                  </div>
+                )}
                 <div className="flex items-center">
                   <Calendar className="w-3 h-3 mr-2" />
                   <span>อัปเดต: {formatDate(doc.updatedAt)}</span>
@@ -308,11 +318,13 @@ export default function RFAListTable({
                   สถานะ <SortIcon columnKey='pendingDays' />
                 </button>
               </th>
-              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                <button onClick={() => requestSort('responsibleParty')} className="flex items-center justify-center w-full">
-                  ผู้รับผิดชอบ <SortIcon columnKey='responsibleParty' />
-                </button>
-              </th>
+              {showResponsibleParty && (
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <button onClick={() => requestSort('responsibleParty')} className="flex items-center justify-center w-full">
+                    ผู้รับผิดชอบ <SortIcon columnKey='responsibleParty' />
+                  </button>
+                </th>
+              )}
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                 <button onClick={() => requestSort('updatedAt')} className="flex items-center justify-center w-full">
                   วันที่อัปเดตล่าสุด <SortIcon columnKey='updatedAt' />
@@ -370,14 +382,16 @@ export default function RFAListTable({
                       )}
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-center">
-                    <div className="flex items-center justify-center">
-                      <User className="w-4 h-4 text-gray-400 mr-2" />
-                      <div className="text-sm">
-                        <p className="text-gray-900">{responsible.name}</p>
+                  {showResponsibleParty && (
+                    <td className="px-6 py-4 text-center">
+                      <div className="flex items-center justify-center">
+                        <User className="w-4 h-4 text-gray-400 mr-2" />
+                        <div className="text-sm">
+                          <p className="text-gray-900">{responsible.name}</p>
+                        </div>
                       </div>
-                    </div>
-                  </td>
+                    </td>
+                  )}
                   <td className="px-6 py-4">
                     <div className="text-sm text-gray-600 text-center">
                       <span>{formatDate(doc.updatedAt)}</span>

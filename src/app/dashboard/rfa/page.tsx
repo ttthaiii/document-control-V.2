@@ -9,7 +9,7 @@ import RFAListTable from '@/components/rfa/RFAListTable'
 import DashboardStats from '@/components/rfa/DashboardStats'
 import CreateRFAForm from '@/components/rfa/CreateRFAForm'
 import { RFADocument, Site as SiteType, Category } from '@/types/rfa'
-import { STATUSES, STATUS_LABELS, Role, STATUS_COLORS } from '@/lib/config/workflow'
+import { STATUSES, STATUS_LABELS, Role, STATUS_COLORS, RFA_CM_VISIBLE_STATUSES, getRfaStatusLabelForRole, normalizeRfaStatusForRole } from '@/lib/config/workflow'
 import { Plus, RefreshCw, ClipboardList } from 'lucide-react'
 import SmartRFAModal from '@/components/rfa/SmartRFAModal'
 import FilterBar from '@/components/rfa/FilterBar'
@@ -127,11 +127,22 @@ function RFAContent() {
         setLoading(true);
         console.log('[DEBUG-RFA] Fetching documents using SITE IDs:', user.sites);
 
-        const q = query(
-            collection(db, 'rfaDocuments'),
-            where('siteId', 'in', user.sites),
-            orderBy('updatedAt', 'desc')
-        );
+        // CM only ever sees documents that have reached them (roadmap T-008). This
+        // filter MUST match firestore.rules exactly — the rule rejects the whole query
+        // for CM otherwise (see firestore.rules rfaDocuments). Needs the composite
+        // index siteId + status + updatedAt (firestore.indexes.json).
+        const q = user.role === 'CM'
+            ? query(
+                collection(db, 'rfaDocuments'),
+                where('siteId', 'in', user.sites),
+                where('status', 'in', RFA_CM_VISIBLE_STATUSES),
+                orderBy('updatedAt', 'desc')
+            )
+            : query(
+                collection(db, 'rfaDocuments'),
+                where('siteId', 'in', user.sites),
+                orderBy('updatedAt', 'desc')
+            );
 
         const unsubscribe = onSnapshot(q, (querySnapshot) => {
             if (querySnapshot.empty) {
@@ -274,6 +285,20 @@ function RFAContent() {
 
 
 
+    // CM sees "อนุมัติตามคอมเมนต์" as one concept everywhere — the ต้องแก้ไข/ไม่ต้องแก้ไข
+    // split is SITE's own internal round-2 classification, never something CM decided.
+    const displayStatusLabels = useMemo(() => {
+        if (user?.role !== 'CM') return STATUS_LABELS;
+        // Rebuild from every real status key so this always matches whatever
+        // getRfaStatusLabelForRole considers CM-collapsed — a hardcoded single-key
+        // override here silently drifts out of sync when that set changes.
+        const labels: { [key: string]: string } = {};
+        for (const key of Object.keys(STATUS_LABELS)) {
+            labels[key] = getRfaStatusLabelForRole(key, user.role);
+        }
+        return labels;
+    }, [user?.role]);
+
     const availableResponsibleParties = useMemo(() => [
         { value: 'ALL', label: 'ทุกคน' },
         { value: 'SITE', label: isExternalCM ? 'Site (รอตรวจสอบ)' : 'Site (รอตรวจสอบ/รออนุมัติขั้นสุดท้าย)' },
@@ -301,7 +326,9 @@ function RFAContent() {
         }
     }, [filters.responsibleParty, isExternalCM]);
     const getStatusColor = (status: string) => {
-        switch (status) {
+        // CM must never see PENDING_FINAL_APPROVAL's "waiting" color once they've
+        // already approved with comments — SITE's round-2 loop is invisible to them.
+        switch (normalizeRfaStatusForRole(status, user?.role)) {
             // กลุ่มรออนุมัติ (โทนหิน/เทาอมฟ้า)
             case STATUSES.PENDING_REVIEW:
                 return 'bg-[#78909C]/20 text-[#546E7A]'; // Slate
@@ -476,6 +503,7 @@ function RFAContent() {
                     <FilterBar
                         filters={filters} handleFilterChange={handleFilterChange} searchTerm={searchTerm} setSearchTerm={setSearchTerm} resetFilters={resetFilters}
                         sites={sites} categories={availableCategories} availableStatuses={availableStatuses} availableResponsibleParties={availableResponsibleParties}
+                        showResponsibleParty={user?.role !== 'CM'}
                     />
                 </div>
 
@@ -488,8 +516,9 @@ function RFAContent() {
                             isLoading={loading}
                             onDocumentClick={handleDocumentClick}
                             getStatusColor={getStatusColor}
-                            statusLabels={STATUS_LABELS}
+                            statusLabels={displayStatusLabels}
                             getRFATypeColor={getRFATypeColor}
+                            userRole={user?.role}
                         />
                     )}
                 </div>

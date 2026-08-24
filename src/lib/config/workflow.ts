@@ -62,6 +62,25 @@ export const STATUSES = {
   REVISION_REQUESTED: 'REVISION_REQUESTED', // ขอแก้ไขแบบ
 };
 
+/**
+ * Statuses that mean a document has actually reached CM (or, for EXTERNAL projects,
+ * the Reviewer acting on CM's behalf) — as opposed to PENDING_REVIEW/REVISION_REQUIRED,
+ * which are SITE/BIM's internal loop before anything is sent out (roadmap T-008).
+ *
+ * No document can move BACK to PENDING_REVIEW/REVISION_REQUIRED once it reaches any of
+ * these (see api/rfa/[id]/route.ts's status transitions) — a fresh revision instead
+ * creates a NEW document starting over, so this list is safe to use as a permanent
+ * per-document "has CM seen this" test, unlike RFI which needed a separate sticky flag.
+ */
+export const RFA_CM_VISIBLE_STATUSES: string[] = [
+  STATUSES.PENDING_CM_APPROVAL,
+  STATUSES.PENDING_FINAL_APPROVAL,
+  STATUSES.APPROVED,
+  STATUSES.APPROVED_WITH_COMMENTS,
+  STATUSES.APPROVED_REVISION_REQUIRED,
+  STATUSES.REJECTED,
+];
+
 export const WR_STATUSES = {
   DRAFT: 'DRAFT',
   REJECTED_BY_PM: 'REJECTED_BY_PM',
@@ -95,6 +114,42 @@ export const STATUS_LABELS: { [key: string]: string } = {
   [WR_STATUSES.REVISION_REQUESTED]: 'ขอแก้ไข (WR)',
   [WR_STATUSES.COMPLETED]: 'เสร็จสิ้น',
 };
+
+/**
+ * CM only ever needs to know a document was "approved with comments" — the further
+ * split into revision-required vs not is SITE's own internal round-2 classification
+ * (PENDING_FINAL_APPROVAL loop) and was never a decision CM made or needs to track.
+ * Every CM-facing status display should route through this instead of a raw
+ * STATUS_LABELS lookup, so the two internal statuses always read the same to CM.
+ */
+const CM_APPROVED_WITH_COMMENTS_LABEL = 'อนุมัติตามคอมเมนต์';
+
+// From CM's perspective, "อนุมัติตามคอมเมนต์" is the end of their involvement — the
+// PENDING_FINAL_APPROVAL round-2 loop that follows is SITE's own internal
+// classification (revision-required vs not) and never something CM acts on or
+// should perceive as a separate, still-pending step.
+const CM_COLLAPSED_STATUSES: string[] = [
+  STATUSES.PENDING_FINAL_APPROVAL,
+  STATUSES.APPROVED_WITH_COMMENTS,
+  STATUSES.APPROVED_REVISION_REQUIRED,
+];
+
+export function getRfaStatusLabelForRole(status: string, role?: string): string {
+  if (role === ROLES.CM && CM_COLLAPSED_STATUSES.includes(status)) {
+    return CM_APPROVED_WITH_COMMENTS_LABEL;
+  }
+  return STATUS_LABELS[status] || status;
+}
+
+/** Same collapse as getRfaStatusLabelForRole, but on the status VALUE — for grouping
+ * (e.g. chart counts) where CM's two internal-round statuses must merge into one
+ * bucket rather than just relabel two separate ones identically. */
+export function normalizeRfaStatusForRole(status: string, role?: string): string {
+  if (role === ROLES.CM && CM_COLLAPSED_STATUSES.includes(status)) {
+    return STATUSES.APPROVED_WITH_COMMENTS;
+  }
+  return status;
+}
 
 export const STATUS_COLORS: { [key: string]: string } = {
   [STATUSES.PENDING_REVIEW]: '#3B82F6', // Blue-500 (รอตรวจสอบ - สีฟ้า)

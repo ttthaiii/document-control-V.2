@@ -32,8 +32,19 @@ export default function SmartRFAModal({ documentId, onClose }: SmartRFAModalProp
     }
 
     const fetchDocument = async () => {
-      const docRef = doc(db, 'rfaDocuments', documentId)
-      const docSnap = await getDoc(docRef)
+      let docSnap;
+      try {
+        const docRef = doc(db, 'rfaDocuments', documentId)
+        docSnap = await getDoc(docRef)
+      } catch (err) {
+        // Most commonly permission-denied: the doc's status hasn't reached this
+        // user's role yet (e.g. CM opening a link to a SITE-internal-loop doc) —
+        // firestore.rules rejects the read outright rather than filtering fields.
+        console.error('Fetch RFA document error:', err)
+        showNotification('error', 'ไม่มีสิทธิ์เข้าถึง', 'คุณไม่มีสิทธิ์ดูเอกสารนี้ หรือเอกสารยังไม่ถึงขั้นตอนของคุณ')
+        onClose()
+        return
+      }
       if (docSnap.exists()) {
         const data = docSnap.data();
         setDocumentData({ id: docSnap.id, ...data } as RFADocument)

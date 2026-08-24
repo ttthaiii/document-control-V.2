@@ -25,6 +25,8 @@ interface FilterBarProps {
   categories: Category[];
   availableStatuses: string[];
   availableResponsibleParties: { value: string; label: string }[];
+  /** Hidden for CM — same reasoning as the table's ผู้รับผิดชอบ column removal. */
+  showResponsibleParty?: boolean;
 }
 
 const inputStyle = "w-full mt-1 h-10 px-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none";
@@ -39,6 +41,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
   categories,
   availableStatuses,
   availableResponsibleParties,
+  showResponsibleParty = true,
 }) => {
   return (
     <div className="bg-white rounded-lg shadow p-4">
@@ -62,8 +65,9 @@ const FilterBar: React.FC<FilterBarProps> = ({
           </select>
         </div>
 
-        {/* Search Filter */}
-        <div className="md:col-span-2">
+        {/* Search Filter — widens to fill the space freed when the responsible-party
+            filter is hidden (CM), instead of leaving a blank gap in the grid. */}
+        <div className={showResponsibleParty ? 'md:col-span-2' : 'md:col-span-4'}>
           <label htmlFor="search-filter" className="text-sm font-medium text-gray-700">ค้นหา</label>
           <div className="relative mt-1">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -99,19 +103,21 @@ const FilterBar: React.FC<FilterBarProps> = ({
         </div>
 
         {/* Responsible Party Filter */}
-        <div className="md:col-span-2">
-          <label htmlFor="responsible-party-filter" className="text-sm font-medium text-gray-700">ผู้รับผิดชอบ</label>
-          <select
-            id="responsible-party-filter"
-            value={filters.responsibleParty}
-            onChange={(e) => handleFilterChange('responsibleParty', e.target.value)}
-            className={inputStyle}
-          >
-            {availableResponsibleParties.map(party => (
-              <option key={party.value} value={party.value}>{party.label}</option>
-            ))}
-          </select>
-        </div>
+        {showResponsibleParty && (
+          <div className="md:col-span-2">
+            <label htmlFor="responsible-party-filter" className="text-sm font-medium text-gray-700">ผู้รับผิดชอบ</label>
+            <select
+              id="responsible-party-filter"
+              value={filters.responsibleParty}
+              onChange={(e) => handleFilterChange('responsibleParty', e.target.value)}
+              className={inputStyle}
+            >
+              {availableResponsibleParties.map(party => (
+                <option key={party.value} value={party.value}>{party.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Category Filter */}
         <div className="md:col-span-2">

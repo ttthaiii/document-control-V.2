@@ -7,7 +7,7 @@ import { X, Paperclip, Clock, User, Check, Send, AlertTriangle, FileText, Downlo
 import Spinner from '@/components/shared/Spinner';
 import LoadingOverlay from '@/components/shared/LoadingOverlay';
 import { useAuth } from '@/lib/auth/useAuth'
-import { Role, STATUS_LABELS, STATUSES, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUS_COLORS, ROLES } from '@/lib/config/workflow'
+import { Role, STATUS_LABELS, STATUSES, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUS_COLORS, ROLES, getRfaStatusLabelForRole, normalizeRfaStatusForRole } from '@/lib/config/workflow'
 import PDFPreviewModal from './PDFPreviewModal'
 import { useNotification } from '@/lib/context/NotificationContext';
 import { useLogActivity } from '@/lib/hooks/useLogActivity';
@@ -97,13 +97,13 @@ const WorkflowHistoryModal = ({
                 <div key={index} className="relative pl-6 pb-8 last:pb-0">
                   <div
                     className="absolute -left-[9px] top-1 w-4 h-4 rounded-full border-2 border-white z-10"
-                    style={{ backgroundColor: STATUS_COLORS[item.status] || '#3B82F6' }}
+                    style={{ backgroundColor: STATUS_COLORS[normalizeRfaStatusForRole(item.status, userRole)] || '#3B82F6' }}
                   ></div>
                   <p className="font-semibold text-gray-800">
                     {item.revisionNumber !== undefined && (
                       <span className="text-blue-600 mr-2 font-bold">[Rev.{item.revisionNumber}]</span>
                     )}
-                    {STATUS_LABELS[item.status] || item.status}
+                    {getRfaStatusLabelForRole(item.status, userRole)}
                   </p>
                   <p className="text-sm text-gray-600">โดย: {item.userName} ({item.role})</p>
                   <time className="text-xs text-gray-400">{formatDate(item.timestamp)}</time>
@@ -481,6 +481,26 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const isSiteReviewing = !!(permissions.canSendToCm || permissions.canRequestRevision);
   const isApproving = permissions.canApprove;
 
+  // Most recent CAD file anywhere in the workflow history — this is what round 2
+  // (PENDING_FINAL_APPROVAL) will actually finalize with if Site doesn't attach a
+  // new file. Surfaced read-only so Site sees CM's file before deciding, instead of
+  // discovering only after clicking approve that attaching something here REPLACES
+  // it rather than adding alongside it.
+  const existingCadFileMeta = (() => {
+    const CAD_EXTENSIONS = ['.dwg', '.zip', '.rar'];
+    if (!document?.workflow) return null;
+    const reversedWorkflow = [...document.workflow].reverse();
+    for (const step of reversedWorkflow) {
+      if (step.files) {
+        const cadFile = step.files.find((f: RFAFile) => CAD_EXTENSIONS.some(ext => f.fileName.toLowerCase().endsWith(ext)));
+        if (cadFile) {
+          return { fileName: cadFile.fileName, fileUrl: cadFile.fileUrl, uploader: step.userName || 'Unknown', date: formatDate(step.timestamp) };
+        }
+      }
+    }
+    return null;
+  })();
+
   // 6. File Handling Functions
   const uploadTempFile = (fileObj: UploadedFile, target: 'action' | 'revision' | 'resubmission' | 'supersede') => {
     return new Promise<void>((resolve, reject) => {
@@ -776,11 +796,26 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       'REJECT'
     ];
     const successfulFiles = newFiles.filter(f => f.status === 'success');
-    if (actionsRequiringFile.includes(action) && successfulFiles.length === 0) {
+    // SITE's round-2 classification (PENDING_FINAL_APPROVAL) never uploads a new
+    // file — it finalizes using whatever CAD CM already attached at round 1. The
+    // CAD-check flow below already looks up that history and warns if none exists,
+    // so file attachment here is optional, not a hard requirement like round 1.
+    const isSiteRound2Classification = status === STATUSES.PENDING_FINAL_APPROVAL
+      && ['APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED'].includes(action);
+    if (actionsRequiringFile.includes(action) && !isSiteRound2Classification && successfulFiles.length === 0) {
       showNotification('warning', 'คำเตือน', 'กรุณาแนบไฟล์ประกอบการดำเนินการ');
       return;
     }
-    const isFinalApprovalAction = ['APPROVE', 'APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED'].includes(action);
+    // CM's "อนุมัติตามคอมเมนต์" at round 1 (INTERNAL) never actually publishes the
+    // file — it only forwards to SITE's round 2 (PENDING_FINAL_APPROVAL), where SITE
+    // decides both the final classification AND whether the CAD file is ready for
+    // real use. Asking CM to confirm "publish the old CAD file" here is premature —
+    // that question belongs to SITE's round 2 action, not CM's forwarding decision.
+    const isCmForwardingToRound2 = action === 'APPROVE_WITH_COMMENTS'
+      && document.site?.cmSystemType === 'INTERNAL'
+      && status === STATUSES.PENDING_CM_APPROVAL;
+
+    const isFinalApprovalAction = !isCmForwardingToRound2 && ['APPROVE', 'APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED'].includes(action);
     if (isFinalApprovalAction) {
       const CAD_EXTENSIONS = ['.dwg', '.zip', '.rar'];
       const hasCadFile = successfulFiles.some(f =>
@@ -1026,10 +1061,10 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                     <strong className="text-gray-700 font-semibold block mb-1">สถานะ:</strong>
                     <span
                       className="inline-flex items-center px-3 py-1 text-xs font-bold text-white rounded-full shadow-sm"
-                      style={{ backgroundColor: STATUS_COLORS[document.status] || '#6c757d' }}
+                      style={{ backgroundColor: STATUS_COLORS[normalizeRfaStatusForRole(document.status, userRole)] || '#6c757d' }}
                     >
-                      {getStatusIcon(document.status)}
-                      {STATUS_LABELS[document.status] || document.status}
+                      {getStatusIcon(normalizeRfaStatusForRole(document.status, userRole))}
+                      {getRfaStatusLabelForRole(document.status, userRole)}
                     </span>
                   </div>
                   <div>
@@ -1414,14 +1449,48 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
               {isApproving && (
                 <div className="space-y-6">
                   <div className="pb-3 border-b border-slate-200">
-                    <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (อนุมัติ)</h3>
+                    <h3 className="text-lg font-bold text-slate-800">
+                      {status === STATUSES.PENDING_FINAL_APPROVAL ? 'ดำเนินการ (พิจารณาขั้นสุดท้าย)' : 'ดำเนินการ (อนุมัติ)'}
+                    </h3>
                   </div>
+                  {status === STATUSES.PENDING_FINAL_APPROVAL && (
+                    <div className="flex items-start gap-3 p-4 bg-teal-50 border border-teal-200 rounded-lg">
+                      <MessageSquare size={18} className="text-teal-600 mt-0.5 flex-shrink-0" />
+                      <p className="text-sm text-teal-800">
+                        เอกสารฉบับนี้ถูก CM <span className="font-semibold">อนุมัติตามคอมเมนต์</span> มาแล้ว —
+                        Site เหลือแค่พิจารณาขั้นสุดท้ายว่าไฟล์ที่แก้ตามคอมเมนต์นี้ <span className="font-semibold">ต้องแก้ไขเพิ่ม</span> หรือ <span className="font-semibold">ไม่ต้องแก้ไข</span> เท่านั้น
+                      </p>
+                    </div>
+                  )}
                   <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
                     <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
                       <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">1</span>
                       <h4 className="font-semibold text-slate-800 text-base">แนบไฟล์ประกอบการอนุมัติ</h4>
                     </div>
-                    <label className="text-sm font-medium text-gray-700 mb-1 block">แนบไฟล์ <span className="text-red-700">*</span></label>
+                    {status === STATUSES.PENDING_FINAL_APPROVAL ? (
+                      <>
+                        {existingCadFileMeta ? (
+                          <div className="p-3 bg-slate-50 border border-slate-200 rounded-md text-sm space-y-1">
+                            <p className="font-medium text-gray-700">ไฟล์ CAD จาก CM (ระบบจะใช้ไฟล์นี้ ถ้าไม่แนบไฟล์ใหม่ด้านล่าง)</p>
+                            <a href={existingCadFileMeta.fileUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline break-all">
+                              {existingCadFileMeta.fileName}
+                            </a>
+                            <p className="text-xs text-gray-500">แนบโดย {existingCadFileMeta.uploader} · {existingCadFileMeta.date}</p>
+                          </div>
+                        ) : (
+                          <div className="p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-800">
+                            ยังไม่มีไฟล์ CAD จาก CM ในเอกสารนี้ — กรุณาแนบไฟล์ก่อนอนุมัติขั้นสุดท้าย หรือกดอนุมัติต่อได้หากต้องการยืนยันโดยไม่มีไฟล์
+                          </div>
+                        )}
+                        <label className="text-sm font-medium text-gray-700 mb-1 block">
+                          {existingCadFileMeta
+                            ? <>แนบไฟล์ใหม่แทน <span className="text-red-600 font-normal">(จะแทนที่ไฟล์ของ CM ด้านบนทันที — ไม่บังคับ)</span></>
+                            : <>แนบไฟล์ <span className="text-gray-400 font-normal">(ไม่บังคับ)</span></>}
+                        </label>
+                      </>
+                    ) : (
+                      <label className="text-sm font-medium text-gray-700 mb-1 block">แนบไฟล์ <span className="text-red-700">*</span></label>
+                    )}
                     <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
                       <input type="file" multiple onChange={(e) => handleFileUpload(e, 'action')} className="hidden" id="action-file-upload-final" />
                       <label htmlFor="action-file-upload-final" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
@@ -1438,38 +1507,54 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                     </div>
                     <label className="text-sm font-medium text-gray-700 mb-1.5 block">แสดงความคิดเห็น (Optional)</label>
                     <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..." className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white text-gray-900 focus:ring-blue-500 focus:border-blue-500 transition-colors" rows={3} />
-                    <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200">
-                      <button
-                        onClick={() => handleAction('REJECT')}
-                        disabled={isActionDisabled}
-                        className="flex items-center px-4 py-2 text-sm font-medium text-red-600 bg-white border-2 border-red-300 rounded-lg hover:bg-red-50 hover:border-red-500 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-red-500 outline-none transition-colors"
-                      >
-                        {loadingAction === 'REJECT' ? <Spinner className="w-4 h-4 mr-2" /> : <ThumbsDown size={16} className="mr-2" />} ไม่อนุมัติ
-                      </button>
-                      <div className="flex flex-wrap gap-2">
+                    {/* PENDING_FINAL_APPROVAL is SITE's round-2 classification of an already
+                        approved-with-comments doc — never a fresh approve/reject, so only the
+                        two classification buttons show here. Every other approving status is
+                        round 1 (CM, or Reviewer-on-CM's-behalf for EXTERNAL projects). */}
+                    {status === STATUSES.PENDING_FINAL_APPROVAL ? (
+                      <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-200">
                         <button
                           onClick={() => handleAction('APPROVE_REVISION_REQUIRED')}
-                          disabled={isActionDisabled}
+                          disabled={isSubmitting}
                           className="flex items-center px-4 py-2 text-sm font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-amber-400 outline-none transition-colors"
                         >
                           {loadingAction === 'APPROVE_REVISION_REQUIRED' ? <Spinner className="w-4 h-4 mr-2" /> : <Edit3 size={16} className="mr-2" />} อนุมัติตามคอมเมนต์ (ต้องแก้ไข)
                         </button>
                         <button
                           onClick={() => handleAction('APPROVE_WITH_COMMENTS')}
-                          disabled={isActionDisabled}
+                          disabled={isSubmitting}
                           className="flex items-center px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-teal-500 outline-none transition-colors"
                         >
                           {loadingAction === 'APPROVE_WITH_COMMENTS' ? <Spinner className="w-4 h-4 mr-2" /> : <MessageSquare size={16} className="mr-2" />} อนุมัติตามคอมเมนต์ (ไม่ต้องแก้ไข)
                         </button>
-                        <button
-                          onClick={() => handleAction('APPROVE')}
-                          disabled={isActionDisabled}
-                          className="flex items-center px-5 py-2 text-sm font-bold text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-green-500 outline-none transition-colors shadow-sm"
-                        >
-                          {loadingAction === 'APPROVE' ? <Spinner className="w-4 h-4 mr-2" /> : <ThumbsUp size={16} className="mr-2" />} อนุมัติ
-                        </button>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200">
+                        <button
+                          onClick={() => handleAction('REJECT')}
+                          disabled={isActionDisabled}
+                          className="flex items-center px-4 py-2 text-sm font-medium text-red-600 bg-white border-2 border-red-300 rounded-lg hover:bg-red-50 hover:border-red-500 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-red-500 outline-none transition-colors"
+                        >
+                          {loadingAction === 'REJECT' ? <Spinner className="w-4 h-4 mr-2" /> : <ThumbsDown size={16} className="mr-2" />} ไม่อนุมัติ
+                        </button>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => handleAction('APPROVE_WITH_COMMENTS')}
+                            disabled={isActionDisabled}
+                            className="flex items-center px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-teal-500 outline-none transition-colors"
+                          >
+                            {loadingAction === 'APPROVE_WITH_COMMENTS' ? <Spinner className="w-4 h-4 mr-2" /> : <MessageSquare size={16} className="mr-2" />} อนุมัติตามคอมเมนต์
+                          </button>
+                          <button
+                            onClick={() => handleAction('APPROVE')}
+                            disabled={isActionDisabled}
+                            className="flex items-center px-5 py-2 text-sm font-bold text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-green-500 outline-none transition-colors shadow-sm"
+                          >
+                            {loadingAction === 'APPROVE' ? <Spinner className="w-4 h-4 mr-2" /> : <ThumbsUp size={16} className="mr-2" />} อนุมัติ
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

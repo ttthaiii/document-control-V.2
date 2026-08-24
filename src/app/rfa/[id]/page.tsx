@@ -60,9 +60,13 @@ export default function RFADirectLinkHandlerPage() {
         } else {
           setError("ไม่พบเอกสารที่คุณต้องการ");
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Redirect Error:", err);
-        setError("เกิดข้อผิดพลาดในการเปิดเอกสาร");
+        if (err?.code === 'permission-denied') {
+          setError("คุณไม่มีสิทธิ์ดูเอกสารนี้ หรือเอกสารยังไม่ถึงขั้นตอนของคุณ");
+        } else {
+          setError("เกิดข้อผิดพลาดในการเปิดเอกสาร");
+        }
       }
     };
 

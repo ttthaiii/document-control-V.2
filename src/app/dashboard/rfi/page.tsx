@@ -290,12 +290,14 @@ function RFIContent() {
               ))}
             </select>
 
-            <select value={filters.responsibleParty} onChange={(e) => handleFilterChange('responsibleParty', e.target.value)} className={selectClass}>
-              <option value="ALL">รอใครก็ได้</option>
-              {Object.entries(RFI_PARTY_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </select>
+            {user.role !== 'CM' && (
+              <select value={filters.responsibleParty} onChange={(e) => handleFilterChange('responsibleParty', e.target.value)} className={selectClass}>
+                <option value="ALL">รอใครก็ได้</option>
+                {Object.entries(RFI_PARTY_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            )}
 
             <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
               <input
@@ -317,7 +319,7 @@ function RFIContent() {
         </div>
 
         <div className="mt-6">
-          <RFIListTable documents={filteredDocuments} isLoading={loading} onDocumentClick={setSelectedDocument} />
+          <RFIListTable documents={filteredDocuments} isLoading={loading} onDocumentClick={setSelectedDocument} userRole={user?.role} />
         </div>
 
         {selectedDocument && (

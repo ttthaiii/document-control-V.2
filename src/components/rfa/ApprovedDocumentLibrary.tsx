@@ -14,7 +14,7 @@ import PDFPreviewModal from './PDFPreviewModal'
 
 import { db } from '@/lib/firebase/client'
 import { collection, query, where, getDocs, orderBy, QueryConstraint } from 'firebase/firestore'
-import { STATUSES, STATUS_LABELS, STATUS_COLORS } from '@/lib/config/workflow'
+import { STATUSES, STATUS_LABELS, STATUS_COLORS, getRfaStatusLabelForRole, normalizeRfaStatusForRole } from '@/lib/config/workflow'
 
 
 const formatDate = (date: any): string => {
@@ -572,8 +572,8 @@ export default function ApprovedDocumentLibrary() {
                     )}
 
                     <div className="flex justify-between items-center pt-2 border-t text-xs text-gray-500">
-                      <span className={`px-2 py-1 rounded font-medium ${getStatusColor(doc.status)}`}>
-                        {STATUS_LABELS[doc.status] || doc.status}
+                      <span className={`px-2 py-1 rounded font-medium ${getStatusColor(normalizeRfaStatusForRole(doc.status, user?.role))}`}>
+                        {getRfaStatusLabelForRole(doc.status, user?.role)}
                       </span>
                       <span>{formatDate(doc.updatedAt)}</span>
                     </div>
@@ -706,9 +706,9 @@ export default function ApprovedDocumentLibrary() {
                         <td className="px-4 py-4 max-w-[220px]">
                           {/* Status badge */}
                           <span
-                            className={`inline-flex items-center px-2.5 py-1 rounded text-xs font-medium ${getStatusColor(doc.status)}`}
+                            className={`inline-flex items-center px-2.5 py-1 rounded text-xs font-medium ${getStatusColor(normalizeRfaStatusForRole(doc.status, user?.role))}`}
                           >
-                            {STATUS_LABELS[doc.status] || doc.status}
+                            {getRfaStatusLabelForRole(doc.status, user?.role)}
                           </span>
 
                           {/* Remark — แสดงใต้ badge เมื่อมีข้อมูล */}

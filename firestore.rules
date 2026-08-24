@@ -55,8 +55,24 @@ service cloud.firestore {
     }
 
     // 3. RFA Documents & Work Requests
+    //
+    // CM only ever reads a document once it has actually reached them (roadmap T-008).
+    // Unlike RFI, RFA never moves a document's status back to PENDING_REVIEW/
+    // REVISION_REQUIRED once it reaches CM — a revision instead creates a brand-new
+    // document — so a plain status whitelist is a safe permanent test, no sticky flag
+    // needed. The dashboard's Firestore query must add
+    // where('status','in',[...same list...]) for CM viewers, or this rule rejects the
+    // whole list query. Keep this list in sync with RFA_CM_VISIBLE_STATUSES in
+    // src/lib/config/workflow.ts (rules can't import JS, so it's duplicated here).
     match /rfaDocuments/{docId} {
-      allow read, create, update: if isUserActive();
+      allow read: if isUserActive() && (
+        getUserData().get('role', '') != 'CM' ||
+        resource.data.status in [
+          'PENDING_CM_APPROVAL', 'PENDING_FINAL_APPROVAL',
+          'APPROVED', 'APPROVED_WITH_COMMENTS', 'APPROVED_REVISION_REQUIRED', 'REJECTED'
+        ]
+      );
+      allow create, update: if isUserActive();
       allow delete: if isAdmin();
     }
     

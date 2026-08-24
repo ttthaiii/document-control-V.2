@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { adminDb, adminAuth, adminBucket } from '@/lib/firebase/admin';
 import { FieldValue } from 'firebase-admin/firestore';
 // 2. เพิ่ม STATUS_LABELS
-import { CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUSES, STATUS_LABELS, ROLES, Role } from '@/lib/config/workflow';
+import { CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUSES, STATUS_LABELS, ROLES, Role, RFA_CM_VISIBLE_STATUSES } from '@/lib/config/workflow';
 import { RFAFile } from '@/types/rfa';
 import { sendPushNotification } from '@/lib/utils/push-notification';
 import { PERMISSION_KEYS } from '@/lib/config/permissions';
@@ -56,6 +56,14 @@ export async function GET(
             return NextResponse.json({ success: false, error: 'Access denied' }, { status: 403 });
         }
 
+        // CM only ever sees documents that have reached them (roadmap T-008). This
+        // route uses the Admin SDK, which bypasses firestore.rules entirely, so the
+        // same check must be enforced here too — otherwise opening the URL directly
+        // would bypass the dashboard's query filter.
+        if (userData.role === ROLES.CM && !RFA_CM_VISIBLE_STATUSES.includes(rfaData.status)) {
+            return NextResponse.json({ success: false, error: 'Access denied' }, { status: 403 });
+        }
+
         let siteInfo: any = { id: rfaData.siteId, name: 'N/A' };
         let userOverrides = {};
         let cmSystemType = 'INTERNAL'; // Default
@@ -88,7 +96,13 @@ export async function GET(
         const isReviewer = REVIEWER_ROLES.includes(userRole as Role);
         const isCM = userRole === ROLES.CM || userRole === ROLES.ADMIN;
         const canApproveOverride = checkPermission(userRole, userOverrides, 'RFA', PERMISSION_KEYS.RFA.APPROVE, APPROVER_ROLES);
-
+        // APPROVER_ROLES (used above) includes CM by design, for round 1's CM check —
+        // reusing that same override for a Reviewer-only gate would default-allow CM
+        // there too (checkPermission falls back to defaultAllowedRoles.includes(role)
+        // when no explicit per-user override exists). Round 2 / EXTERNAL's single
+        // round are Reviewer-only actions, so they must check against REVIEWER_ROLES
+        // instead, or CM silently keeps approve rights past round 1.
+        const canApproveAsReviewerOverride = checkPermission(userRole, userOverrides, 'RFA', PERMISSION_KEYS.RFA.APPROVE, REVIEWER_ROLES);
 
         let canApprove = false;
         let canReject = false;
@@ -100,16 +114,16 @@ export async function GET(
                 canApprove = isCM || canApproveOverride;
                 canReject = isCM || canApproveOverride;
             } else if (status === STATUSES.PENDING_FINAL_APPROVAL) {
-                // รอบ 2: ต้องเป็น Site Admin / PE / OE (Reviewer)
-                canApprove = isReviewer || canApproveOverride;
-                canReject = isReviewer || canApproveOverride;
+                // รอบ 2: ต้องเป็น Site Admin / PE / OE (Reviewer) — CM ต้องไม่ผ่านรอบนี้
+                canApprove = isReviewer || canApproveAsReviewerOverride;
+                canReject = isReviewer || canApproveAsReviewerOverride;
             }
         } else {
             // EXTERNAL FLOW: 1 รอบ
             if (status === STATUSES.PENDING_CM_APPROVAL) {
-                // รอบเดียว: Site Admin / PE / OE กดอนุมัติได้เลย
-                canApprove = isReviewer || canApproveOverride;
-                canReject = isReviewer || canApproveOverride;
+                // รอบเดียว: Site Admin / PE / OE กดอนุมัติได้เลย (ไม่มี CM ในระบบ EXTERNAL อยู่แล้ว)
+                canApprove = isReviewer || canApproveAsReviewerOverride;
+                canReject = isReviewer || canApproveAsReviewerOverride;
             }
         }
 
@@ -223,23 +237,32 @@ export async function PUT(
         // 3. Approval Actions
         const isCM = userRole === ROLES.CM || userRole === ROLES.ADMIN;
         const canApproveOverride = checkPermission(userRole, userOverrides, 'RFA', PERMISSION_KEYS.RFA.APPROVE, APPROVER_ROLES);
+        // Same fix as the GET handler: APPROVER_ROLES defaults CM to "can approve",
+        // which must NOT leak into round 2 / EXTERNAL's Reviewer-only gate below.
+        const canApproveAsReviewerOverride = checkPermission(userRole, userOverrides, 'RFA', PERMISSION_KEYS.RFA.APPROVE, REVIEWER_ROLES);
         const approvalActions = ['APPROVE', 'APPROVE_WITH_COMMENTS', 'REJECT', 'APPROVE_REVISION_REQUIRED'];
+        // Round 1 (CM, or Reviewer-on-CM's-behalf for EXTERNAL) decides approve/reject/
+        // approve-with-comments. Round 2 (SITE at PENDING_FINAL_APPROVAL) only ever
+        // classifies an already-approved-with-comments doc — it never re-approves or
+        // rejects from scratch, so APPROVE/REJECT must not be valid there.
+        const round1Actions = ['APPROVE', 'APPROVE_WITH_COMMENTS', 'REJECT'];
+        const round2Actions = ['APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED'];
 
         if (approvalActions.includes(action)) {
             if (cmSystemType === 'INTERNAL') {
                 // INTERNAL: มี 2 รอบ
-                if (docData.status === STATUSES.PENDING_CM_APPROVAL) {
+                if (docData.status === STATUSES.PENDING_CM_APPROVAL && round1Actions.includes(action)) {
                     // รอบ 1: ต้องเป็น CM
                     if (isCM || canApproveOverride) canPerformAction = true;
-                } else if (docData.status === STATUSES.PENDING_FINAL_APPROVAL) {
-                    // รอบ 2: ต้องเป็น Reviewer (Site Admin/OE/PE)
-                    if (isReviewer || canApproveOverride) canPerformAction = true;
+                } else if (docData.status === STATUSES.PENDING_FINAL_APPROVAL && round2Actions.includes(action)) {
+                    // รอบ 2: ต้องเป็น Reviewer (Site Admin/OE/PE) — CM ต้องไม่ผ่านรอบนี้
+                    if (isReviewer || canApproveAsReviewerOverride) canPerformAction = true;
                 }
             } else {
                 // EXTERNAL: มี 1 รอบ
-                if (docData.status === STATUSES.PENDING_CM_APPROVAL) {
-                    // รอบเดียว: Reviewer อนุมัติได้เลย
-                    if (isReviewer || canApproveOverride) canPerformAction = true;
+                if (docData.status === STATUSES.PENDING_CM_APPROVAL && round1Actions.includes(action)) {
+                    // รอบเดียว: Reviewer อนุมัติได้เลย (ไม่มี CM ในระบบ EXTERNAL อยู่แล้ว)
+                    if (isReviewer || canApproveAsReviewerOverride) canPerformAction = true;
                 }
             }
         }
@@ -258,7 +281,13 @@ export async function PUT(
             'REJECT'
         ];
 
-        if (actionsRequiringFiles.includes(action)) {
+        // SITE's round-2 classification (PENDING_FINAL_APPROVAL) finalizes using
+        // whatever CAD CM already attached at round 1 — it never uploads a new file,
+        // so this must not be a hard requirement here (frontend mirrors this check).
+        const isSiteRound2Classification = docData.status === STATUSES.PENDING_FINAL_APPROVAL
+            && ['APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED'].includes(action);
+
+        if (actionsRequiringFiles.includes(action) && !isSiteRound2Classification) {
             // เช็คว่ามีไฟล์แนบมาหรือไม่
             if (!newFiles || !Array.isArray(newFiles) || newFiles.length === 0) {
                 return NextResponse.json(
@@ -287,13 +316,23 @@ export async function PUT(
             case 'APPROVE_REVISION_REQUIRED': newStatus = STATUSES.APPROVED_REVISION_REQUIRED; break;
 
             case 'APPROVE':
+                // Plain approve has nothing ambiguous for SITE to double-check, so it
+                // finalizes immediately at every round — same as REJECT above. Only
+                // APPROVE_WITH_COMMENTS (below) goes through the round-2 SITE loop,
+                // because SITE is the one who decides whether the comment needs a
+                // revision (APPROVE_REVISION_REQUIRED) or not (APPROVE_WITH_COMMENTS).
+                newStatus = STATUSES.APPROVED;
+                break;
             case 'APPROVE_WITH_COMMENTS':
                 if (cmSystemType === 'INTERNAL' && docData.status === STATUSES.PENDING_CM_APPROVAL) {
-                    // Internal: ผ่าน CM แล้ว -> ไปรอ Final Approval
+                    // Internal round 1: CM approved with comments -> SITE must decide
+                    // revision-required or not at round 2 (PENDING_FINAL_APPROVAL is
+                    // reachable ONLY from here, so it unambiguously means this).
                     newStatus = STATUSES.PENDING_FINAL_APPROVAL;
                 } else {
-                    // Internal (รอบ 2) OR External (รอบเดียว) -> จบที่ Approved
-                    newStatus = action === 'APPROVE' ? STATUSES.APPROVED : STATUSES.APPROVED_WITH_COMMENTS;
+                    // Internal round 2 (SITE decided no revision needed) OR External
+                    // (single round) -> finalize as approved with comments.
+                    newStatus = STATUSES.APPROVED_WITH_COMMENTS;
                 }
                 break;
         }
@@ -329,10 +368,12 @@ export async function PUT(
         };
 
         const isApprovalAction = ['APPROVE', 'APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED'].includes(action);
-        const isFinalApproval = (
-            cmSystemType === 'INTERNAL' ? docData.status === STATUSES.PENDING_FINAL_APPROVAL :
-            docData.status === STATUSES.PENDING_CM_APPROVAL
-        );
+        // Final = this action's resulting status is a terminal one, not the round-2
+        // SITE-review loop. Derived from newStatus (not docData.status) because APPROVE
+        // now finalizes immediately even at round 1 (INTERNAL) — the old formula
+        // checked docData.status === PENDING_FINAL_APPROVAL, which would have wrongly
+        // stayed false for that immediate-approve case.
+        const isFinalApproval = isApprovalAction && newStatus !== STATUSES.PENDING_FINAL_APPROVAL;
 
         const updates: { [key: string]: any } = {
             status: newStatus,
