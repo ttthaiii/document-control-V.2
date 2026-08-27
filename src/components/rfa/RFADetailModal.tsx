@@ -3,18 +3,19 @@
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react'
 import { RFADocument, RFAPermissions, RFAWorkflowStep, RFAFile, RFASite } from '@/types/rfa'
-import { X, Paperclip, Clock, User, Check, Send, AlertTriangle, FileText, Download, History, MessageSquare, Edit3, Upload, ThumbsUp, ThumbsDown, Eye, CornerUpLeft, RefreshCw, EyeOff, Lock, CheckCircle2, XCircle, RotateCcw, Hourglass } from 'lucide-react'
+import { X, Paperclip, Clock, User, Check, Send, AlertTriangle, FileText, Download, History, MessageSquare, Edit3, Upload, ThumbsUp, ThumbsDown, Eye, CornerUpLeft, ArrowLeft, RefreshCw, EyeOff, Lock, CheckCircle2, XCircle, RotateCcw, Hourglass } from 'lucide-react'
 import Spinner from '@/components/shared/Spinner';
 import LoadingOverlay from '@/components/shared/LoadingOverlay';
 import { useAuth } from '@/lib/auth/useAuth'
-import { Role, STATUS_LABELS, STATUSES, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUS_COLORS, ROLES, getRfaStatusLabelForRole, normalizeRfaStatusForRole } from '@/lib/config/workflow'
+import { Role, STATUS_LABELS, STATUSES, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUS_COLORS, ROLES, getRfaStatusLabelForRole, getRfaStatusLabelForDoc, normalizeRfaStatusForRole } from '@/lib/config/workflow'
 import PDFPreviewModal from './PDFPreviewModal'
 import { useNotification } from '@/lib/context/NotificationContext';
 import { useLogActivity } from '@/lib/hooks/useLogActivity';
 import { storage } from '@/lib/firebase/client';
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
-import { getFileUrl } from '@/lib/utils/storage';
+import { getFileUrl, resolveViewUrl } from '@/lib/utils/storage';
 import { useScrollLock } from '@/hooks/useScrollLock';
+import ExternalChainConfig, { ExternalChainStepConfig } from '@/components/shared/ExternalChainConfig';
 
 // --- Helper Functions ---
 const formatDate = (dateString: string | undefined): string => {
@@ -68,8 +69,20 @@ const WorkflowHistoryModal = ({
   const { logActivity } = useLogActivity();
   const filteredWorkflow = useMemo(() => {
     if (userRole === ROLES.CM && cmSystemType === 'INTERNAL') {
-      const statusesToHide = [STATUSES.PENDING_REVIEW, STATUSES.REVISION_REQUIRED];
-      return workflow.filter(item => !statusesToHide.includes(item.status));
+      // Internal loop steps CM must never see: the SITE<->BIM review pass AND the round-2
+      // classification (PENDING_FINAL_APPROVAL loop) SITE runs on its own AFTER CM has
+      // decided. CM's OWN round-2 step collapses to the same label, so the role guard
+      // keeps it — only SITE/BIM-authored internal steps are hidden.
+      const internalOnlyStatuses = [
+        STATUSES.PENDING_REVIEW,
+        STATUSES.REVISION_REQUIRED,
+        STATUSES.PENDING_FINAL_APPROVAL,
+        STATUSES.APPROVED_WITH_COMMENTS,
+        STATUSES.APPROVED_REVISION_REQUIRED,
+      ];
+      return workflow.filter(
+        item => !(internalOnlyStatuses.includes(item.status) && item.role !== ROLES.CM)
+      );
     }
     return workflow;
   }, [workflow, userRole, cmSystemType]);
@@ -120,7 +133,7 @@ const WorkflowHistoryModal = ({
                           <li key={fileIndex} className="flex items-center text-xs text-gray-600">
                             <FileText size={12} className="mr-2 flex-shrink-0" />
                             <a
-                              href={file.fileUrl}
+                              href={resolveViewUrl(file.fileUrl, file.filePath)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="truncate hover:underline"
@@ -249,6 +262,12 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
 
   // Pending Review States (Site Review)
   const [suspendPreviousRevision, setSuspendPreviousRevision] = useState(false);
+  // External chain config the CM picks before forwarding (INTERNAL round 1). Empty = nothing chosen yet.
+  const [chainConfig, setChainConfig] = useState<ExternalChainStepConfig[]>([]);
+  // CM round-1 (INTERNAL) can EITHER approve OR forward to the external chain. Instead of
+  // stacking both panels at once (confusing), show a mode selector first. 'select' = the
+  // two-choice screen; 'approve'/'forward' = that mode's controls (with a back button).
+  const [cmActionMode, setCmActionMode] = useState<'select' | 'approve' | 'forward'>('select');
 
   // Advanced CAD Warning Modal States
   const [cadWarningModalData, setCadWarningModalData] = useState<{
@@ -283,6 +302,12 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   isActionActiveRef.current = isSubmitting || isSupersedeSubmitting || isClosing;
 
   // 1. Fetch Full Document Data
+  // Reset the CM round-1 mode selector whenever a different document is opened, so a
+  // previously-chosen 'approve'/'forward' view never carries over to the next doc.
+  useEffect(() => {
+    setCmActionMode('select');
+  }, [initialDoc?.id]);
+
   useEffect(() => {
     if (isActionActiveRef.current) return; // ข้ามการโหลดหน้าใหม่ถ้ากำลังโชว์กล่องเขียว หรือกำลังโหลด Submit อยู่
 
@@ -339,7 +364,12 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const requiresBimVerification = isBimUser && isBimDocument;
   const canReviseBimDoc = requiresBimVerification;
   const canReviseNonBimDoc = !isBimDocument && !isBimUser;
-  const canRevise = isCreator || user?.role === ROLES.ADMIN || canReviseBimDoc || canReviseNonBimDoc;
+  // Submitting a new revision is a creator (BIM/SITE) duty, never an approver's. CM is the
+  // only role in APPROVER_ROLES that is NOT in CREATOR_ROLES, so excluding CM here closes the
+  // leak (CM was slipping through canReviseNonBimDoc on non-BIM docs) without touching any
+  // creator's flow. Mirrors the CM guard already on canRequestSupersede below.
+  const canRevise = (isCreator || user?.role === ROLES.ADMIN || canReviseBimDoc || canReviseNonBimDoc)
+    && user?.role !== ROLES.CM;
   const hasRequestedRevision = !!document?.supersededComment;
   const isRevisionFlow = (
     document?.status === STATUSES.REJECTED ||
@@ -354,6 +384,9 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const canRequestSupersede =
     isApprovedStatus &&
     document?.supersededStatus !== 'SUSPENDED' &&
+    // CM ต้องไม่เห็นปุ่ม "ขอสร้าง Revision ใหม่" — เป็น action ฝั่งภายในเท่านั้น
+    // (CM อยู่ใน APPROVER_ROLES + API grant permission ให้ isCM จึงต้องกันตรงนี้)
+    user?.role !== ROLES.CM &&
     (isAdmin || isApprover || !!document?.permissions?.canRequestSupersede);
 
   const canEditPDF = useMemo(() => {
@@ -371,6 +404,16 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
     if (status === STATUSES.APPROVED || status === STATUSES.APPROVED_WITH_COMMENTS || status === STATUSES.APPROVED_REVISION_REQUIRED) return false;
     if (isSiteReviewing) return true;
     if (isApproving) return true;
+    // External approver (Designer/Owner) marking up the PDF at their chain step.
+    // The server grants canActExternalStep (not canApprove) to the current holder at
+    // PENDING_EXTERNAL_APPROVAL, and their verdict REQUIRES an attached file — so the
+    // markup editor must be unlocked for them. Saved file lands in newFiles/'action',
+    // the same bucket the EXT_* action reads.
+    if (permissions.canActExternalStep) return true;
+    // CM finalizing after the external chain returns (PENDING_CM_FINAL). CM is NOT
+    // exempt from the file requirement here (unlike round 1), so the markup editor must
+    // be unlocked to produce that file too. Saved file lands in newFiles/'action'.
+    if (permissions.canFinalizeExternal) return true;
     if (isResubmissionFlow) return true;
     return false;
   }, [document, user]);
@@ -480,26 +523,38 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   // isSiteReviewing: ใช้ permissions.canSendToCm จาก API ซึ่งรวม override แล้ว
   const isSiteReviewing = !!(permissions.canSendToCm || permissions.canRequestRevision);
   const isApproving = permissions.canApprove;
+  // CM round-1 (INTERNAL, PENDING_CM_APPROVAL) is the ONLY state where both approve and
+  // forward are offered together. In that case render the single mode-selector panel and
+  // suppress the two standalone panels so buttons never stack. Always a CM (canForwardExternal
+  // requires isCM) and CM is file-exempt at round 1, so the shared file field is OPTIONAL.
+  const isCmRound1Choice = isApproving && permissions.canForwardExternal;
 
   // Most recent CAD file anywhere in the workflow history — this is what round 2
   // (PENDING_FINAL_APPROVAL) will actually finalize with if Site doesn't attach a
   // new file. Surfaced read-only so Site sees CM's file before deciding, instead of
   // discovering only after clicking approve that attaching something here REPLACES
   // it rather than adding alongside it.
-  const existingCadFileMeta = (() => {
+  // The full set of files CM approved, shown together on SITE's final-approval screen:
+  // the latest published files (usually the PDF) PLUS the most recent CAD (.dwg/.zip/.rar)
+  // from history if it isn't already in that set. Both categories reach BIM/FM (files +
+  // auto-extracted cadFiles), so they belong in ONE list, not two split boxes.
+  const cmApprovedFiles = (() => {
     const CAD_EXTENSIONS = ['.dwg', '.zip', '.rar'];
-    if (!document?.workflow) return null;
-    const reversedWorkflow = [...document.workflow].reverse();
-    for (const step of reversedWorkflow) {
-      if (step.files) {
-        const cadFile = step.files.find((f: RFAFile) => CAD_EXTENSIONS.some(ext => f.fileName.toLowerCase().endsWith(ext)));
+    const list: RFAFile[] = [...latestFiles];
+    const keyOf = (f: RFAFile) => f.filePath || f.fileName;
+    const alreadyHasCad = list.some(f => CAD_EXTENSIONS.some(ext => f.fileName.toLowerCase().endsWith(ext)));
+    if (!alreadyHasCad && document?.workflow) {
+      for (const step of [...document.workflow].reverse()) {
+        const cadFile = step.files?.find((f: RFAFile) => CAD_EXTENSIONS.some(ext => f.fileName.toLowerCase().endsWith(ext)));
         if (cadFile) {
-          return { fileName: cadFile.fileName, fileUrl: cadFile.fileUrl, uploader: step.userName || 'Unknown', date: formatDate(step.timestamp) };
+          if (!list.some(f => keyOf(f) === keyOf(cadFile))) list.push(cadFile);
+          break;
         }
       }
     }
-    return null;
+    return list;
   })();
+  const cmApprovedHasCad = cmApprovedFiles.some(f => ['.dwg', '.zip', '.rar'].some(ext => f.fileName.toLowerCase().endsWith(ext)));
 
   // 6. File Handling Functions
   const uploadTempFile = (fileObj: UploadedFile, target: 'action' | 'revision' | 'resubmission' | 'supersede') => {
@@ -727,7 +782,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   );
 
   // 7. Action Handlers
-  const executeAction = async (action: string) => {
+  const executeAction = async (action: string, chainConfigArg?: ExternalChainStepConfig[]) => {
     setIsSubmitting(true);
     setLoadingAction(action);
     let isSuccess = false;
@@ -740,6 +795,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
         documentNumber?: string;
         suspendPreviousRevision?: boolean;
         cadWarningAcknowledged?: boolean;
+        chainConfig?: ExternalChainStepConfig[];
       } = {
         action,
         comments: comment,
@@ -749,6 +805,10 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       };
       if (needsDocNumber && newDocumentNumberInput.trim()) {
         payload.documentNumber = newDocumentNumberInput.trim();
+      }
+      // FORWARD_EXTERNAL carries the CM-picked Designer/Owner chain (route validates it).
+      if (chainConfigArg && chainConfigArg.length > 0) {
+        payload.chainConfig = chainConfigArg;
       }
       const response = await fetch(`/api/rfa/${document.id}`, {
         method: 'PUT',
@@ -793,16 +853,27 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       'APPROVE',
       'APPROVE_WITH_COMMENTS',
       'APPROVE_REVISION_REQUIRED',
-      'REJECT'
+      'REJECT',
+      // External chain: every external verdict requires a supporting file (user rule).
+      'EXT_APPROVE',
+      'EXT_APPROVE_WITH_COMMENTS',
+      'EXT_REJECT'
     ];
     const successfulFiles = newFiles.filter(f => f.status === 'success');
+    // CM (role CM = INTERNAL CM ที่ login เอง) กดได้ทันทีทุก action — ไม่บังคับแนบไฟล์
+    // และไม่เด้ง CAD Warning Modal (ทั้งกรณีมี/ไม่มี CAD). ต้องการให้ CM ใช้ง่าย ไม่ยุ่งยาก.
+    // EXTERNAL CM ให้ SITE กดแทน (role SITE) จึงยังเช็คตามปกติ — loop ภายในไม่เปลี่ยน.
+    const isCM = user?.role === ROLES.CM;
+    // CM's round-1 exemption does NOT extend to the external-chain final decision
+    // (PENDING_CM_FINAL): there the user requires a supporting file like everyone else.
+    const isCmFinal = status === STATUSES.PENDING_CM_FINAL;
     // SITE's round-2 classification (PENDING_FINAL_APPROVAL) never uploads a new
     // file — it finalizes using whatever CAD CM already attached at round 1. The
     // CAD-check flow below already looks up that history and warns if none exists,
     // so file attachment here is optional, not a hard requirement like round 1.
     const isSiteRound2Classification = status === STATUSES.PENDING_FINAL_APPROVAL
       && ['APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED'].includes(action);
-    if (actionsRequiringFile.includes(action) && !isSiteRound2Classification && successfulFiles.length === 0) {
+    if (actionsRequiringFile.includes(action) && !isSiteRound2Classification && !(isCM && !isCmFinal) && successfulFiles.length === 0) {
       showNotification('warning', 'คำเตือน', 'กรุณาแนบไฟล์ประกอบการดำเนินการ');
       return;
     }
@@ -816,7 +887,8 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
       && status === STATUSES.PENDING_CM_APPROVAL;
 
     const isFinalApprovalAction = !isCmForwardingToRound2 && ['APPROVE', 'APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED'].includes(action);
-    if (isFinalApprovalAction) {
+    // CM ข้าม CAD Warning Modal ทั้งหมด (ไปเผยแพร่/อนุมัติทันที). SITE ยังเด้งตามเดิม.
+    if (isFinalApprovalAction && !isCM) {
       const CAD_EXTENSIONS = ['.dwg', '.zip', '.rar'];
       const hasCadFile = successfulFiles.some(f =>
         CAD_EXTENSIONS.some(ext => f.file.name.toLowerCase().endsWith(ext))
@@ -1064,7 +1136,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                       style={{ backgroundColor: STATUS_COLORS[normalizeRfaStatusForRole(document.status, userRole)] || '#6c757d' }}
                     >
                       {getStatusIcon(normalizeRfaStatusForRole(document.status, userRole))}
-                      {getRfaStatusLabelForRole(document.status, userRole)}
+                      {getRfaStatusLabelForDoc(document.status, userRole, document.externalChain)}
                     </span>
                   </div>
                   <div>
@@ -1098,6 +1170,9 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 </div>
               )}
 
+              {/* Hidden on SITE's final-approval screen — the files are consolidated into
+                  the "ไฟล์ที่ CM อนุมัติ" list in the action panel below to avoid a split view. */}
+              {status !== STATUSES.PENDING_FINAL_APPROVAL && (
               <div>
                 <h4 className="text-md font-semibold mb-2 flex items-center text-slate-800">
                   <Paperclip size={16} className="mr-2" /> ไฟล์แนบ (ฉบับล่าสุด)
@@ -1144,7 +1219,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                             </button>
                           ) : (
                             <a
-                              href={file.fileUrl}
+                              href={resolveViewUrl(file.fileUrl, file.filePath)}
                               download={file.fileName}
                               target="_blank"
                               rel="noopener noreferrer"
@@ -1174,6 +1249,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                   )}
                 </ul>
               </div>
+              )}
             </div>
 
             {/* Action Panels */}
@@ -1446,7 +1522,137 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 </div>
               )}
 
-              {isApproving && (
+              {/* CM round-1 (INTERNAL) mode selector: one shared file field, then pick a
+                  path — approve directly OR forward to the external chain. Replaces the old
+                  two-panels-at-once layout so the CM never sees 5 buttons at the same time. */}
+              {isCmRound1Choice && (
+                <div className="space-y-6">
+                  <div className="pb-3 border-b border-slate-200">
+                    <h3 className="text-lg font-bold text-slate-800">ดำเนินการ</h3>
+                  </div>
+
+                  {/* Shared file attach — OPTIONAL here (CM round 1). Approve buttons still
+                      gate on a file via isActionDisabled; forward does not. */}
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                    <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+                      <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">1</span>
+                      <h4 className="font-semibold text-slate-800 text-base">แนบไฟล์ประกอบการดำเนินการ</h4>
+                    </div>
+                    <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
+                      <input type="file" multiple onChange={(e) => handleFileUpload(e, 'action')} className="hidden" id="action-file-upload-cmchoice" />
+                      <label htmlFor="action-file-upload-cmchoice" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
+                        <Upload size={16} className="mr-2" />
+                        คลิกเพื่อเลือกไฟล์
+                      </label>
+                    </div>
+                    {renderFileList(newFiles, 'action')}
+                  </div>
+
+                  {/* Step 2: choose a mode, or the chosen mode's controls */}
+                  {cmActionMode === 'select' && (
+                    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                      <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+                        <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">2</span>
+                        <h4 className="font-semibold text-slate-800 text-base">เลือกการดำเนินการ</h4>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <button
+                          onClick={() => setCmActionMode('approve')}
+                          className="flex flex-col items-start gap-1 p-4 rounded-lg border-2 border-green-200 bg-green-50 hover:border-green-500 hover:bg-green-100 text-left transition-colors focus-visible:ring-2 focus-visible:ring-green-500 outline-none"
+                        >
+                          <span className="flex items-center font-bold text-green-800"><ThumbsUp size={16} className="mr-2" /> ดำเนินการอนุมัติ</span>
+                          <span className="text-xs text-green-700">อนุมัติ / อนุมัติตามคอมเมนต์ / ไม่อนุมัติ เอกสารนี้เอง</span>
+                        </button>
+                        <button
+                          onClick={() => setCmActionMode('forward')}
+                          className="flex flex-col items-start gap-1 p-4 rounded-lg border-2 border-indigo-200 bg-indigo-50 hover:border-indigo-500 hover:bg-indigo-100 text-left transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 outline-none"
+                        >
+                          <span className="flex items-center font-bold text-indigo-800"><Send size={16} className="mr-2" /> ส่งต่อผู้พิจารณาภายนอก</span>
+                          <span className="text-xs text-indigo-700">ส่งให้ผู้ออกแบบ / เจ้าของโครงการ พิจารณาก่อนกลับมาที่ CM</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {cmActionMode === 'approve' && (
+                    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                        <div className="flex items-center gap-3">
+                          <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">2</span>
+                          <h4 className="font-semibold text-slate-800 text-base">อนุมัติเอกสาร</h4>
+                        </div>
+                        <button onClick={() => setCmActionMode('select')} className="flex items-center text-sm text-slate-500 hover:text-slate-800 transition-colors">
+                          <ArrowLeft size={16} className="mr-1" /> ย้อนกลับ
+                        </button>
+                      </div>
+                      <label className="text-sm font-medium text-gray-700 mb-1.5 block">แสดงความคิดเห็น (Optional)</label>
+                      <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..." className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white text-gray-900 focus:ring-blue-500 focus:border-blue-500 transition-colors" rows={3} />
+                      <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200">
+                        <button
+                          onClick={() => handleAction('REJECT')}
+                          disabled={isActionDisabled}
+                          className="flex items-center px-4 py-2 text-sm font-medium text-red-600 bg-white border-2 border-red-300 rounded-lg hover:bg-red-50 hover:border-red-500 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-red-500 outline-none transition-colors"
+                        >
+                          {loadingAction === 'REJECT' ? <Spinner className="w-4 h-4 mr-2" /> : <ThumbsDown size={16} className="mr-2" />} ไม่อนุมัติ
+                        </button>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => handleAction('APPROVE_WITH_COMMENTS')}
+                            disabled={isActionDisabled}
+                            className="flex items-center px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-teal-500 outline-none transition-colors"
+                          >
+                            {loadingAction === 'APPROVE_WITH_COMMENTS' ? <Spinner className="w-4 h-4 mr-2" /> : <MessageSquare size={16} className="mr-2" />} อนุมัติตามคอมเมนต์
+                          </button>
+                          <button
+                            onClick={() => handleAction('APPROVE')}
+                            disabled={isActionDisabled}
+                            className="flex items-center px-5 py-2 text-sm font-bold text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-green-500 outline-none transition-colors shadow-sm"
+                          >
+                            {loadingAction === 'APPROVE' ? <Spinner className="w-4 h-4 mr-2" /> : <ThumbsUp size={16} className="mr-2" />} อนุมัติ
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {cmActionMode === 'forward' && (
+                    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                        <div className="flex items-center gap-3">
+                          <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">2</span>
+                          <h4 className="font-semibold text-slate-800 text-base">ส่งต่อผู้พิจารณาภายนอก</h4>
+                        </div>
+                        <button onClick={() => setCmActionMode('select')} className="flex items-center text-sm text-slate-500 hover:text-slate-800 transition-colors">
+                          <ArrowLeft size={16} className="mr-1" /> ย้อนกลับ
+                        </button>
+                      </div>
+                      <div className="flex items-start gap-3 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
+                        <Send size={18} className="text-indigo-600 mt-0.5 flex-shrink-0" />
+                        <p className="text-sm text-indigo-800">
+                          เลือกผู้พิจารณาภายนอก (ผู้ออกแบบ / เจ้าของโครงการ) และลำดับการพิจารณา
+                          เมื่อส่งแล้วเอกสารจะไล่ผ่านทุกลำดับก่อนกลับมาให้ CM สรุปผลขั้นสุดท้าย (แนบไฟล์ได้ ไม่บังคับ)
+                        </p>
+                      </div>
+                      <ExternalChainConfig
+                        value={chainConfig}
+                        onChange={setChainConfig}
+                        disabled={isSubmitting}
+                      />
+                      <div className="flex items-center justify-end pt-2 border-t border-slate-200">
+                        <button
+                          onClick={() => executeAction('FORWARD_EXTERNAL', chainConfig)}
+                          disabled={isSubmitting || chainConfig.length === 0}
+                          className="flex items-center px-5 py-2 text-sm font-bold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-indigo-500 outline-none transition-colors shadow-sm"
+                        >
+                          {loadingAction === 'FORWARD_EXTERNAL' ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />} ส่งออกภายนอก
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {isApproving && !isCmRound1Choice && (
                 <div className="space-y-6">
                   <div className="pb-3 border-b border-slate-200">
                     <h3 className="text-lg font-bold text-slate-800">
@@ -1465,40 +1671,51 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                   <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
                     <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
                       <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">1</span>
-                      <h4 className="font-semibold text-slate-800 text-base">แนบไฟล์ประกอบการอนุมัติ</h4>
+                      <h4 className="font-semibold text-slate-800 text-base">
+                        {status === STATUSES.PENDING_FINAL_APPROVAL ? 'ไฟล์ที่ CM อนุมัติ' : 'แนบไฟล์ประกอบการอนุมัติ'}
+                      </h4>
                     </div>
                     {status === STATUSES.PENDING_FINAL_APPROVAL ? (
+                      // SITE's round-2 finalize never attaches a new file here — CM's files
+                      // must NOT be replaceable. Show ALL files CM approved (PDF + CAD) in ONE
+                      // list; if no CAD exists, the attach field appears in the CAD warning modal.
                       <>
-                        {existingCadFileMeta ? (
-                          <div className="p-3 bg-slate-50 border border-slate-200 rounded-md text-sm space-y-1">
-                            <p className="font-medium text-gray-700">ไฟล์ CAD จาก CM (ระบบจะใช้ไฟล์นี้ ถ้าไม่แนบไฟล์ใหม่ด้านล่าง)</p>
-                            <a href={existingCadFileMeta.fileUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline break-all">
-                              {existingCadFileMeta.fileName}
-                            </a>
-                            <p className="text-xs text-gray-500">แนบโดย {existingCadFileMeta.uploader} · {existingCadFileMeta.date}</p>
-                          </div>
-                        ) : (
+                        <div className="p-3 bg-slate-50 border border-slate-200 rounded-md text-sm space-y-2">
+                          <p className="font-medium text-gray-700">ไฟล์ที่ CM อนุมัติ (ระบบจะใช้ไฟล์เหล่านี้ในการเผยแพร่)</p>
+                          {cmApprovedFiles.length > 0 ? (
+                            <ul className="space-y-1">
+                              {cmApprovedFiles.map((file, i) => (
+                                <li key={i} className="flex items-baseline gap-2">
+                                  <a href={resolveViewUrl(file.fileUrl, file.filePath)} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline break-all">
+                                    {file.fileName}
+                                  </a>
+                                  {file.fileSize ? <span className="text-xs text-gray-500 flex-shrink-0">{formatFileSize(file.fileSize)}</span> : null}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="text-xs text-gray-500">ไม่มีไฟล์แนบ</p>
+                          )}
+                        </div>
+                        {!cmApprovedHasCad && (
                           <div className="p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-800">
-                            ยังไม่มีไฟล์ CAD จาก CM ในเอกสารนี้ — กรุณาแนบไฟล์ก่อนอนุมัติขั้นสุดท้าย หรือกดอนุมัติต่อได้หากต้องการยืนยันโดยไม่มีไฟล์
+                            ยังไม่มีไฟล์ CAD ในเอกสารนี้ — เมื่อกดอนุมัติ ระบบจะให้แนบไฟล์ในขั้นตอนยืนยัน (หรือยืนยันโดยไม่มีไฟล์ก็ได้)
                           </div>
                         )}
-                        <label className="text-sm font-medium text-gray-700 mb-1 block">
-                          {existingCadFileMeta
-                            ? <>แนบไฟล์ใหม่แทน <span className="text-red-600 font-normal">(จะแทนที่ไฟล์ของ CM ด้านบนทันที — ไม่บังคับ)</span></>
-                            : <>แนบไฟล์ <span className="text-gray-400 font-normal">(ไม่บังคับ)</span></>}
-                        </label>
                       </>
                     ) : (
-                      <label className="text-sm font-medium text-gray-700 mb-1 block">แนบไฟล์ <span className="text-red-700">*</span></label>
+                      <>
+                        <label className="text-sm font-medium text-gray-700 mb-1 block">แนบไฟล์ <span className="text-red-700">*</span></label>
+                        <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
+                          <input type="file" multiple onChange={(e) => handleFileUpload(e, 'action')} className="hidden" id="action-file-upload-final" />
+                          <label htmlFor="action-file-upload-final" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
+                            <Upload size={16} className="mr-2" />
+                            คลิกเพื่อเลือกไฟล์
+                          </label>
+                        </div>
+                        {renderFileList(newFiles, 'action')}
+                      </>
                     )}
-                    <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
-                      <input type="file" multiple onChange={(e) => handleFileUpload(e, 'action')} className="hidden" id="action-file-upload-final" />
-                      <label htmlFor="action-file-upload-final" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
-                        <Upload size={16} className="mr-2" />
-                        คลิกเพื่อเลือกไฟล์
-                      </label>
-                    </div>
-                    {renderFileList(newFiles, 'action')}
                   </div>
                   <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
                     <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
@@ -1555,6 +1772,162 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                         </div>
                       </div>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {/* CM forwards the document to the external Designer/Owner chain (INTERNAL,
+                  round 1). No file needed here — this only configures who reviews and in
+                  what order; the verdict files come at each external step. */}
+              {permissions.canForwardExternal && !isCmRound1Choice && (
+                <div className="space-y-6">
+                  <div className="pb-3 border-b border-slate-200">
+                    <h3 className="text-lg font-bold text-slate-800">ส่งออกให้ผู้พิจารณาภายนอก</h3>
+                  </div>
+                  <div className="flex items-start gap-3 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
+                    <Send size={18} className="text-indigo-600 mt-0.5 flex-shrink-0" />
+                    <p className="text-sm text-indigo-800">
+                      เลือกผู้พิจารณาภายนอก (ผู้ออกแบบ / เจ้าของโครงการ) และลำดับการพิจารณา
+                      เมื่อส่งแล้วเอกสารจะไล่ผ่านทุกลำดับก่อนกลับมาให้ CM สรุปผลขั้นสุดท้าย
+                    </p>
+                  </div>
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                    <ExternalChainConfig
+                      value={chainConfig}
+                      onChange={setChainConfig}
+                      disabled={isSubmitting}
+                    />
+                    <div className="flex items-center justify-end pt-2 border-t border-slate-200">
+                      <button
+                        onClick={() => executeAction('FORWARD_EXTERNAL', chainConfig)}
+                        disabled={isSubmitting || chainConfig.length === 0}
+                        className="flex items-center px-5 py-2 text-sm font-bold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-indigo-500 outline-none transition-colors shadow-sm"
+                      >
+                        {loadingAction === 'FORWARD_EXTERNAL' ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />} ส่งออกภายนอก
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* External approver (Designer/Owner) verdict — INTERNAL chain step.
+                  File required for every verdict (client block + server enforce). */}
+              {permissions.canActExternalStep && (
+                <div className="space-y-6">
+                  <div className="pb-3 border-b border-slate-200">
+                    <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (ผู้พิจารณาภายนอก)</h3>
+                  </div>
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                    <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+                      <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">1</span>
+                      <h4 className="font-semibold text-slate-800 text-base">แนบไฟล์ประกอบการพิจารณา</h4>
+                    </div>
+                    <label className="text-sm font-medium text-gray-700 mb-1 block">แนบไฟล์ <span className="text-red-700">*</span></label>
+                    <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
+                      <input type="file" multiple onChange={(e) => handleFileUpload(e, 'action')} className="hidden" id="action-file-upload-ext" />
+                      <label htmlFor="action-file-upload-ext" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
+                        <Upload size={16} className="mr-2" />
+                        คลิกเพื่อเลือกไฟล์
+                      </label>
+                    </div>
+                    {renderFileList(newFiles, 'action')}
+                  </div>
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                    <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+                      <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">2</span>
+                      <h4 className="font-semibold text-slate-800 text-base">ความคิดเห็น</h4>
+                    </div>
+                    <label className="text-sm font-medium text-gray-700 mb-1.5 block">แสดงความคิดเห็น (Optional)</label>
+                    <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..." className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white text-gray-900 focus:ring-blue-500 focus:border-blue-500 transition-colors" rows={3} />
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200">
+                      <button
+                        onClick={() => handleAction('EXT_REJECT')}
+                        disabled={isActionDisabled}
+                        className="flex items-center px-4 py-2 text-sm font-medium text-red-600 bg-white border-2 border-red-300 rounded-lg hover:bg-red-50 hover:border-red-500 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-red-500 outline-none transition-colors"
+                      >
+                        {loadingAction === 'EXT_REJECT' ? <Spinner className="w-4 h-4 mr-2" /> : <ThumbsDown size={16} className="mr-2" />} ไม่อนุมัติ
+                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => handleAction('EXT_APPROVE_WITH_COMMENTS')}
+                          disabled={isActionDisabled}
+                          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-teal-500 outline-none transition-colors"
+                        >
+                          {loadingAction === 'EXT_APPROVE_WITH_COMMENTS' ? <Spinner className="w-4 h-4 mr-2" /> : <MessageSquare size={16} className="mr-2" />} อนุมัติตามคอมเมนต์
+                        </button>
+                        <button
+                          onClick={() => handleAction('EXT_APPROVE')}
+                          disabled={isActionDisabled}
+                          className="flex items-center px-5 py-2 text-sm font-bold text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-green-500 outline-none transition-colors shadow-sm"
+                        >
+                          {loadingAction === 'EXT_APPROVE' ? <Spinner className="w-4 h-4 mr-2" /> : <ThumbsUp size={16} className="mr-2" />} อนุมัติ
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* CM final decision — external chain has returned (PENDING_CM_FINAL).
+                  File required (CM is NOT exempt here, unlike round 1). */}
+              {permissions.canFinalizeExternal && (
+                <div className="space-y-6">
+                  <div className="pb-3 border-b border-slate-200">
+                    <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (CM พิจารณาขั้นสุดท้าย)</h3>
+                  </div>
+                  <div className="flex items-start gap-3 p-4 bg-violet-50 border border-violet-200 rounded-lg">
+                    <MessageSquare size={18} className="text-violet-600 mt-0.5 flex-shrink-0" />
+                    <p className="text-sm text-violet-800">
+                      ผู้พิจารณาภายนอกตอบกลับครบทุกลำดับแล้ว — CM สรุปผลขั้นสุดท้ายได้เลย
+                    </p>
+                  </div>
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                    <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+                      <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">1</span>
+                      <h4 className="font-semibold text-slate-800 text-base">แนบไฟล์ประกอบการสรุป</h4>
+                    </div>
+                    <label className="text-sm font-medium text-gray-700 mb-1 block">แนบไฟล์ <span className="text-red-700">*</span></label>
+                    <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
+                      <input type="file" multiple onChange={(e) => handleFileUpload(e, 'action')} className="hidden" id="action-file-upload-cmfinal" />
+                      <label htmlFor="action-file-upload-cmfinal" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
+                        <Upload size={16} className="mr-2" />
+                        คลิกเพื่อเลือกไฟล์
+                      </label>
+                    </div>
+                    {renderFileList(newFiles, 'action')}
+                  </div>
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                    <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+                      <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">2</span>
+                      <h4 className="font-semibold text-slate-800 text-base">ความคิดเห็น</h4>
+                    </div>
+                    <label className="text-sm font-medium text-gray-700 mb-1.5 block">แสดงความคิดเห็น (Optional)</label>
+                    <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..." className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white text-gray-900 focus:ring-blue-500 focus:border-blue-500 transition-colors" rows={3} />
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200">
+                      <button
+                        onClick={() => handleAction('REJECT')}
+                        disabled={isActionDisabled}
+                        className="flex items-center px-4 py-2 text-sm font-medium text-red-600 bg-white border-2 border-red-300 rounded-lg hover:bg-red-50 hover:border-red-500 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-red-500 outline-none transition-colors"
+                      >
+                        {loadingAction === 'REJECT' ? <Spinner className="w-4 h-4 mr-2" /> : <ThumbsDown size={16} className="mr-2" />} ไม่อนุมัติ
+                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => handleAction('APPROVE_WITH_COMMENTS')}
+                          disabled={isActionDisabled}
+                          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-teal-500 outline-none transition-colors"
+                        >
+                          {loadingAction === 'APPROVE_WITH_COMMENTS' ? <Spinner className="w-4 h-4 mr-2" /> : <MessageSquare size={16} className="mr-2" />} อนุมัติตามคอมเมนต์
+                        </button>
+                        <button
+                          onClick={() => handleAction('APPROVE')}
+                          disabled={isActionDisabled}
+                          className="flex items-center px-5 py-2 text-sm font-bold text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-green-500 outline-none transition-colors shadow-sm"
+                        >
+                          {loadingAction === 'APPROVE' ? <Spinner className="w-4 h-4 mr-2" /> : <ThumbsUp size={16} className="mr-2" />} อนุมัติ
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1756,7 +2129,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                         <span className="w-20 font-medium text-gray-500">ชื่อไฟล์:</span>
                         {cadWarningModalData.cadMeta?.fileUrl ? (
                           <a
-                            href={cadWarningModalData.cadMeta.fileUrl}
+                            href={resolveViewUrl(cadWarningModalData.cadMeta.fileUrl)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="font-semibold text-blue-600 truncate flex-1 hover:underline hover:text-blue-800"
@@ -1811,15 +2184,23 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                   </label>
                 </>
               ) : (
-                // ─── Case B: ไม่มีไฟล์ CAD ในประวัติเลย → แจ้งเตือนสั้นตรงประเด็น ───
-                <div className="p-4 bg-orange-50 border border-orange-200 rounded-md space-y-1">
+                // ─── Case B: ไม่มีไฟล์ CAD ในประวัติเลย → แจ้งเตือน + เปิดช่องแนบไฟล์ (ไม่บังคับ) ───
+                <div className="p-4 bg-orange-50 border border-orange-200 rounded-md space-y-3">
                   <div className="flex items-start gap-2 text-sm text-orange-800 font-semibold">
                     <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" />
                     ไม่พบไฟล์ CAD ในประวัติทั้งหมด
                   </div>
                   <p className="text-sm text-orange-700 pl-6">
-                    หากต้องการแนบไฟล์ก่อน ให้กด "ย้อนกลับ"
+                    แนบไฟล์ CAD ได้ที่นี่ หรือกด "ยืนยันและเผยแพร่" เพื่ออนุมัติโดยไม่มีไฟล์ก็ได้
                   </p>
+                  <div className="border-2 border-dashed border-orange-300 rounded-lg p-4 text-center hover:border-orange-500 bg-white transition-colors">
+                    <input type="file" multiple onChange={(e) => handleFileUpload(e, 'action')} className="hidden" id="cad-warning-file-upload" />
+                    <label htmlFor="cad-warning-file-upload" className="cursor-pointer text-orange-600 hover:text-orange-800 font-medium flex items-center justify-center">
+                      <Upload size={16} className="mr-2" />
+                      คลิกเพื่อเลือกไฟล์ (ไม่บังคับ)
+                    </label>
+                  </div>
+                  {renderFileList(newFiles, 'action')}
                 </div>
               )}
             </div>

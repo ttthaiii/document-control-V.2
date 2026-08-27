@@ -17,12 +17,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminDb, adminAuth, adminBucket } from '@/lib/firebase/admin';
 import { FieldValue } from 'firebase-admin/firestore';
-import { ROLES, Role } from '@/lib/config/workflow';
+import {
+  ROLES,
+  Role,
+  ExternalChain,
+  EXTERNAL_STEP_STATUSES,
+  getExternalChainHolder,
+  canActOnExternalStep,
+  configureExternalChain,
+  applyExternalStep,
+  advanceExternalChain,
+  serializeExternalChainForViewer,
+} from '@/lib/config/workflow';
 import {
   RFI_ACTIONS,
   RFI_ACTION_LABELS,
   RFI_STATUSES,
   RFI_TRANSITIONS,
+  RFI_PARTIES,
   RFI_PARTY_ROLES,
   RFI_SITE_ROLES,
   askerParty,
@@ -49,6 +61,8 @@ const PERMISSION_KEY: Record<WorkflowAction, keyof RFIPermissions> = {
   [RFI_ACTIONS.FORWARD_TO_CM]: 'canForwardToCm',
   [RFI_ACTIONS.ANSWER_AND_FORWARD]: 'canAnswerAndForward',
   [RFI_ACTIONS.CM_REPLY]: 'canRecordCmReply',
+  [RFI_ACTIONS.FORWARD_EXTERNAL]: 'canForwardExternal',
+  [RFI_ACTIONS.EXT_STEP_ACT]: 'canActExternalStep',
   [RFI_ACTIONS.ACKNOWLEDGE]: 'canAcknowledge',
   [RFI_ACTIONS.REQUEST_MORE_INFO]: 'canRequestMoreInfo',
 };
@@ -63,6 +77,8 @@ const LOG_ACTION: Record<WorkflowAction, LogAction> = {
   [RFI_ACTIONS.FORWARD_TO_CM]: 'SUBMIT_DOCUMENT',
   [RFI_ACTIONS.ANSWER_AND_FORWARD]: 'SUBMIT_DOCUMENT',
   [RFI_ACTIONS.CM_REPLY]: 'SUBMIT_DOCUMENT',
+  [RFI_ACTIONS.FORWARD_EXTERNAL]: 'SUBMIT_DOCUMENT',
+  [RFI_ACTIONS.EXT_STEP_ACT]: 'SUBMIT_DOCUMENT',
   [RFI_ACTIONS.ACKNOWLEDGE]: 'APPROVE_DOCUMENT',
   [RFI_ACTIONS.REQUEST_MORE_INFO]: 'REQUEST_REVISION',
 };
@@ -86,6 +102,9 @@ interface ActionContext {
    * tell them apart.
    */
   lastAction: WorkflowAction | null;
+  /** The document's external approval chain, if CM has forwarded it (INTERNAL only).
+   *  Drives FORWARD_EXTERNAL / EXT_STEP_ACT gating and defers CM_REPLY until it completes. */
+  externalChain?: ExternalChain;
 }
 
 /** Reads ctx.lastAction off a document's workflow history. Last entry wins. */
@@ -110,6 +129,35 @@ interface Verdict {
 function evaluateAction(action: WorkflowAction, ctx: ActionContext): Verdict {
   const transition = RFI_TRANSITIONS[action];
   if (!transition) return { allowed: false, reason: `Unknown action: ${action}` };
+
+  // --- External approval chain (INTERNAL only) ---
+  // Special-cased ahead of the generic actor/state logic: these are gated on the CM track
+  // + the chain, not on `status` or the table's single `actor`. This lets whichever role
+  // (Designer/Owner) currently holds a step act on it, and keeps a reject from short-
+  // circuiting the walk (advanceExternalChain never inspects step.status).
+  if (action === RFI_ACTIONS.FORWARD_EXTERNAL) {
+    if (ctx.cmSystemType !== 'INTERNAL') return { allowed: false, reason: 'ไม่รองรับสายอนุมัติภายนอกในโครงการนี้' };
+    if (!ctx.awaitingCm) return { allowed: false, reason: 'เอกสารนี้ไม่ได้รออยู่ที่ CM' };
+    if (!RFI_PARTY_ROLES[RFI_PARTIES.CM].includes(ctx.role)) {
+      return { allowed: false, reason: `บทบาท ${ctx.role} ไม่มีสิทธิ์ทำรายการนี้` };
+    }
+    // A chain that already exists — whether still walking its steps OR fully complete
+    // and back with CM — means CM has forwarded once already. getExternalChainHolder
+    // returns null in BOTH the "never configured" and the "chain complete" cases, so it
+    // cannot tell a fresh round-1 apart from a finished loop. Check the chain's existence
+    // directly: after the loop CM finalizes with CM_REPLY, it does not forward a 2nd time.
+    if (ctx.externalChain && ctx.externalChain.steps.length > 0) {
+      return { allowed: false, reason: 'เอกสารนี้ส่งต่อสายอนุมัติภายนอกไปแล้ว' };
+    }
+    return { allowed: true, reason: '' };
+  }
+  if (action === RFI_ACTIONS.EXT_STEP_ACT) {
+    if (ctx.cmSystemType !== 'INTERNAL') return { allowed: false, reason: 'ไม่รองรับสายอนุมัติภายนอกในโครงการนี้' };
+    if (!canActOnExternalStep(ctx.externalChain, ctx.role)) {
+      return { allowed: false, reason: 'ไม่ใช่ผู้ที่ต้องดำเนินการในขั้นนี้' };
+    }
+    return { allowed: true, reason: '' };
+  }
 
   // --- Who may act ---
   // Closing and asking-for-more belong to whoever RAISED the question, so their party
@@ -142,8 +190,15 @@ function evaluateAction(action: WorkflowAction, ctx: ActionContext): Verdict {
   // it belongs to the parallel CM track, so it is gated on awaitingCm instead. A
   // question can be closed on the BIM side while CM still owes an answer.
   if (transition.from === null) {
-    if (action === RFI_ACTIONS.CM_REPLY && !ctx.awaitingCm) {
-      return { allowed: false, reason: 'เอกสารนี้ไม่ได้รออยู่ที่ CM' };
+    if (action === RFI_ACTIONS.CM_REPLY) {
+      if (!ctx.awaitingCm) {
+        return { allowed: false, reason: 'เอกสารนี้ไม่ได้รออยู่ที่ CM' };
+      }
+      // CM finalizes only AFTER the external chain (if any) has run to completion — the
+      // whole point is that CM weighs every approver's outcome before replying.
+      if (getExternalChainHolder(ctx.externalChain) !== null) {
+        return { allowed: false, reason: 'ต้องรอสายอนุมัติภายนอกให้ครบทุกขั้นก่อน CM จึงจะสรุปได้' };
+      }
     }
     return { allowed: true, reason: '' };
   }
@@ -184,6 +239,8 @@ function buildPermissions(ctx: ActionContext): RFIPermissions {
     canRecordCmReply: false,
     canAcknowledge: false,
     canRequestMoreInfo: false,
+    canForwardExternal: false,
+    canActExternalStep: false,
   };
 
   // Same function PUT uses, so a visible button is always an accepted button.
@@ -264,13 +321,19 @@ export async function GET(
       origin: (rfiData.origin || 'BIM') as RFIOrigin,
       cmSystemType,
       lastAction: getLastWorkflowAction(rfiData.workflow),
+      externalChain: rfiData.externalChain,
     });
+
+    const isCm = userRole === ROLES.CM || userRole === ROLES.ADMIN;
 
     return NextResponse.json({
       success: true,
       document: {
         id: rfiDoc.id,
         ...rfiData,
+        // Override the raw spread: CM sees the full chain, everyone else location-only
+        // (per-approver outcomes stay hidden until CM's reply).
+        externalChain: serializeExternalChainForViewer(rfiData.externalChain, isCm),
         site: siteInfo,
         category: {
           id: rfiData.categoryId,
@@ -352,6 +415,7 @@ export async function PUT(
       origin: (docData.origin || 'BIM') as RFIOrigin,
       cmSystemType,
       lastAction: getLastWorkflowAction(docData.workflow),
+      externalChain: docData.externalChain,
     });
     if (!verdict.allowed) {
       return NextResponse.json({ success: false, error: verdict.reason }, { status: 403 });
@@ -489,6 +553,41 @@ export async function PUT(
       updates.files = allFiles;
       updates.filesCount = allFiles.length;
       updates.totalFileSize = allFiles.reduce((sum, f) => sum + (f.size || 0), 0);
+    }
+
+    // --- External approval chain writes (INTERNAL; gating already passed above) ---
+    // Status + CM track are left untouched (the table's null toStatus/setAwaitingCm) — only
+    // the chain moves. FORWARD builds it; a step records its outcome then advances (a reject
+    // never short-circuits). Once the chain completes, CM_REPLY becomes available again.
+    if (action === RFI_ACTIONS.FORWARD_EXTERNAL) {
+      const chainConfig = (body as { chainConfig?: { role: Role; order: number }[] }).chainConfig;
+      if (!Array.isArray(chainConfig) || chainConfig.length === 0) {
+        return NextResponse.json(
+          { success: false, error: 'กรุณาเลือกผู้พิจารณาภายนอกอย่างน้อย 1 ราย' },
+          { status: 400 }
+        );
+      }
+      try {
+        updates.externalChain = configureExternalChain(chainConfig, userId);
+      } catch (e) {
+        return NextResponse.json(
+          { success: false, error: e instanceof Error ? e.message : 'การตั้งค่าสายอนุมัติไม่ถูกต้อง' },
+          { status: 400 }
+        );
+      }
+    } else if (action === RFI_ACTIONS.EXT_STEP_ACT) {
+      // RFI external step is a REPLY, not a verdict — Designer/Owner answer with an
+      // attached document. Record ANSWERED (no approve/reject) + the reply files +
+      // comment, then advance. The attachment is enforced by transition.requiresFiles.
+      const acted = applyExternalStep(docData.externalChain, {
+        status: EXTERNAL_STEP_STATUSES.ANSWERED,
+        userId,
+        userName: userData.email || '',
+        comment: comments || '',
+        files: movedFiles,
+        actedAt: nowIso,
+      });
+      updates.externalChain = advanceExternalChain(acted).chain;
     }
 
     // First answer wins — answeredAt records when the question was first answered,

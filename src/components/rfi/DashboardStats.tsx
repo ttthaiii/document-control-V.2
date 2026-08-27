@@ -18,6 +18,9 @@ interface DashboardStatsProps {
   categoryDocuments: RFIDocument[];
   onChartFilter: (filterKey: 'status' | 'categoryId', value: string) => void;
   activeFilters: { status: string; categoryId: string };
+  /** Ordered statuses the status donut renders. Defaults to all active statuses;
+   *  callers pass a narrower set (e.g. CM sees only CM-relevant statuses). */
+  statuses?: string[];
 }
 
 const CustomTooltip = ({ active, payload }: any) => {
@@ -39,7 +42,7 @@ const CustomTooltip = ({ active, payload }: any) => {
   return null;
 };
 
-const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, categoryDocuments, onChartFilter, activeFilters }) => {
+const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, categoryDocuments, onChartFilter, activeFilters, statuses }) => {
   const [isSmallScreen, setIsSmallScreen] = useState(false);
 
   useEffect(() => {
@@ -52,7 +55,7 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, categoryD
   const statusData = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const doc of allDocuments) counts[doc.status] = (counts[doc.status] || 0) + 1;
-    return RFI_ACTIVE_STATUSES
+    return (statuses ?? RFI_ACTIVE_STATUSES)
       .map(status => ({
         name: RFI_STATUS_LABELS[status],
         value: counts[status] || 0,
@@ -60,7 +63,7 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, categoryD
         color: RFI_STATUS_COLORS[status] || '#94a3b8',
       }))
       .filter(item => item.value > 0);
-  }, [allDocuments]);
+  }, [allDocuments, statuses]);
 
   const categoryData = useMemo(() => {
     const counts: Record<string, number> = {};

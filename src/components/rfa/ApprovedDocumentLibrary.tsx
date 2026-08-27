@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '@/lib/auth/useAuth'
+import { resolveViewUrl } from '@/lib/utils/storage'
 import { useLogActivity } from '@/lib/hooks/useLogActivity'
 import { Site, Category, RFADocument, RFAFile } from '@/types/rfa'
 import {
@@ -310,7 +311,7 @@ export default function ApprovedDocumentLibrary() {
       siteName,
       description: `ดาวน์โหลดไฟล์ CAD "${cad.fileName}" (คลังเอกสาร)`,
     });
-    if (cad.fileUrl) window.open(cad.fileUrl, '_blank');
+    if (cad.fileUrl) window.open(resolveViewUrl(cad.fileUrl), '_blank');
   };
 
   // เปิดไฟล์เอกสาร: PDF → preview modal, อื่นๆ → เปิด tab ใหม่
@@ -318,7 +319,7 @@ export default function ApprovedDocumentLibrary() {
     if (file.fileName.toLowerCase().endsWith('.pdf')) {
       handlePreviewPdf(file, doc);
     } else if (file.fileUrl) {
-      window.open(file.fileUrl, '_blank');
+      window.open(resolveViewUrl(file.fileUrl), '_blank');
     }
   };
 

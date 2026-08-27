@@ -86,6 +86,9 @@ export default function CreateRFAForm({
 
   const [isCheckingTask, setIsCheckingTask] = useState(false);
   const [isTaskDuplicate, setIsTaskDuplicate] = useState<boolean | null>(null);
+  // Task keys (taskUid || taskName) that already carry an RFA for this site —
+  // used to HIDE already-used tasks from the selectable list.
+  const [usedTaskKeys, setUsedTaskKeys] = useState<Set<string>>(new Set());
 
   const { firebaseUser, user } = useAuth(); // ใช้ user จาก useAuth โดยตรง
   const { showNotification } = useNotification();
@@ -251,6 +254,38 @@ export default function CreateRFAForm({
 
     checkTaskDuplicate();
   }, [formData.selectedTask, selectedSite]);
+
+  // Fetch every task key already used by an RFA in this site, so used tasks can be
+  // hidden from the create list. Client can read rfaDocuments directly (same access
+  // as checkTaskDuplicate). Fail-open: on error the set stays empty → list shows all.
+  useEffect(() => {
+    if (!selectedSite) {
+      setUsedTaskKeys(new Set());
+      return;
+    }
+
+    const fetchUsedTasks = async () => {
+      try {
+        const q = query(
+          collection(db, 'rfaDocuments'),
+          where('siteId', '==', selectedSite)
+        );
+        const snapshot = await getDocs(q);
+        const keys = new Set<string>();
+        snapshot.forEach((doc) => {
+          const taskData = doc.data().taskData;
+          if (taskData?.taskUid) keys.add(taskData.taskUid);
+          if (taskData?.taskName) keys.add(taskData.taskName);
+        });
+        setUsedTaskKeys(keys);
+      } catch (error) {
+        console.error('Failed to fetch used RFA tasks:', error);
+        setUsedTaskKeys(new Set());
+      }
+    };
+
+    fetchUsedTasks();
+  }, [selectedSite]);
 
   const updateFormData = (updates: Partial<RFAFormData>) => {
     setFormData(prev => ({ ...prev, ...updates }));
@@ -529,9 +564,11 @@ export default function CreateRFAForm({
   };
 
   const filteredTasks = useMemo(() => {
-    if (!taskSearchQuery) return tasks.slice(0, 20);
-    return tasks.filter(t => t.taskName.toLowerCase().includes(taskSearchQuery.toLowerCase()));
-  }, [tasks, taskSearchQuery]);
+    // Hide tasks that already carry an RFA in this site.
+    const available = tasks.filter(t => !usedTaskKeys.has(t.taskUid || t.taskName));
+    if (!taskSearchQuery) return available.slice(0, 20);
+    return available.filter(t => t.taskName.toLowerCase().includes(taskSearchQuery.toLowerCase()));
+  }, [tasks, taskSearchQuery, usedTaskKeys]);
 
   // ... (ส่วน JSX ที่เหลือทั้งหมดเหมือนเดิม ไม่ต้องแก้ไข) ...
   return (

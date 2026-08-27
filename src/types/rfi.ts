@@ -8,7 +8,7 @@
 //   3. `dueDate` exists. RFA has no due date; RFI does.
 //   4. No revision / supersede fields. An RFI is a question, not a published document.
 
-import { Role } from '@/lib/config/workflow';
+import { Role, ExternalChain } from '@/lib/config/workflow';
 import {
   RFIStatus,
   RFIAction,
@@ -99,6 +99,10 @@ export interface RFIPermissions {
   canAcknowledge: boolean;
   /** BIM: accept but send back for more. */
   canRequestMoreInfo: boolean;
+  /** CM (INTERNAL only): forward the question to the external chain (Designer/Owner). */
+  canForwardExternal: boolean;
+  /** Current external chain holder (Designer/Owner, INTERNAL only): record their outcome. */
+  canActExternalStep: boolean;
 }
 
 export interface RFICurrentUser {
@@ -172,6 +176,11 @@ export interface RFIDocument {
   currentUser?: RFICurrentUser;
 
   metadata?: Record<string, unknown>;
+
+  // External approval chain (M1 foundation). Present only once CM configures a chain
+  // (INTERNAL cmSystemType sites); absent = legacy / internal-only flow. RFI `status`
+  // stays PENDING_CM while inside the chain — location derives from here. Written in M2.
+  externalChain?: ExternalChain;
 }
 
 /** Shape written to Firestore on create, before server-side fields are added. */

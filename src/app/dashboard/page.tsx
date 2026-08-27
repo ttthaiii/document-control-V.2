@@ -16,7 +16,7 @@ function DashboardContent() {
 
 export default function DashboardPage() {
   return (
-    <AuthGuard>
+    <AuthGuard blockedRoles={['CM']}>
       {/* 👇 2. ครอบ DashboardContent ด้วย Suspense */}
       <Suspense fallback={<div className="p-8 text-center">Loading Dashboard...</div>}>
         <DashboardContent />

@@ -18,6 +18,8 @@ import {
   Role,
   REVIEWER_ROLES,
   RFA_SHOP_CATEGORIES,
+  ExternalChain,
+  getExternalChainHolder,
 } from '@/lib/config/workflow';
 import { MUTED_PALETTE } from '@/lib/config/chartColors';
 
@@ -36,6 +38,9 @@ export const RFI_STATUSES = {
   PENDING_CM: 'PENDING_CM',
   /** BIM closed the question. Note: not "finished" unless awaitingCm is false too. */
   CLOSED: 'CLOSED',
+  // NOTE (M1 foundation): the external approval chain (CM → Designer/Owner → CM) adds NO
+  // new RFI status. While a document is inside the chain, status stays PENDING_CM; the
+  // granular location (at Designer / at Owner) is derived from the doc's externalChain.
 } as const;
 
 export type RFIStatus = ObjectValues<typeof RFI_STATUSES>;
@@ -43,7 +48,7 @@ export type RFIStatus = ObjectValues<typeof RFI_STATUSES>;
 export const RFI_STATUS_LABELS: Record<string, string> = {
   [RFI_STATUSES.PENDING_SITE]: 'รอตรวจสอบ',
   [RFI_STATUSES.PENDING_SITE_MORE_INFO]: 'รอข้อมูลเพิ่มเติม',
-  [RFI_STATUSES.PENDING_CM]: 'รอคำตอบ',
+  [RFI_STATUSES.PENDING_CM]: 'รอดำเนินการ',
   [RFI_STATUSES.CLOSED]: 'ตอบกลับแล้ว',
 };
 
@@ -67,6 +72,16 @@ export const RFI_ACTIVE_STATUSES: RFIStatus[] = [
   RFI_STATUSES.CLOSED,
 ];
 
+/**
+ * Statuses relevant to a CM. CM only ever handles a question once it reaches them
+ * (waiting for their action) or after it is closed — the SITE-track states are internal
+ * to the BIM<->SITE loop. Drives CM-scoped chart + status filter (rfi dashboard).
+ */
+export const RFI_CM_STATUSES: RFIStatus[] = [
+  RFI_STATUSES.PENDING_CM,
+  RFI_STATUSES.CLOSED,
+];
+
 /** Colour for the parallel CM track badge, shown alongside the status badge. */
 export const RFI_AWAITING_CM_COLOR = '#8B5CF6';
 export const RFI_AWAITING_CM_LABEL = 'รอ CM ตอบ';
@@ -81,7 +96,14 @@ export function getRfiStatusLabel(doc: {
   status?: string;
   awaitingCm?: boolean;
   origin?: string;
+  externalChain?: ExternalChain;
 }): string {
+  // While a document is walking the external chain its `status` stays PENDING_CM, so the
+  // generic "รอดำเนินการ" hides WHO it is actually waiting on. Surface the active chain
+  // holder (Designer / Owner) directly so the list makes the current owner obvious.
+  const holder = getExternalChainHolder(doc.externalChain);
+  if (holder) return `รอคำตอบ ${RFI_PARTY_LABELS[holder as RFIParty] ?? holder}`;
+
   return RFI_STATUS_LABELS[doc.status || ''] || doc.status || '-';
 }
 
@@ -90,7 +112,12 @@ export function getRfiStatusColor(doc: {
   status?: string;
   awaitingCm?: boolean;
   origin?: string;
+  externalChain?: ExternalChain;
 }): string {
+  // Match the badge colour to the party currently holding the chain so text + colour agree.
+  const holder = getExternalChainHolder(doc.externalChain);
+  if (holder) return RFI_PARTY_COLORS[holder as RFIParty] ?? '#6B7280';
+
   return RFI_STATUS_COLORS[doc.status || ''] || '#6B7280';
 }
 
@@ -106,17 +133,24 @@ export const RFI_PARTIES = {
   SN: 'SN',
   SITE: 'SITE',
   CM: 'CM',
+  /** External approval-chain holders (M1 foundation). A document sits here only while
+   *  inside the CM-configured external chain; RFI `status` stays PENDING_CM throughout
+   *  (see RFI_STATUSES note). Location for these is derived from the doc's externalChain. */
+  DESIGNER: 'Designer',
+  OWNER: 'Owner',
   DONE: 'DONE',
 } as const;
 
 export type RFIParty = ObjectValues<typeof RFI_PARTIES>;
 
 export const RFI_PARTY_LABELS: Record<RFIParty, string> = {
-  BIM: 'รอ BIM',
-  ME: 'รอ ME',
-  SN: 'รอ SN',
-  SITE: 'รอ SITE',
-  CM: 'รอ CM',
+  BIM: 'BIM',
+  ME: 'ME',
+  SN: 'SN',
+  SITE: 'SITE',
+  CM: 'CM',
+  Designer: 'Designer',
+  Owner: 'Owner',
   DONE: 'เสร็จแล้ว',
 };
 
@@ -126,6 +160,8 @@ export const RFI_PARTY_COLORS: Record<RFIParty, string> = {
   SN: '#14B8A6',
   SITE: '#3B82F6',
   CM: '#8B5CF6',
+  Designer: '#0EA5E9', // Sky-500 (external chain · M1 foundation)
+  Owner: '#7C3AED',    // Violet-600 (external chain · M1 foundation)
   DONE: '#22C55E',
 };
 
@@ -292,6 +328,12 @@ export const RFI_ACTIONS = {
   ANSWER_AND_FORWARD: 'ANSWER_AND_FORWARD',
   /** CM's reply is recorded. Clears the CM track WITHOUT touching `status`. */
   CM_REPLY: 'CM_REPLY',
+  /** CM forwards the question to the external chain (Designer/Owner) to gather input.
+   *  INTERNAL sites only. Stays at PENDING_CM (CM track); externalChain drives location. */
+  FORWARD_EXTERNAL: 'FORWARD_EXTERNAL',
+  /** The current external chain holder (Designer or Owner) records their outcome. The
+   *  chain then advances; a reject never short-circuits. INTERNAL sites only. */
+  EXT_STEP_ACT: 'EXT_STEP_ACT',
   /** BIM accepts the answer and closes the question. */
   ACKNOWLEDGE: 'ACKNOWLEDGE',
   /** BIM accepts but needs more, sending it back to SITE. */
@@ -306,6 +348,8 @@ export const RFI_ACTION_LABELS: Record<RFIAction, string> = {
   [RFI_ACTIONS.FORWARD_TO_CM]: 'ส่งต่อให้ CM',
   [RFI_ACTIONS.ANSWER_AND_FORWARD]: 'ตอบกลับ + ส่งต่อให้ CM',
   [RFI_ACTIONS.CM_REPLY]: 'บันทึกคำตอบจาก CM',
+  [RFI_ACTIONS.FORWARD_EXTERNAL]: 'ส่งต่อให้ผู้พิจารณาภายนอก',
+  [RFI_ACTIONS.EXT_STEP_ACT]: 'ตอบกลับ RFI',
   [RFI_ACTIONS.ACKNOWLEDGE]: 'รับทราบ / ปิดงาน',
   [RFI_ACTIONS.REQUEST_MORE_INFO]: 'ขอข้อมูลเพิ่ม',
 };
@@ -400,6 +444,29 @@ export const RFI_TRANSITIONS: Record<Exclude<RFIAction, 'CREATE'>, RFITransition
     toStatusWhenFrom: { [RFI_STATUSES.PENDING_CM]: RFI_STATUSES.CLOSED },
     setAwaitingCm: false,
     actor: RFI_PARTIES.CM,
+    requiresFiles: true,
+    requiresCmNumber: false,
+  },
+  [RFI_ACTIONS.FORWARD_EXTERNAL]: {
+    // Fully special-cased in evaluateAction (like CM_REPLY): gated on the CM track +
+    // chain, not on `status`. Stays at PENDING_CM with awaitingCm untouched — the chain
+    // runs inside the CM track, and CM_REPLY still closes it once the chain completes.
+    from: null,
+    toStatus: null,
+    setAwaitingCm: null,
+    actor: RFI_PARTIES.CM,
+    requiresFiles: false,
+    requiresCmNumber: false,
+  },
+  [RFI_ACTIONS.EXT_STEP_ACT]: {
+    // `actor` is nominal — the real gate is canActOnExternalStep in evaluateAction, so
+    // whichever role (Designer/Owner) currently holds the step may act. Leaves status +
+    // CM track alone; only the externalChain advances (handled in PUT apply).
+    // RFI has NO approval: this step is a REPLY, so a reply document is REQUIRED.
+    from: null,
+    toStatus: null,
+    setAwaitingCm: null,
+    actor: RFI_PARTIES.DESIGNER,
     requiresFiles: true,
     requiresCmNumber: false,
   },
@@ -528,12 +595,19 @@ export const RFI_SITE_ROLES: Role[] = REVIEWER_ROLES;
 /** CM answers. On EXTERNAL-CM projects, SITE records the answer on their behalf. */
 export const RFI_CM_ROLES: Role[] = [ROLES.CM, ROLES.ADMIN];
 
+/** External approval-chain parties (M1 foundation). Admin included as the universal
+ *  fallback, matching every other RFI party group above. */
+export const RFI_DESIGNER_ROLES: Role[] = [ROLES.DESIGNER, ROLES.ADMIN];
+export const RFI_OWNER_ROLES: Role[] = [ROLES.OWNER, ROLES.ADMIN];
+
 export const RFI_PARTY_ROLES: Record<Exclude<RFIParty, 'DONE'>, Role[]> = {
   BIM: RFI_BIM_ROLES,
   ME: RFI_ME_ROLES,
   SN: RFI_SN_ROLES,
   SITE: RFI_SITE_ROLES,
   CM: RFI_CM_ROLES,
+  Designer: RFI_DESIGNER_ROLES,
+  Owner: RFI_OWNER_ROLES,
 };
 
 /**

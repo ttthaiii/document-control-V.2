@@ -12,6 +12,7 @@ import {
 import * as fabric from 'fabric';
 import { PDFDocument, degrees } from 'pdf-lib';
 import { useNotification } from '@/lib/context/NotificationContext';
+import { resolveViewUrl } from '@/lib/utils/storage';
 
 interface PDFPreviewModalProps {
   isOpen: boolean;
@@ -254,7 +255,7 @@ export default function PDFPreviewModal({
         // @ts-ignore
         const pdfjsLib = window.pdfjsLib;
         if (!pdfjsLib) { setTimeout(loadPDF, 500); return; }
-        const urlToLoad = managedFileUrl || file.fileUrl; // Load the managed file if exists
+        const urlToLoad = managedFileUrl || resolveViewUrl(file.fileUrl, file.filePath); // Load the managed file if exists
         const loadingTask = pdfjsLib.getDocument(urlToLoad);
         const pdf = await loadingTask.promise;
         pdfDocRef.current = pdf;
@@ -299,7 +300,7 @@ export default function PDFPreviewModal({
     try {
       saveCurrentPageData();
 
-      const existingPdfBytes = await fetch(managedFileUrl || file.fileUrl).then(res => res.arrayBuffer());
+      const existingPdfBytes = await fetch(managedFileUrl || resolveViewUrl(file.fileUrl, file.filePath)).then(res => res.arrayBuffer());
       const pdfDoc = await PDFDocument.load(existingPdfBytes);
       const pages = pdfDoc.getPages();
 
@@ -365,7 +366,7 @@ export default function PDFPreviewModal({
     if (!file) return;
     if (onDownload) onDownload();
     try {
-      const targetUrl = managedFileUrl || file.fileUrl;
+      const targetUrl = managedFileUrl || resolveViewUrl(file.fileUrl, file.filePath);
       const response = await fetch(targetUrl);
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
@@ -378,7 +379,7 @@ export default function PDFPreviewModal({
       document.body.removeChild(a);
     } catch (error) {
       console.error('Download failed:', error);
-      window.open(managedFileUrl || file.fileUrl, '_blank');
+      window.open(managedFileUrl || resolveViewUrl(file.fileUrl, file.filePath), '_blank');
     }
   };
 
@@ -386,7 +387,7 @@ export default function PDFPreviewModal({
   const performPdfOperation = async (operation: (currentBytes: ArrayBuffer) => Promise<Uint8Array>) => {
     setIsLoading(true);
     try {
-      const currentUrl = managedFileUrl || file!.fileUrl;
+      const currentUrl = managedFileUrl || resolveViewUrl(file!.fileUrl, file!.filePath);
       const pdfBytes = await fetch(currentUrl).then(res => res.arrayBuffer());
 
       const newPdfBytes = await operation(pdfBytes);

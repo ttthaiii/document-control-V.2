@@ -22,15 +22,19 @@ export const functions = getFunctions(app, 'asia-southeast1');
 
 // Connect to Emulators if running locally and env var is set
 if (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === 'true') {
-  console.log('🔗 Connecting to Firebase Emulators...');
+  // Host defaults to 127.0.0.1 for desktop dev. When testing on a phone over the
+  // same WiFi, set NEXT_PUBLIC_EMULATOR_HOST to the dev machine's LAN IP so the
+  // browser on the phone reaches this PC instead of itself.
+  const emulatorHost = process.env.NEXT_PUBLIC_EMULATOR_HOST || '127.0.0.1';
+  console.log(`🔗 Connecting to Firebase Emulators at ${emulatorHost}...`);
   // auth
-  connectAuthEmulator(auth, 'http://127.0.0.1:9099');
+  connectAuthEmulator(auth, `http://${emulatorHost}:9099`);
   // firestore
-  connectFirestoreEmulator(db, '127.0.0.1', 8080);
+  connectFirestoreEmulator(db, emulatorHost, 8080);
   // storage
-  connectStorageEmulator(storage, '127.0.0.1', 9199);
+  connectStorageEmulator(storage, emulatorHost, 9199);
   // functions
-  connectFunctionsEmulator(functions, '127.0.0.1', 5001);
+  connectFunctionsEmulator(functions, emulatorHost, 5001);
 }
 
 // ✅ แก้ไข: สร้างฟังก์ชันเพื่อดึง Messaging instance แทนการ export ตัวแปรโดยตรง

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { FileText, Calendar, User, Clock, Building, Tag, ArrowUp, ArrowDown, Lock, AlertTriangle } from 'lucide-react'
 import { RFADocument } from '@/types/rfa'
 
-import { ROLES, STATUSES } from '@/lib/config/workflow'
+import { ROLES, STATUSES, getRfaStatusLabelForDoc } from '@/lib/config/workflow'
 import Spinner from '@/components/shared/Spinner'
 
 interface RFAListTableProps {
@@ -249,7 +249,7 @@ export default function RFAListTable({
                 </div>
                 <div className="flex flex-col items-end space-y-1 flex-shrink-0 ml-2">
                   <span className={`inline-flex items-center justify-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(doc.status)}`}>
-                    {statusLabels[doc.status] || doc.status}
+                    {getRfaStatusLabelForDoc(doc.status, userRole, doc.externalChain)}
                   </span>
                 </div>
               </div>
@@ -375,7 +375,7 @@ export default function RFAListTable({
                   <td className="px-6 py-4">
                     <div className="flex flex-col space-y-1 items-center">
                       <span className={`inline-flex items-center justify-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(doc.status)}`}>
-                        {statusLabels[doc.status] || doc.status}
+                        {getRfaStatusLabelForDoc(doc.status, userRole, doc.externalChain)}
                       </span>
                       {ACTIVE_STATUSES_FOR_PENDING_DAYS.includes(doc.status) && pendingDays > 0 && (
                         <span className="text-xs text-orange-600 text-center">{`ค้าง ${pendingDays} วัน`}</span>

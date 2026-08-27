@@ -194,9 +194,11 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
 
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
 
-          <Link href="/dashboard" onClick={showLoader} className={`flex items-center px-3 py-2 rounded-lg transition-colors ${isPathActive('/dashboard') && pathname === '/dashboard' ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-100'}`}>
-            <BarChart3 className="w-5 h-5 mr-3" /> Dashboard
-          </Link>
+          {user.role !== 'CM' && (
+            <Link href="/dashboard" onClick={showLoader} className={`flex items-center px-3 py-2 rounded-lg transition-colors ${isPathActive('/dashboard') && pathname === '/dashboard' ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+              <BarChart3 className="w-5 h-5 mr-3" /> Dashboard
+            </Link>
+          )}
 
           {hasRfaAccess && (
             <div className="space-y-1">
@@ -235,7 +237,7 @@ function SidebarContent({ isOpen, onToggle }: SidebarProps) {
             </Link>
           )}
 
-          {hasWorkRequestAccess && (
+          {hasWorkRequestAccess && user.role !== 'CM' && (
             <Link href="/dashboard/work-request" onClick={showLoader} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors duration-200 ${isPathActive('/dashboard/work-request') ? 'bg-orange-200 text-orange-900' : 'text-gray-700 hover:bg-orange-100 hover:text-orange-800'}`}>
               <Wrench size={18} /><span>Work Request</span>
             </Link>

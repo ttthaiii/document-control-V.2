@@ -22,7 +22,6 @@ import {
   getRfiStatusLabel,
   getRfiStatusColor,
   RFI_PARTY_LABELS,
-  RFI_PARTY_COLORS,
   RFI_AWAITING_CM_COLOR,
   RFI_AWAITING_CM_LABEL,
   RFI_STATUSES,
@@ -88,17 +87,9 @@ function StatusBadges({ doc }: { doc: RFIDocument }) {
 function PartyBadges({ doc }: { doc: RFIDocument }) {
   const parties = getResponsibleParties(doc);
   return (
-    <div className="flex flex-wrap items-center justify-center gap-1">
-      {parties.map(party => (
-        <span
-          key={party}
-          className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium"
-          style={badgeStyle(RFI_PARTY_COLORS[party])}
-        >
-          {RFI_PARTY_LABELS[party]}
-        </span>
-      ))}
-    </div>
+    <span className="text-sm text-gray-900">
+      {parties.map(party => RFI_PARTY_LABELS[party]).join(', ')}
+    </span>
   );
 }
 
@@ -147,6 +138,14 @@ function DueCell({ doc }: { doc: RFIDocument }) {
 
 export default function RFIListTable({ documents, isLoading, onDocumentClick, userRole }: RFIListTableProps) {
   const showResponsibleParty = userRole !== ROLES.CM;
+  // The due date is an internal SLA the company tracks against itself — CM's own
+  // review cadence isn't bound by it, so it's hidden for CM the same way the
+  // responsible-party column is. The external approvers (Designer, Owner) sit
+  // outside that internal SLA too, so they don't see the due-date column either.
+  const showDueDate =
+    userRole !== ROLES.CM &&
+    userRole !== ROLES.DESIGNER &&
+    userRole !== ROLES.OWNER;
   const [isMobile, setIsMobile] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection } | null>(
     { key: 'updatedAt', direction: 'descending' }
@@ -263,12 +262,14 @@ export default function RFIListTable({ documents, isLoading, onDocumentClick, us
               <div className="flex items-center"><Tag className="w-3 h-3 mr-2" />{doc.category?.categoryCode || '-'}</div>
               {showResponsibleParty && (
                 <div className="flex items-center gap-2">
-                  <User className="w-3 h-3" /> รอใครอยู่: <PartyBadges doc={doc} />
+                  <User className="w-3 h-3" /> ผู้รับผิดชอบ: <PartyBadges doc={doc} />
                 </div>
               )}
-              <div className="flex items-center gap-2">
-                <CalendarClock className="w-3 h-3" /> กำหนดตอบ: <DueCell doc={doc} />
-              </div>
+              {showDueDate && (
+                <div className="flex items-center gap-2">
+                  <CalendarClock className="w-3 h-3" /> กำหนดตอบ: <DueCell doc={doc} />
+                </div>
+              )}
               <div className="flex items-center"><Calendar className="w-3 h-3 mr-2" />อัปเดต: {formatDate(doc.updatedAt)}</div>
             </div>
           </div>
@@ -305,15 +306,17 @@ export default function RFIListTable({ documents, isLoading, onDocumentClick, us
                   สถานะ <SortIcon columnKey="status" />
                 </button>
               </th>
-              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                <button onClick={() => requestSort('dueDate')} className="flex items-center justify-center w-full">
-                  กำหนดตอบ <SortIcon columnKey="dueDate" />
-                </button>
-              </th>
+              {showDueDate && (
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <button onClick={() => requestSort('dueDate')} className="flex items-center justify-center w-full">
+                    กำหนดตอบ <SortIcon columnKey="dueDate" />
+                  </button>
+                </th>
+              )}
               {showResponsibleParty && (
                 <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                   <button onClick={() => requestSort('responsibleParty')} className="flex items-center justify-center w-full">
-                    รอใครอยู่ <SortIcon columnKey="responsibleParty" />
+                    ผู้รับผิดชอบ <SortIcon columnKey="responsibleParty" />
                   </button>
                 </th>
               )}
@@ -349,9 +352,11 @@ export default function RFIListTable({ documents, isLoading, onDocumentClick, us
                   </div>
                 </td>
                 <td className="px-6 py-4"><StatusBadges doc={doc} /></td>
-                <td className="px-6 py-4 text-center"><DueCell doc={doc} /></td>
+                {showDueDate && (
+                  <td className="px-6 py-4 text-center"><DueCell doc={doc} /></td>
+                )}
                 {showResponsibleParty && (
-                  <td className="px-6 py-4"><PartyBadges doc={doc} /></td>
+                  <td className="px-6 py-4 text-center"><PartyBadges doc={doc} /></td>
                 )}
                 <td className="px-6 py-4">
                   <p className="text-sm text-gray-600 text-center">{formatDate(doc.updatedAt)}</p>

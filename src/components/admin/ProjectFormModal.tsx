@@ -9,6 +9,10 @@ export interface ProjectFormData {
     shortName: string
     cmSystemType: 'INTERNAL' | 'EXTERNAL'
     LineGroupID: string
+    // Separate LINE group for the CM audience. INTERNAL projects only: the CM comes into
+    // a LINE loop with us, but must NEVER see the internal BIM<->SITE group, so CM-relevant
+    // notifications go here instead. Empty = skip CM push (same convention as LineGroupID).
+    LineGroupID_CM: string
     status: 'ACTIVE' | 'INACTIVE'
 }
 
@@ -26,6 +30,7 @@ export function ProjectFormModal({ isOpen, onClose, onSubmit, initialData, isLoa
         shortName: '',
         cmSystemType: 'INTERNAL',
         LineGroupID: '',
+        LineGroupID_CM: '',
         status: 'ACTIVE',
     })
     const [error, setError] = useState<string | null>(null)
@@ -39,6 +44,7 @@ export function ProjectFormModal({ isOpen, onClose, onSubmit, initialData, isLoa
                 shortName: '',
                 cmSystemType: 'INTERNAL',
                 LineGroupID: '',
+                LineGroupID_CM: '',
                 status: 'ACTIVE',
             })
         }
@@ -164,7 +170,7 @@ export function ProjectFormModal({ isOpen, onClose, onSubmit, initialData, isLoa
 
                         <div>
                             <label htmlFor="LineGroupID" className="block text-sm font-medium text-gray-700 mb-1">
-                                Line Group ID (Optional)
+                                Line Group ID — กลุ่มภายใน (Optional)
                             </label>
                             <input
                                 type="text"
@@ -176,8 +182,29 @@ export function ProjectFormModal({ isOpen, onClose, onSubmit, initialData, isLoa
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900"
                                 disabled={isLoading}
                             />
-                            <p className="mt-1 text-xs text-gray-500">สำหรับส่งการแจ้งเตือนผ่าน LINE Notify (หากมี)</p>
+                            <p className="mt-1 text-xs text-gray-500">กลุ่ม LINE ภายใน (BIM/SITE) — รับแจ้งเตือนทุกเหตุการณ์</p>
                         </div>
+
+                        {/* CM LINE group: INTERNAL projects only. CM must never be in the internal
+                            group, so their notifications go to this separate group. Empty = skip. */}
+                        {formData.cmSystemType === 'INTERNAL' && (
+                            <div>
+                                <label htmlFor="LineGroupID_CM" className="block text-sm font-medium text-gray-700 mb-1">
+                                    Line Group ID — กลุ่ม CM (Optional)
+                                </label>
+                                <input
+                                    type="text"
+                                    id="LineGroupID_CM"
+                                    name="LineGroupID_CM"
+                                    value={formData.LineGroupID_CM}
+                                    onChange={handleChange}
+                                    placeholder="เช่น Cd84012..."
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900"
+                                    disabled={isLoading}
+                                />
+                                <p className="mt-1 text-xs text-gray-500">กลุ่ม LINE ของ CM — รับเฉพาะเหตุการณ์ที่เกี่ยวกับ CM (เว้นว่าง = ไม่แจ้ง)</p>
+                            </div>
+                        )}
                     </form>
                 </div>
 

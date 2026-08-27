@@ -506,7 +506,7 @@ function WorkRequestDashboardContent() {
 
 export default function WorkRequestDashboardPage() {
     return (
-        <AuthGuard requiredRoles={[
+        <AuthGuard blockedRoles={['CM']} requiredRoles={[
             ROLES.ADMIN, ROLES.SITE_ADMIN, ROLES.BIM, ...WR_CREATOR_ROLES, ...WR_APPROVER_ROLES
         ]}>
             <Suspense fallback={<div className="text-center p-8">Loading Page...</div>}>

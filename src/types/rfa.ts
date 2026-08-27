@@ -1,5 +1,5 @@
 // src/types/rfa.ts
-import { Role } from '@/lib/config/workflow';
+import { Role, ExternalChain } from '@/lib/config/workflow';
 
 export interface Site {
   id: string;
@@ -54,6 +54,10 @@ export interface RFAPermissions {
   canApproveRevisionRequired?: boolean
   // --- ✅ 2. สิทธิ์พิเศษแบบ Override รายบุคคล ---
   canRequestSupersede?: boolean // ขอแก้ไขเอกสารที่อนุมัติแล้ว
+  // --- ✅ 3. External approval chain (INTERNAL cmSystemType only) ---
+  canForwardExternal?: boolean    // CM forwards to the Designer/Owner chain at round 1
+  canActExternalStep?: boolean    // current role-holder acts on their external step
+  canFinalizeExternal?: boolean   // CM's final decision after the chain returns
 }
 
 export interface RFACurrentUser {
@@ -126,6 +130,11 @@ export interface RFADocument {
   previousRevisionId?: string;     // docId ของ Rev. เก่า (สำหรับ Rev. ใหม่)
   previousRevisionSuspended?: boolean; // true ถ้า Rev. เก่าถูก Suspend ไปแล้วก่อนสร้าง Rev. ใหม่
   cadFiles?: RFAFile[];            // ไฟล์ CAD (.dwg) ที่ extract จาก ZIP/RAR อัตโนมัติเมื่ออนุมัติ
+
+  // External approval chain (M1 foundation). Present only once CM configures a chain
+  // (INTERNAL cmSystemType sites); absent = legacy / internal-only flow. Nothing writes
+  // this until M2.
+  externalChain?: ExternalChain;
 }
 
 // (ส่วนที่เหลือของไฟล์ไม่ต้องแก้ไข)

@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { STATUS_LABELS, STATUSES } from '@/lib/config/workflow';
+import { STATUS_LABELS, STATUSES, normalizeRfaStatusForRole, getRfaStatusLabelForRole } from '@/lib/config/workflow';
 import { getCategoryColor, MUTED_PALETTE } from '@/lib/config/chartColors';
 import { RFADocument } from '@/types/rfa';
 
@@ -23,6 +23,10 @@ interface DashboardStatsProps {
   };
   categories: Category[];
   availableStatuses: string[];
+  // When set to 'CM', the status donut groups + labels by the CM-collapsed status
+  // (normalizeRfaStatusForRole / getRfaStatusLabelForRole) so CM never sees SITE's internal
+  // round-2 statuses as their own slices. Undefined/any-other role = raw statuses (no change).
+  userRole?: string;
 }
 
 const CustomTooltip = ({ active, payload }: any) => {
@@ -68,7 +72,7 @@ const STATUS_CHART_COLORS: { [key: string]: string } = {
   [STATUSES.REJECTED]: MUTED_PALETTE.rust,                      // แดงสนิม/ดินแดงเข้ม
 };
 
-const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFilter, activeFilters, categories, availableStatuses }) => {
+const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFilter, activeFilters, categories, availableStatuses, userRole }) => {
   const [isSmallScreen, setIsSmallScreen] = useState(false);
 
   useEffect(() => {
@@ -82,7 +86,11 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
     const statusCounts: { [key: string]: number } = {};
     const categoryCounts: { [key: string]: { value: number, name: string } } = {};
     for (const doc of allDocuments) {
-      statusCounts[doc.status] = (statusCounts[doc.status] || 0) + 1;
+      // For CM, collapse SITE's internal round-2 statuses into one bucket before counting so
+      // the donut shows CM-relevant buckets only (no-op for every other role). No document is
+      // dropped — the TOTAL is unchanged; the counts are just grouped.
+      const statusKey = normalizeRfaStatusForRole(doc.status, userRole);
+      statusCounts[statusKey] = (statusCounts[statusKey] || 0) + 1;
       const categoryId = doc.category?.id || 'N/A';
       const categoryName = doc.category?.categoryCode || categoryId;
       if (categoryName !== 'N/A') {
@@ -93,7 +101,7 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
       }
     }
     return { statusCounts, categoryCounts };
-  }, [allDocuments]);
+  }, [allDocuments, userRole]);
 
   const responsiblePartyData = useMemo(() => {
     if (!statsByStatus) return [];
@@ -101,15 +109,19 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ allDocuments, onChartFi
     // ✅ [แก้ไข 2] ยกเลิกการใช้ groupMapping แล้วดึงสีจาก STATUS_CHART_COLORS โดยตรง
     return Object.entries(statsByStatus.statusCounts)
       .map(([statusKey, value]) => {
-        const label = STATUS_LABELS[statusKey];
+        // Drop-unknown guard stays on the raw label map; the DISPLAYED name uses the
+        // role-aware label so CM's collapsed bucket reads "อนุมัติตามคอมเมนต์" (no-op for
+        // other roles). statusKey is already normalized above, so the color lookup hits.
+        const rawLabel = STATUS_LABELS[statusKey];
+        const label = getRfaStatusLabelForRole(statusKey, userRole);
         // ดึงสีตาม Key ของสถานะเป๊ะๆ ถ้าไม่เจอให้ใช้สีเทา
         const color = STATUS_CHART_COLORS[statusKey] || '#94a3b8';
 
-        if (!label) return null;
+        if (!rawLabel) return null;
         return { name: label, value: value, statusKey: statusKey, color: color };
       })
       .filter((item): item is NonNullable<typeof item> => item !== null && item.value > 0);
-  }, [statsByStatus]);
+  }, [statsByStatus, userRole]);
 
   const categoryData = useMemo(() => {
     if (!statsByStatus) return [];

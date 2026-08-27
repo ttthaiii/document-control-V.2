@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '@/lib/auth/useAuth';
+import { resolveViewUrl } from '@/lib/utils/storage';
 import { WorkRequest, WorkRequestWorkflowStep } from '@/types/work-request';
 import { WorkRequestStatus } from '@/lib/config/workflow';
 import Spinner from '@/components/shared/Spinner';
@@ -81,7 +82,7 @@ const WorkflowHistoryModal = ({ workflow, onClose }: { workflow: WorkRequestWork
                                                     <li key={fileIndex} className="flex items-center text-xs text-gray-600">
                                                         <FileText size={12} className="mr-2 flex-shrink-0" />
                                                         <a
-                                                            href={file.fileUrl}
+                                                            href={resolveViewUrl(file.fileUrl)}
                                                             target="_blank"
                                                             rel="noopener noreferrer"
                                                             className="truncate hover:underline text-blue-600"
@@ -767,7 +768,7 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                                                             siteName: document.site?.name,
                                                             description: `ดาวน์โหลดไฟล์ผลงาน: ${file.fileName}`
                                                         });
-                                                        window.open(file.fileUrl);
+                                                        window.open(resolveViewUrl(file.fileUrl));
                                                     }
                                                 }}>
                                                     <FileText className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
@@ -800,7 +801,7 @@ export default function WorkRequestDetailModal({ documentId, onClose, onUpdate }
                                                     )}
                                                     {!isPdf && (
                                                         <a 
-                                                            href={file.fileUrl} 
+                                                            href={resolveViewUrl(file.fileUrl)} 
                                                             target="_blank" 
                                                             rel="noopener noreferrer" 
                                                             className="p-1 text-gray-400 hover:text-gray-600"

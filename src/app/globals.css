@@ -3,15 +3,14 @@
 @tailwind utilities;
 
 :root {
+  /* App is light-mode only. Force a light color-scheme so browser-native
+     controls (date picker, dropdowns, scrollbars) never render dark, and so
+     text never inherits a near-white foreground on our hardcoded white
+     surfaces (was: a leftover prefers-color-scheme:dark block flipped
+     --foreground to #ededed, making inherited-color text invisible). */
+  color-scheme: light;
   --background: #ffffff;
   --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 html, body {

@@ -25,8 +25,8 @@ import { Role } from '@/lib/config/workflow'
 import {
   RFI_STATUS_LABELS,
   RFI_ACTIVE_STATUSES,
+  RFI_CM_STATUSES,
   RFI_PARTY_LABELS,
-  RFI_DISCIPLINES,
   getResponsibleParties,
   isOverdue,
   RFIParty,
@@ -205,14 +205,19 @@ function RFIContent() {
     return applyFilters(documentsWithSiteNames, filters, { categoryId: true }).filter(d => matchesSearch(d, searchTerm));
   }, [documentsWithSiteNames, filters, searchTerm]);
 
-  /** Disciplines actually present, unioned with the standard list so filters stay stable. */
+  /** Disciplines actually used in real documents — never a hardcoded master list
+   *  (matches RFA's dashboard/rfa/page.tsx availableCategories), so a discipline no
+   *  document has ever used never shows up as a dead filter option. Scoped to the
+   *  selected project the same way RFA scopes by rfaType + siteId. */
   const availableCategories = useMemo(() => {
+    const docs = filters.siteId !== 'ALL'
+      ? documentsWithSiteNames.filter(d => d.site?.id === filters.siteId)
+      : documentsWithSiteNames;
     const found = new Set(
-      documentsWithSiteNames.map(d => d.category?.categoryCode).filter(Boolean) as string[]
+      docs.map(d => d.category?.categoryCode).filter(Boolean) as string[]
     );
-    RFI_DISCIPLINES.forEach(d => found.add(d));
     return Array.from(found).sort();
-  }, [documentsWithSiteNames]);
+  }, [documentsWithSiteNames, filters.siteId]);
 
   const handleFilterChange = <K extends keyof Filters>(key: K, value: Filters[K]) => {
     setFilters(prev => ({ ...prev, [key]: value }));
@@ -224,6 +229,9 @@ function RFIContent() {
   };
 
   if (!user) return null;
+
+  // CM only cares about statuses that reach them; other roles see the full pipeline.
+  const rfiStatuses = user.role === 'CM' ? RFI_CM_STATUSES : RFI_ACTIVE_STATUSES;
 
   return (
     <AuthGuard>
@@ -255,66 +263,93 @@ function RFIContent() {
         <DashboardStats
           allDocuments={statusChartDocuments}
           categoryDocuments={categoryChartDocuments}
+          statuses={rfiStatuses}
           onChartFilter={(key, value) => handleFilterChange(key, value)}
           activeFilters={{ status: filters.status, categoryId: filters.categoryId }}
         />
 
         {/* Filters */}
         <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="relative flex-1 min-w-[220px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="ค้นหาเลขที่เอกสาร หรือหัวข้อคำถาม"
-                className={`${selectClass} w-full pl-9`}
-              />
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+            {/* โครงการ */}
+            <div className="md:col-span-2">
+              <label className="text-sm font-medium text-gray-700">โครงการ</label>
+              <select value={filters.siteId} onChange={(e) => handleFilterChange('siteId', e.target.value)} className={`${selectClass} w-full mt-1`}>
+                <option value="ALL">ทุกโครงการ</option>
+                {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
             </div>
 
-            <select value={filters.siteId} onChange={(e) => handleFilterChange('siteId', e.target.value)} className={selectClass}>
-              <option value="ALL">ทุกโครงการ</option>
-              {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+            {/* ค้นหา — widens when the responsible-party filter is hidden (CM) */}
+            <div className={user.role !== 'CM' ? 'md:col-span-2' : 'md:col-span-4'}>
+              <label className="text-sm font-medium text-gray-700">ค้นหา</label>
+              <div className="relative mt-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="ค้นหาเลขที่เอกสาร หรือหัวข้อคำถาม"
+                  className={`${selectClass} w-full pl-9`}
+                />
+              </div>
+            </div>
 
-            <select value={filters.categoryId} onChange={(e) => handleFilterChange('categoryId', e.target.value)} className={selectClass}>
-              <option value="ALL">ทุกหมวดงาน</option>
-              {availableCategories.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-
-            <select value={filters.status} onChange={(e) => handleFilterChange('status', e.target.value)} className={selectClass}>
-              <option value="ALL">ทุกสถานะ</option>
-              {RFI_ACTIVE_STATUSES.map(status => (
-                <option key={status} value={status}>{RFI_STATUS_LABELS[status]}</option>
-              ))}
-            </select>
-
-            {user.role !== 'CM' && (
-              <select value={filters.responsibleParty} onChange={(e) => handleFilterChange('responsibleParty', e.target.value)} className={selectClass}>
-                <option value="ALL">รอใครก็ได้</option>
-                {Object.entries(RFI_PARTY_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
+            {/* สถานะ */}
+            <div className="md:col-span-2">
+              <label className="text-sm font-medium text-gray-700">สถานะ</label>
+              <select value={filters.status} onChange={(e) => handleFilterChange('status', e.target.value)} className={`${selectClass} w-full mt-1`}>
+                <option value="ALL">ทุกสถานะ</option>
+                {rfiStatuses.map(status => (
+                  <option key={status} value={status}>{RFI_STATUS_LABELS[status]}</option>
                 ))}
               </select>
+            </div>
+
+            {/* ผู้รับผิดชอบ — hidden for CM */}
+            {user.role !== 'CM' && (
+              <div className="md:col-span-2">
+                <label className="text-sm font-medium text-gray-700">ผู้รับผิดชอบ</label>
+                <select value={filters.responsibleParty} onChange={(e) => handleFilterChange('responsibleParty', e.target.value)} className={`${selectClass} w-full mt-1`}>
+                  <option value="ALL">ทั้งหมด</option>
+                  {Object.entries(RFI_PARTY_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </div>
             )}
 
-            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={filters.overdueOnly}
-                onChange={(e) => handleFilterChange('overdueOnly', e.target.checked)}
-                className="w-4 h-4 rounded border-gray-300"
-              />
-              เฉพาะที่เกินกำหนด
-            </label>
+            {/* หมวดงาน */}
+            <div className="md:col-span-2">
+              <label className="text-sm font-medium text-gray-700">หมวดงาน</label>
+              <select value={filters.categoryId} onChange={(e) => handleFilterChange('categoryId', e.target.value)} className={`${selectClass} w-full mt-1`}>
+                <option value="ALL">ทุกหมวดงาน</option>
+                {availableCategories.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
 
-            <button
-              onClick={resetFilters}
-              className="flex items-center gap-2 h-10 px-3 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
-            >
-              <RotateCcw className="w-4 h-4" /> ล้างตัวกรอง
-            </button>
+            {/* เฉพาะที่เกินกำหนด */}
+            <div className="md:col-span-1 flex items-center h-10">
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={filters.overdueOnly}
+                  onChange={(e) => handleFilterChange('overdueOnly', e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300"
+                />
+                เกินกำหนด
+              </label>
+            </div>
+
+            {/* Reset */}
+            <div className="md:col-span-1">
+              <button
+                onClick={resetFilters}
+                className="w-full flex items-center justify-center gap-2 h-10 px-3 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                <RotateCcw className="w-4 h-4" /> รีเซ็ต
+              </button>
+            </div>
           </div>
         </div>
 

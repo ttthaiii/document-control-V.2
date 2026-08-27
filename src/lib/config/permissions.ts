@@ -41,14 +41,23 @@ const COMMON_VIEWERS: Role[] = [
 
 // กลุ่มที่เห็นเมนู Sidebar (ตัด SE/FM ออกตามโจทย์ "เข้าได้แค่หน้า Dashboard")
 const SIDEBAR_VIEWERS: Role[] = [
-  ROLES.ADMIN, ROLES.PD, ROLES.PM, 
+  ROLES.ADMIN, ROLES.PD, ROLES.PM,
   ROLES.BIM, ROLES.SITE_ADMIN, ROLES.CM, ROLES.ME, ROLES.SN, ROLES.OE, ROLES.PE
+];
+
+// External approvers (Designer/Owner) must reach the RFA/RFI menu + list to act on
+// their chain step (T-015 M4). They get VIEW on RFA + RFI only — NOT Work Request, and
+// NOT create/approve (those keys keep their own role lists). Everything downstream
+// (page AuthGuard, firestore.rules for non-CM, the site-scoped list query) already
+// allows them; the missing piece was only sidebar/page visibility.
+const EXTERNAL_APPROVER_VIEWERS: Role[] = [
+  ...SIDEBAR_VIEWERS, ROLES.DESIGNER, ROLES.OWNER
 ];
 
 export const PERMISSION_DEFAULTS: Record<string, Role[]> = {
   // --- RFA: Shop Drawing ---
   // View: ใช้ SIDEBAR_VIEWERS แทน เพื่อซ่อนเมนูจาก SE/FM
-  [`RFA.${PERMISSION_KEYS.RFA.VIEW_SHOP}`]: SIDEBAR_VIEWERS,
+  [`RFA.${PERMISSION_KEYS.RFA.VIEW_SHOP}`]: EXTERNAL_APPROVER_VIEWERS,
   // Create: BIM, ME, SN, Site Admin, PM, PE, OE, Admin
   [`RFA.${PERMISSION_KEYS.RFA.CREATE_SHOP}`]: [
     ROLES.BIM, ROLES.ME, ROLES.SN, 
@@ -57,7 +66,7 @@ export const PERMISSION_DEFAULTS: Record<string, Role[]> = {
   ],
 
   // --- RFA: General ---
-  [`RFA.${PERMISSION_KEYS.RFA.VIEW_GEN}`]: SIDEBAR_VIEWERS,
+  [`RFA.${PERMISSION_KEYS.RFA.VIEW_GEN}`]: EXTERNAL_APPROVER_VIEWERS,
   // Create: BIM, ME, SN, Site Admin, PM, PE, OE, Admin
   [`RFA.${PERMISSION_KEYS.RFA.CREATE_GEN}`]: [
     ROLES.BIM, ROLES.ME, ROLES.SN, 
@@ -66,7 +75,7 @@ export const PERMISSION_DEFAULTS: Record<string, Role[]> = {
   ],
 
   // --- RFA: Material ---
-  [`RFA.${PERMISSION_KEYS.RFA.VIEW_MAT}`]: SIDEBAR_VIEWERS,
+  [`RFA.${PERMISSION_KEYS.RFA.VIEW_MAT}`]: EXTERNAL_APPROVER_VIEWERS,
   // Create: Site Admin, PM, PE, OE, Admin (BIM ห้ามสร้าง)
   [`RFA.${PERMISSION_KEYS.RFA.CREATE_MAT}`]: [
     ROLES.SITE_ADMIN, ROLES.ADMIN, 
@@ -86,7 +95,7 @@ export const PERMISSION_DEFAULTS: Record<string, Role[]> = {
   [`RFA.${PERMISSION_KEYS.RFA.CAN_REQUEST_SUPERSEDE}`]: [],
 
   // --- RFI ---
-  [`RFI.${PERMISSION_KEYS.RFI.VIEW}`]: SIDEBAR_VIEWERS,
+  [`RFI.${PERMISSION_KEYS.RFI.VIEW}`]: EXTERNAL_APPROVER_VIEWERS,
   // Create: NOT a hand-written list. RFI_CREATOR_ROLES is derived from the same arrays
   // getOriginForRole uses, so the button and the API always agree — add a role there
   // (rfi-workflow.ts) and it appears here too. A list typed out again would drift.

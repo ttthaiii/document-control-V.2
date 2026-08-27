@@ -99,6 +99,8 @@ export default function CreateRFIForm({
 
   const [isCheckingTask, setIsCheckingTask] = useState(false);
   const [isTaskDuplicate, setIsTaskDuplicate] = useState<boolean | null>(null);
+  // taskUids that already carry an RFI for this site — used to HIDE used tasks from the list.
+  const [usedTaskUids, setUsedTaskUids] = useState<Set<string>>(new Set());
 
   const { firebaseUser, user } = useAuth();
   const { showNotification } = useNotification();
@@ -237,6 +239,32 @@ export default function CreateRFIForm({
     checkTaskDuplicate();
   }, [formData.selectedTask, selectedSite, firebaseUser]);
 
+  // Fetch every taskUid already used by an RFI in this site, so used tasks can be
+  // hidden from the create list. Client can't read rfiDocuments directly → server
+  // endpoint (admin SDK). Fail-open: on error the set stays empty → list shows all.
+  useEffect(() => {
+    if (!selectedSite || !firebaseUser) {
+      setUsedTaskUids(new Set());
+      return;
+    }
+    const fetchUsedTasks = async () => {
+      try {
+        const token = await firebaseUser.getIdToken();
+        const response = await fetch('/api/rfi/used-tasks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ siteId: selectedSite }),
+        });
+        const result = await response.json();
+        setUsedTaskUids(new Set<string>(result.taskUids || []));
+      } catch (error) {
+        console.error('Failed to fetch used RFI tasks:', error);
+        setUsedTaskUids(new Set());
+      }
+    };
+    fetchUsedTasks();
+  }, [selectedSite, firebaseUser]);
+
   const updateFormData = (updates: Partial<RFIFormData>) => {
     setFormData(prev => ({ ...prev, ...updates }));
     const newErrors = { ...errors };
@@ -302,9 +330,12 @@ export default function CreateRFIForm({
   };
 
   const filteredTasks = useMemo(() => {
-    if (!taskSearchQuery) return tasks.slice(0, 20);
-    return tasks.filter(t => t.taskName.toLowerCase().includes(taskSearchQuery.toLowerCase()));
-  }, [tasks, taskSearchQuery]);
+    // Hide tasks that already carry an RFI in this site (only tasks that have a taskUid
+    // can be deduped; tasks without one stay selectable).
+    const available = tasks.filter(t => !(t.taskUid && usedTaskUids.has(t.taskUid)));
+    if (!taskSearchQuery) return available.slice(0, 20);
+    return available.filter(t => t.taskName.toLowerCase().includes(taskSearchQuery.toLowerCase()));
+  }, [tasks, taskSearchQuery, usedTaskUids]);
 
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};

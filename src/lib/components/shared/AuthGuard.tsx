@@ -50,17 +50,25 @@ interface AuthGuardProps {
   requiredSiteAccess?: string[]
   fallback?: ReactNode
   redirectTo?: string
+  /** Roles that must NOT see this page: they are redirected away (URL guard, not just a
+   *  hidden menu). Empty by default → no behavior change for existing callers. */
+  blockedRoles?: string[]
+  blockedRedirectTo?: string
 }
 
-export function AuthGuard({ 
-  children, 
+export function AuthGuard({
+  children,
   requiredRoles = [],
   requiredSiteAccess = [],
   fallback,
-  redirectTo = '/login'
+  redirectTo = '/login',
+  blockedRoles = [],
+  blockedRedirectTo = '/dashboard/rfi'
 }: AuthGuardProps) {
   const { user, loading, error } = useAuth()
   const router = useRouter()
+
+  const isBlockedRole = !loading && !!user && blockedRoles.includes(user.role)
 
   useEffect(() => {
     if (!loading && !user) {
@@ -68,8 +76,19 @@ export function AuthGuard({
     }
   }, [user, loading, router, redirectTo])
 
+  useEffect(() => {
+    if (isBlockedRole) {
+      router.replace(blockedRedirectTo)
+    }
+  }, [isBlockedRole, router, blockedRedirectTo])
+
   // Loading state
   if (loading) {
+    return <SkeletonLoader />
+  }
+
+  // Blocked role — render the loader while the redirect (above) takes effect, never the children.
+  if (isBlockedRole) {
     return <SkeletonLoader />
   }
 

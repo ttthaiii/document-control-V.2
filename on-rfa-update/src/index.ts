@@ -40,7 +40,87 @@ const RFA_STATUS_LABELS: { [key: string]: string } = {
   APPROVED_WITH_COMMENTS: "อนุมัติตามคอมเมนต์ (ไม่แก้ไข)",
   APPROVED_REVISION_REQUIRED: "อนุมัติตามคอมเมนต์ (ต้องแก้ไข)",
   REJECTED: "ไม่อนุมัติ",
+  PENDING_FINAL_APPROVAL: "รอ SITE อนุมัติขั้นสุดท้าย",
+  // External approval chain (INTERNAL sites · T-015). PENDING_EXTERNAL_APPROVAL is never
+  // rendered (internal group is suppressed for it, CM is not notified on forward);
+  // PENDING_CM_FINAL is shown to the CM group when the chain returns to CM.
+  PENDING_EXTERNAL_APPROVAL: "ส่งผู้พิจารณาภายนอก",
+  PENDING_CM_FINAL: "รอ CM พิจารณาขั้นสุดท้าย",
 };
+
+// --- CM audience rules (mirror of src/lib/config/workflow.ts; CF cannot import from src/) ---
+// CM is only notified when a document actually reaches them, is finally approved, or is
+// rejected. PENDING_REVIEW / REVISION_REQUIRED and the round-2 comment split
+// (APPROVED_WITH_COMMENTS / APPROVED_REVISION_REQUIRED) are SITE's internal loop and must
+// NEVER reach CM.
+const RFA_CM_NOTIFY_STATUSES = [
+  "PENDING_CM_APPROVAL",
+  "PENDING_FINAL_APPROVAL",
+  "APPROVED",
+  "REJECTED",
+  // T-015: external chain returned to CM — CM must know it is their turn to finalize.
+  "PENDING_CM_FINAL",
+];
+
+// T-015: external-loop statuses (INTERNAL sites). The internal BIM/SITE group is NOT
+// notified for these — forwarding to the Designer/Owner chain and the CM-final step are
+// CM-side events; the internal team needs no location heads-up (product decision). CM is
+// still reached for PENDING_CM_FINAL via RFA_CM_NOTIFY_STATUSES above.
+const RFA_INTERNAL_SUPPRESS_STATUSES = [
+  "PENDING_EXTERNAL_APPROVAL",
+  "PENDING_CM_FINAL",
+];
+
+// From CM's view, "อนุมัติตามคอมเมนต์" is the end of their involvement. These three
+// internal statuses all collapse to that one label for the CM group (getRfaStatusLabelForRole).
+const RFA_CM_COLLAPSED_STATUSES = [
+  "PENDING_FINAL_APPROVAL",
+  "APPROVED_WITH_COMMENTS",
+  "APPROVED_REVISION_REQUIRED",
+];
+const CM_APPROVED_WITH_COMMENTS_LABEL = "อนุมัติตามคอมเมนต์";
+
+// CM-facing label overrides: the internal loop phrases some statuses for BIM/SITE
+// ("ส่ง CM" = "we are sending it to CM"), but the CM group must read it from their own
+// side ("รอ CM พิจารณา" = "waiting for CM to review").
+const RFA_CM_LABEL_OVERRIDES: { [key: string]: string } = {
+  PENDING_CM_APPROVAL: "รอ CM พิจารณา",
+};
+
+// Audience-aware status label: CM sees the collapsed / overridden label, internal sees the raw one.
+function rfaLabelForAudience(status: string, audience: "internal" | "cm"): string {
+  if (audience === "cm") {
+    if (RFA_CM_COLLAPSED_STATUSES.includes(status)) {
+      return CM_APPROVED_WITH_COMMENTS_LABEL;
+    }
+    if (RFA_CM_LABEL_OVERRIDES[status]) {
+      return RFA_CM_LABEL_OVERRIDES[status];
+    }
+  }
+  return RFA_STATUS_LABELS[status] || status;
+}
+
+// Shared LINE push helper (used by both RFA and RFI notifications).
+async function pushLine(groupId: string, text: string, logTag: string): Promise<void> {
+  try {
+    const response = await fetch("https://api.line.me/v2/bot/message/push", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`,
+      },
+      body: JSON.stringify({ to: groupId, messages: [{ type: "text", text }] }),
+    });
+    if (!response.ok) {
+      const errorBody = await response.json();
+      logger.error(`${logTag} Failed to send message to ${groupId}`, errorBody);
+    } else {
+      logger.log(`✅ ${logTag} Successfully sent notification to ${groupId}.`);
+    }
+  } catch (error) {
+    logger.error(`${logTag} Error fetching Line API:`, error);
+  }
+}
 
 // --- onRfaUpdate (เหมือนเดิม) ---
 export const onRfaUpdate = onDocumentWritten(
@@ -83,6 +163,148 @@ export const onRfaUpdate = onDocumentWritten(
     return null;
   }
 );
+
+// --- RFI status labels (mirror of src/lib/config/rfi-workflow.ts; CF cannot import from src/) ---
+const RFI_STATUS_LABELS: { [key: string]: string } = {
+  PENDING_SITE: "รอตรวจสอบ",
+  PENDING_SITE_MORE_INFO: "รอข้อมูลเพิ่มเติม",
+  PENDING_CM: "รอดำเนินการ",
+  CLOSED: "ตอบกลับแล้ว",
+};
+
+// --- onRfiUpdate: LINE notifications for RFI documents ---
+// Same dual-audience model as RFA. The internal group (LineGroupID) sees every create and
+// status change. The CM group (LineGroupID_CM, INTERNAL projects only) is notified on just
+// two CM-relevant transitions, so the BIM<->SITE internal loop stays invisible to CM:
+//   (a) forwarded to CM: awaitingCm false/absent -> true   -> "รอดำเนินการ"
+//   (b) closed after CM was involved: status -> CLOSED and the cmInvolved sticky flag is true -> "ตอบกลับแล้ว"
+export const onRfiUpdate = onDocumentWritten(
+  {
+    document: "rfiDocuments/{docId}",
+    region: region,
+    secrets: ["LINE_CHANNEL_ACCESS_TOKEN", "TTSDOC_APP_URL"],
+  },
+  async (event) => {
+    const docId = event.params.docId;
+    try {
+      await sendRfiLineNotification(event);
+    } catch (error) {
+      logger.error(`[RFI LINE/${docId}] Error sending notification:`, error);
+    }
+    return null;
+  }
+);
+
+async function sendRfiLineNotification(event: any) {
+  const docId = event.params.docId;
+  if (!event.data?.after.exists) return; // deleted
+
+  const newData = event.data.after.data();
+  const beforeData = event.data.before.data();
+
+  if (newData?.isMigration === true) {
+    logger.log(`🔇 [RFI LINE/${docId}] Skipped: isMigration is true.`);
+    return;
+  }
+
+  const isCreate = !event.data.before.exists;
+  const statusKey = newData?.status || "UNKNOWN";
+  const beforeStatus = beforeData?.status;
+  const isStatusUpdate = !isCreate && beforeStatus !== statusKey;
+
+  // Internal group fires on create or any status change (same trigger as RFA).
+  const internalShouldNotify = isCreate || isStatusUpdate;
+
+  // CM triggers. cmForwarded also covers a SITE/ME/SN-created RFI that starts with
+  // awaitingCm=true (before is absent -> treated as false), so the first "reached CM" event
+  // notifies the CM group even on create.
+  const beforeAwaitingCm = beforeData?.awaitingCm === true;
+  const afterAwaitingCm = newData?.awaitingCm === true;
+  const cmForwarded = afterAwaitingCm && !beforeAwaitingCm;
+  const cmClosed =
+    statusKey === "CLOSED" &&
+    beforeStatus !== "CLOSED" &&
+    newData?.cmInvolved === true;
+
+  // T-015: the external chain (Designer/Owner) just returned to CM. A chain advance leaves
+  // status + awaitingCm untouched, so this before/after step-index comparison is the ONLY
+  // signal that external replies are done and it is CM's turn to reply. Complete ⇔
+  // currentStepIndex reached steps.length; `beforeStepIndex < afterSteps` makes it fire
+  // exactly once (on the completing write), never on a chain that was already complete.
+  const beforeChain = beforeData?.externalChain;
+  const afterChain = newData?.externalChain;
+  const beforeStepIndex =
+    typeof beforeChain?.currentStepIndex === "number" ? beforeChain.currentStepIndex : -1;
+  const afterSteps = Array.isArray(afterChain?.steps) ? afterChain.steps.length : 0;
+  const externalChainCompleted =
+    !!afterChain &&
+    afterSteps > 0 &&
+    beforeStepIndex < afterSteps &&
+    afterChain.currentStepIndex === afterSteps;
+
+  if (!internalShouldNotify && !cmForwarded && !cmClosed && !externalChainCompleted) {
+    logger.log(`[RFI LINE/${docId}] No notification needed.`);
+    return;
+  }
+
+  const siteId = newData?.siteId;
+  if (!siteId) {
+    logger.warn(`[RFI LINE/${docId}] Site ID missing.`);
+    return;
+  }
+
+  const adminDb = getAdminDb();
+  const siteDoc = await adminDb.collection("sites").doc(siteId).get();
+  if (!siteDoc.exists) {
+    logger.warn(`[RFI LINE/${docId}] Site ${siteId} not found.`);
+    return;
+  }
+
+  const siteData = siteDoc.data();
+  const lineGroupId = siteData?.LineGroupID;
+  const lineGroupIdCM = siteData?.LineGroupID_CM;
+  const cmSystemType = siteData?.cmSystemType;
+  const siteName = siteData?.name || "ไม่ระบุโครงการ";
+
+  if (!lineGroupId && !lineGroupIdCM) {
+    logger.log(`[RFI LINE/${docId}] No Line Group ID configured for site ${siteId}.`);
+    return;
+  }
+
+  const docNo = newData?.documentNumber || newData?.runningNumber || "N/A";
+  const header = `📋 เอกสาร RFI โครงการ: ${siteName}
+📝 หัวข้อ: ${newData?.title || "ไม่มีหัวข้อ"}
+🔢 เลขที่เอกสาร: ${docNo}`;
+  const footer = `🔗 ดูเอกสาร: ${process.env.TTSDOC_APP_URL}/dashboard/rfi`;
+
+  // Internal group: every create/status change.
+  if (lineGroupId && internalShouldNotify) {
+    const internalMessage = `${header}
+📌 สถานะใหม่: ${RFI_STATUS_LABELS[statusKey] || statusKey} ${isCreate ? "(สร้างใหม่)" : ""}
+${footer}`;
+    await pushLine(lineGroupId, internalMessage, `[RFI LINE/${docId}]`);
+  }
+
+  // CM group: INTERNAL projects only, on the two CM triggers. cmClosed wins the label if
+  // both somehow fire on one write (they are normally mutually exclusive transitions).
+  if (lineGroupIdCM && cmSystemType === "INTERNAL" && (cmForwarded || cmClosed)) {
+    const cmLabel = cmClosed ? RFI_STATUS_LABELS.CLOSED : RFI_STATUS_LABELS.PENDING_CM;
+    const cmMessage = `${header}
+📌 สถานะใหม่: ${cmLabel}
+${footer}`;
+    await pushLine(lineGroupIdCM, cmMessage, `[RFI LINE-CM/${docId}]`);
+  }
+
+  // T-015: external replies complete → tell the CM group it is their turn to reply. Kept as
+  // a separate branch (not merged above) because it fires on chain-completion, which is
+  // independent of the awaitingCm/CLOSED transitions that drive cmForwarded/cmClosed.
+  if (lineGroupIdCM && cmSystemType === "INTERNAL" && externalChainCompleted) {
+    const cmMessage = `${header}
+📌 สถานะใหม่: ผู้พิจารณาภายนอกตอบครบแล้ว — รอ CM ตอบกลับ
+${footer}`;
+    await pushLine(lineGroupIdCM, cmMessage, `[RFI LINE-CM/${docId}]`);
+  }
+}
 
 // แก้ชื่อฟังก์ชัน syncToBimTracking เป็น syncRfaToBimTracking
 async function syncRfaToBimTracking(docId: string, newData: any) {
@@ -187,41 +409,43 @@ async function sendRfaLineNotification(event: any) {
 
   const siteData = siteDoc.data();
   const lineGroupId = siteData?.LineGroupID;
+  const lineGroupIdCM = siteData?.LineGroupID_CM;
+  const cmSystemType = siteData?.cmSystemType;
   const siteName = siteData?.name || "ไม่ระบุโครงการ";
 
-  if (!lineGroupId) {
+  if (!lineGroupId && !lineGroupIdCM) {
     logger.log(`[RFA LINE/${docId}] No Line Group ID configured for site ${siteId}.`);
     return;
   }
 
-  // Prepare message content
+  // Common message parts. Only the status line differs between audiences.
   const statusKey = newData.status || "UNKNOWN";
-  const message = `📄 เอกสาร RFA โครงการ: ${siteName}
+  const header = `📄 เอกสาร RFA โครงการ: ${siteName}
 📝 หัวข้อ: ${newData.title || "ไม่มีหัวข้อ"}
 🔢 เลขที่เอกสาร: ${newData.documentNumber || "N/A"}
-🔄 rev: ${String(newData.revisionNumber || 0).padStart(2, "0")}
-📌 สถานะใหม่: ${RFA_STATUS_LABELS[statusKey] || statusKey} ${isCreate ? '(สร้างใหม่)' : ''}
-🔗 ดูเอกสาร: ${process.env.TTSDOC_APP_URL}/rfa/${docId}`;
+🔄 rev: ${String(newData.revisionNumber || 0).padStart(2, "0")}`;
+  const footer = `🔗 ดูเอกสาร: ${process.env.TTSDOC_APP_URL}/rfa/${docId}`;
 
-  // Send the message via Line Messaging API
-  try {
-    const response = await fetch("https://api.line.me/v2/bot/message/push", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`,
-      },
-      body: JSON.stringify({ to: lineGroupId, messages: [{ type: "text", text: message }] }),
-    });
+  // Internal group (BIM/SITE): every create/status-change event, EXCEPT the external-loop
+  // statuses (T-015) which are suppressed for this group (no location heads-up needed).
+  if (lineGroupId && !RFA_INTERNAL_SUPPRESS_STATUSES.includes(statusKey)) {
+    const internalMessage = `${header}
+📌 สถานะใหม่: ${rfaLabelForAudience(statusKey, "internal")} ${isCreate ? "(สร้างใหม่)" : ""}
+${footer}`;
+    await pushLine(lineGroupId, internalMessage, `[RFA LINE/${docId}]`);
+  }
 
-    if (!response.ok) {
-      const errorBody = await response.json();
-      logger.error(`[RFA LINE/${docId}] Failed to send message to ${lineGroupId}`, errorBody);
-    } else {
-      logger.log(`✅ [RFA LINE/${docId}] Successfully sent notification to ${lineGroupId}.`);
-    }
-  } catch (error) {
-    logger.error(`[RFA LINE/${docId}] Error fetching Line API:`, error);
+  // CM group: INTERNAL projects only, and only for CM-relevant statuses. The internal
+  // loop (PENDING_REVIEW / REVISION_REQUIRED / round-2 comment split) never reaches CM.
+  if (
+    lineGroupIdCM &&
+    cmSystemType === "INTERNAL" &&
+    RFA_CM_NOTIFY_STATUSES.includes(statusKey)
+  ) {
+    const cmMessage = `${header}
+📌 สถานะใหม่: ${rfaLabelForAudience(statusKey, "cm")}
+${footer}`;
+    await pushLine(lineGroupIdCM, cmMessage, `[RFA LINE-CM/${docId}]`);
   }
 }
 

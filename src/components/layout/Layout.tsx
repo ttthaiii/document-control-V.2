@@ -13,16 +13,25 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
 
   useEffect(() => {
-    const handleResize = () => {
-      if (window.innerWidth < 1024) {
-        setIsSidebarOpen(false)
-      } else {
-        setIsSidebarOpen(true)
-      }
+    // Track the last WIDTH only. On iOS/iPad, scrolling hides/shows the browser
+    // toolbar, which changes innerHeight and fires a `resize` event even though the
+    // width never changed. Reacting to those height-only events re-opened the sidebar
+    // the user had just closed. So only apply the breakpoint rule when width changes.
+    let lastWidth = window.innerWidth
+
+    const applyWidth = (w: number) => {
+      setIsSidebarOpen(w >= 1024)
     }
 
     // Set initial state based on current window size
-    handleResize()
+    applyWidth(lastWidth)
+
+    const handleResize = () => {
+      const w = window.innerWidth
+      if (w === lastWidth) return // height-only resize (e.g. iOS scroll) → ignore
+      lastWidth = w
+      applyWidth(w)
+    }
 
     // Add event listener for window resize
     window.addEventListener('resize', handleResize)

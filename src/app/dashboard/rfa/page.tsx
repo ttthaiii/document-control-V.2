@@ -9,7 +9,7 @@ import RFAListTable from '@/components/rfa/RFAListTable'
 import DashboardStats from '@/components/rfa/DashboardStats'
 import CreateRFAForm from '@/components/rfa/CreateRFAForm'
 import { RFADocument, Site as SiteType, Category } from '@/types/rfa'
-import { STATUSES, STATUS_LABELS, Role, STATUS_COLORS, RFA_CM_VISIBLE_STATUSES, getRfaStatusLabelForRole, normalizeRfaStatusForRole } from '@/lib/config/workflow'
+import { STATUSES, STATUS_LABELS, Role, STATUS_COLORS, RFA_CM_VISIBLE_STATUSES, RFA_CM_FILTER_STATUSES, RFA_FINAL_DECISION_STATUSES, EXTERNAL_APPROVER_ROLES, getRfaStatusLabelForRole, normalizeRfaStatusForRole } from '@/lib/config/workflow'
 import { Plus, RefreshCw, ClipboardList } from 'lucide-react'
 import SmartRFAModal from '@/components/rfa/SmartRFAModal'
 import FilterBar from '@/components/rfa/FilterBar'
@@ -227,8 +227,9 @@ function RFAContent() {
                 }
             }
 
-            // Auto-sync: Status -> Responsible Party
-            if (key === 'status') {
+            // Auto-sync: Status -> Responsible Party. Skipped for CM (collapsed status key +
+            // no RP selector) — see handleChartFilter for the full reasoning.
+            if (key === 'status' && user?.role !== 'CM') {
                 if (value === 'ALL') {
                     nextFilters.responsibleParty = 'ALL';
                 } else {
@@ -266,8 +267,11 @@ function RFAContent() {
     const handleChartFilter = (key: string, value: string) => {
         setFilters(prev => {
             const nextFilters = { ...prev, [key]: value };
-            // Auto-sync for chart clicks (Status chart)
-            if (key === 'status') {
+            // Auto-sync for chart clicks (Status chart). Skipped for CM: their status key is a
+            // COLLAPSED bucket, and syncing it to a responsibleParty would add a second,
+            // exact-match filter that fights the normalized status filter (step 3) and drops
+            // the folded-in docs. CM has no responsibleParty selector, so keep it 'ALL'.
+            if (key === 'status' && user?.role !== 'CM') {
                 if (value === 'ALL') {
                     nextFilters.responsibleParty = 'ALL';
                 } else {
@@ -309,6 +313,10 @@ function RFAContent() {
     ], [isExternalCM]);
 
     const availableStatuses = useMemo(() => {
+        // CM sees only the collapsed CM-relevant buckets (no SITE-internal statuses, no
+        // responsible-party selector). Matches the chart + table.
+        if (user?.role === 'CM') return RFA_CM_FILTER_STATUSES;
+
         let all = Object.values(STATUSES);
         if (isExternalCM) {
             all = all.filter(s => s !== STATUSES.PENDING_FINAL_APPROVAL);
@@ -324,7 +332,7 @@ function RFAContent() {
             case 'REJECTED': return [STATUSES.REJECTED];
             default: return all;
         }
-    }, [filters.responsibleParty, isExternalCM]);
+    }, [filters.responsibleParty, isExternalCM, user?.role]);
     const getStatusColor = (status: string) => {
         // CM must never see PENDING_FINAL_APPROVAL's "waiting" color once they've
         // already approved with comments — SITE's round-2 loop is invisible to them.
@@ -406,6 +414,18 @@ function RFAContent() {
 
         let docsToShow: RFADocument[] = documentsWithSiteNames;
 
+        // 0. Visibility scope for external approvers (Designer/Owner). Their query pulls
+        //    every doc in their sites (unlike CM's server-filtered query), so scope it here:
+        //    show only docs they are actually a chain member of, PLUS any doc CM has finally
+        //    decided (visible to everyone). Hide in-progress internal-loop docs that never
+        //    involved them. NOTE: UI filter only — firestore.rules/query unchanged.
+        if (user && EXTERNAL_APPROVER_ROLES.includes(user.role as Role)) {
+            docsToShow = docsToShow.filter(doc =>
+                RFA_FINAL_DECISION_STATUSES.includes(doc.status) ||
+                (doc.externalChain?.steps?.some(s => s.role === user.role) ?? false)
+            );
+        }
+
         // 1. กรอง Revision (Show All)
         if (!filters.showAllRevisions) {
             docsToShow = docsToShow.filter(doc => doc.isLatest);
@@ -418,7 +438,13 @@ function RFAContent() {
 
         // 3. กรอง Status
         if (filters.status !== 'ALL') {
-            docsToShow = docsToShow.filter(doc => doc.status === filters.status);
+            // For CM, filters.status is a COLLAPSED bucket key (from the CM chart/dropdown),
+            // so match on the normalized status — otherwise clicking "อนุมัติตามคอมเมนต์"
+            // would miss the PENDING_FINAL_APPROVAL / APPROVED_REVISION_REQUIRED docs folded
+            // into it. Every other role keeps the exact match.
+            docsToShow = user?.role === 'CM'
+                ? docsToShow.filter(doc => normalizeRfaStatusForRole(doc.status, user.role) === filters.status)
+                : docsToShow.filter(doc => doc.status === filters.status);
         }
 
         // 4. กรอง Site
@@ -497,6 +523,7 @@ function RFAContent() {
                     activeFilters={filters}
                     categories={availableCategories}
                     availableStatuses={availableStatuses}
+                    userRole={user?.role}
                 />
 
                 <div className='mb-6'>
@@ -504,6 +531,7 @@ function RFAContent() {
                         filters={filters} handleFilterChange={handleFilterChange} searchTerm={searchTerm} setSearchTerm={setSearchTerm} resetFilters={resetFilters}
                         sites={sites} categories={availableCategories} availableStatuses={availableStatuses} availableResponsibleParties={availableResponsibleParties}
                         showResponsibleParty={user?.role !== 'CM'}
+                        statusLabels={displayStatusLabels}
                     />
                 </div>
 

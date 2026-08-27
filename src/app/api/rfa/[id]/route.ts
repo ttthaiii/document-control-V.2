@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { adminDb, adminAuth, adminBucket } from '@/lib/firebase/admin';
 import { FieldValue } from 'firebase-admin/firestore';
 // 2. เพิ่ม STATUS_LABELS
-import { CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUSES, STATUS_LABELS, ROLES, Role, RFA_CM_VISIBLE_STATUSES } from '@/lib/config/workflow';
+import { CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUSES, STATUS_LABELS, ROLES, Role, RFA_CM_VISIBLE_STATUSES, EXTERNAL_STEP_STATUSES, ExternalChain, configureExternalChain, canActOnExternalStep, applyExternalStep, advanceExternalChain, serializeExternalChainForViewer } from '@/lib/config/workflow';
 import { RFAFile } from '@/types/rfa';
 import { sendPushNotification } from '@/lib/utils/push-notification';
 import { PERMISSION_KEYS } from '@/lib/config/permissions';
@@ -131,6 +131,14 @@ export async function GET(
         const canRequestRevisionOverride = checkPermission(userRole, userOverrides, 'RFA', PERMISSION_KEYS.RFA.CAN_REQUEST_REVISION, []);
         const canRequestSupersedeOverride = checkPermission(userRole, userOverrides, 'RFA', PERMISSION_KEYS.RFA.CAN_REQUEST_SUPERSEDE, []);
 
+        // External approval chain (INTERNAL sites only). CM forwards at round 1; the current
+        // role-holder acts while the doc is at PENDING_EXTERNAL_APPROVAL; CM finalizes at
+        // PENDING_CM_FINAL. Non-CM viewers get a redacted chain (location only) in the response.
+        const canForwardExternal = cmSystemType === 'INTERNAL' && isCM && status === STATUSES.PENDING_CM_APPROVAL;
+        const canActExternalStep = cmSystemType === 'INTERNAL' && status === STATUSES.PENDING_EXTERNAL_APPROVAL
+            && canActOnExternalStep(rfaData.externalChain, userRole as Role);
+        const canFinalizeExternal = cmSystemType === 'INTERNAL' && isCM && status === STATUSES.PENDING_CM_FINAL;
+
         const permissions = {
             canView: true,
             canEdit: CREATOR_ROLES.includes(userData.role as Role) && rfaData.status === STATUSES.REVISION_REQUIRED,
@@ -143,6 +151,9 @@ export async function GET(
                 APPROVED_STATUSES.includes(rfaData.status) &&
                 rfaData.supersededStatus !== 'SUSPENDED' &&
                 (isCM || canApproveOverride || canRequestSupersedeOverride),
+            canForwardExternal,
+            canActExternalStep,
+            canFinalizeExternal,
         };
 
         let isFromSupersedeRequest = rfaData.isFromSupersedeRequest || false;
@@ -159,7 +170,10 @@ export async function GET(
 
         return NextResponse.json({
             success: true, document: {
-                id: rfaDoc.id, ...rfaData, isFromSupersedeRequest, site: siteInfo, category: categoryInfo, permissions
+                id: rfaDoc.id, ...rfaData, isFromSupersedeRequest, site: siteInfo, category: categoryInfo, permissions,
+                // Override the raw spread above: CM sees the full chain, everyone else gets
+                // location-only (per-approver outcomes are hidden until CM's final decision).
+                externalChain: serializeExternalChainForViewer(rfaData.externalChain, isCM),
             }
         });
 
@@ -267,6 +281,25 @@ export async function PUT(
             }
         }
 
+        // 4. External approval chain (INTERNAL only). Runs alongside the 2-round path above:
+        //    CM forwards at round 1 -> current role-holder acts (Designer/Owner) -> when the
+        //    chain completes, CM finalizes. A reject never short-circuits the walk.
+        const extStepActions = ['EXT_APPROVE', 'EXT_APPROVE_WITH_COMMENTS', 'EXT_REJECT'];
+        if (cmSystemType === 'INTERNAL') {
+            if (action === 'FORWARD_EXTERNAL' && isCM && docData.status === STATUSES.PENDING_CM_APPROVAL) {
+                canPerformAction = true;
+            } else if (extStepActions.includes(action)
+                && docData.status === STATUSES.PENDING_EXTERNAL_APPROVAL
+                && canActOnExternalStep(docData.externalChain, userRole as Role)) {
+                // Role-based: anyone holding the current step's role in this project may act.
+                canPerformAction = true;
+            } else if (['APPROVE', 'APPROVE_WITH_COMMENTS', 'REJECT'].includes(action)
+                && isCM && docData.status === STATUSES.PENDING_CM_FINAL) {
+                // CM's final decision after weighing every approver's outcome.
+                canPerformAction = true;
+            }
+        }
+
         if (!canPerformAction) {
             return NextResponse.json({ success: false, error: 'Permission denied or invalid status.' }, { status: 403 });
         }
@@ -278,7 +311,10 @@ export async function PUT(
             'APPROVE',
             'APPROVE_WITH_COMMENTS',
             'APPROVE_REVISION_REQUIRED',
-            'REJECT'
+            'REJECT',
+            // External chain verdicts — every one needs a supporting file (user rule;
+            // client mirrors this in RFADetailModal actionsRequiringFile).
+            ...extStepActions,
         ];
 
         // SITE's round-2 classification (PENDING_FINAL_APPROVAL) finalizes using
@@ -298,7 +334,32 @@ export async function PUT(
         }
 
         // --- Logic การเปลี่ยนสถานะ ---
+        // External chain: FORWARD_EXTERNAL builds it here (no files needed); the EXT_* step
+        // outcome is written AFTER files move (below) so an approver's attachment is captured.
+        let updatedExternalChain: ExternalChain | undefined;
         switch (action) {
+            case 'FORWARD_EXTERNAL': {
+                const chainConfig = body?.chainConfig;
+                if (!Array.isArray(chainConfig) || chainConfig.length === 0) {
+                    return NextResponse.json({ success: false, error: 'FORWARD_EXTERNAL requires chainConfig with at least one step.' }, { status: 400 });
+                }
+                try {
+                    updatedExternalChain = configureExternalChain(chainConfig, userId);
+                } catch (e: any) {
+                    return NextResponse.json({ success: false, error: e?.message || 'Invalid chain configuration.' }, { status: 400 });
+                }
+                newStatus = STATUSES.PENDING_EXTERNAL_APPROVAL;
+                break;
+            }
+            case 'EXT_APPROVE':
+            case 'EXT_APPROVE_WITH_COMMENTS':
+            case 'EXT_REJECT':
+                // Status resolved below after files move. `done` (chain complete) is
+                // file-independent, so decide the doc status here.
+                newStatus = advanceExternalChain(docData.externalChain).done
+                    ? STATUSES.PENDING_CM_FINAL
+                    : STATUSES.PENDING_EXTERNAL_APPROVAL;
+                break;
             case 'SEND_TO_CM': newStatus = STATUSES.PENDING_CM_APPROVAL; break;
             case 'REQUEST_REVISION': newStatus = STATUSES.REVISION_REQUIRED; break;
             case 'SUBMIT_REVISION':
@@ -324,10 +385,12 @@ export async function PUT(
                 newStatus = STATUSES.APPROVED;
                 break;
             case 'APPROVE_WITH_COMMENTS':
-                if (cmSystemType === 'INTERNAL' && docData.status === STATUSES.PENDING_CM_APPROVAL) {
-                    // Internal round 1: CM approved with comments -> SITE must decide
-                    // revision-required or not at round 2 (PENDING_FINAL_APPROVAL is
-                    // reachable ONLY from here, so it unambiguously means this).
+                if (cmSystemType === 'INTERNAL'
+                    && (docData.status === STATUSES.PENDING_CM_APPROVAL || docData.status === STATUSES.PENDING_CM_FINAL)) {
+                    // Internal CM approves-with-comments -> SITE must decide revision-required
+                    // or not at round 2 (PENDING_FINAL_APPROVAL). Reachable from round-1
+                    // (PENDING_CM_APPROVAL) and from the external-chain finalize
+                    // (PENDING_CM_FINAL) — both keep today's SITE round-2 behavior.
                     newStatus = STATUSES.PENDING_FINAL_APPROVAL;
                 } else {
                     // Internal round 2 (SITE decided no revision needed) OR External
@@ -337,12 +400,21 @@ export async function PUT(
                 break;
         }
 
-        // Instead of accumulating all historical files, we REPLACE doc.files with the new upload.
-        // Historical files are preserved in the `workflow` array.
-        let finalDocFiles: RFAFile[] = newFiles && Array.isArray(newFiles) && newFiles.length > 0 ? [] : (docData.files || []);
+        // Default: REPLACE doc.files with the new upload (historical files stay in `workflow`).
+        // Exception — SITE's round-2 finalize: when SITE attaches a file at the final step,
+        // MERGE it with the files CM already published (docData.files) instead of replacing,
+        // so downstream viewers (BIM/FM) see BOTH CM's file and SITE's added CAD. Scoped to
+        // this case only; every other approval keeps the "latest upload replaces" behavior.
+        const hasNewFiles = newFiles && Array.isArray(newFiles) && newFiles.length > 0;
+        const isRound2Finalize = docData.status === STATUSES.PENDING_FINAL_APPROVAL
+            && ['APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED'].includes(action);
+
+        let finalDocFiles: RFAFile[] = hasNewFiles
+            ? (isRound2Finalize ? [...(docData.files || [])] : [])
+            : (docData.files || []);
         let workflowFiles: RFAFile[] = [];
 
-        if (newFiles && Array.isArray(newFiles) && newFiles.length > 0) {
+        if (hasNewFiles) {
             for (const tempFile of newFiles) {
                 const sourcePath = tempFile.filePath;
                 if (!sourcePath || !sourcePath.startsWith(`temp/${userId}/`)) continue;
@@ -360,10 +432,31 @@ export async function PUT(
             }
         }
 
+        // External step outcome: written now (files are moved) but the chain is only advanced
+        // — never short-circuited on a reject. Result persisted to `updates.externalChain` below.
+        if (extStepActions.includes(action)) {
+            const extStatus = action === 'EXT_APPROVE'
+                ? EXTERNAL_STEP_STATUSES.APPROVED
+                : action === 'EXT_APPROVE_WITH_COMMENTS'
+                    ? EXTERNAL_STEP_STATUSES.APPROVED_WITH_COMMENTS
+                    : EXTERNAL_STEP_STATUSES.REJECTED;
+            const acted = applyExternalStep(docData.externalChain, {
+                status: extStatus,
+                userId,
+                userName: userData.email,
+                comment: comments || '',
+                files: workflowFiles,
+                actedAt: new Date().toISOString(),
+            });
+            updatedExternalChain = advanceExternalChain(acted).chain;
+        }
+
         const workflowEntry = {
             action, status: newStatus, userId, userName: userData.email, role: userRole,
             timestamp: new Date().toISOString(), comments: comments || '',
-            files: workflowFiles,
+            // On round-2 finalize the entry carries the MERGED set (CM's + SITE's files) so
+            // `latestFiles` (which reads the latest workflow step) shows them together.
+            files: isRound2Finalize && hasNewFiles ? finalDocFiles : workflowFiles,
             revisionNumber: docData.revisionNumber || 0,
         };
 
@@ -386,6 +479,8 @@ export async function PUT(
             updates.documentNumber = documentNumber.trim().replace(/\s+/g, '-');
         }
         if (workflowFiles.length > 0) updates.files = finalDocFiles;
+        // Persist the (re)built external chain on forward and on every external step.
+        if (updatedExternalChain !== undefined) updates.externalChain = updatedExternalChain;
 
         // Set isLatestApproved if this action completes the workflow
         if (isApprovalAction && isFinalApproval) {

@@ -27,6 +27,9 @@ interface FilterBarProps {
   availableResponsibleParties: { value: string; label: string }[];
   /** Hidden for CM — same reasoning as the table's ผู้รับผิดชอบ column removal. */
   showResponsibleParty?: boolean;
+  /** Status-key → label map for the dropdown. Defaults to STATUS_LABELS; the RFA page
+   *  passes the CM-collapsed labels so CM's options read the same as the chart + table. */
+  statusLabels?: { [key: string]: string };
 }
 
 const inputStyle = "w-full mt-1 h-10 px-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none";
@@ -42,6 +45,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
   availableStatuses,
   availableResponsibleParties,
   showResponsibleParty = true,
+  statusLabels = STATUS_LABELS,
 }) => {
   return (
     <div className="bg-white rounded-lg shadow p-4">
@@ -96,7 +100,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
             <option value="ALL">ทุกสถานะ</option>
             {availableStatuses.map(statusKey => (
               <option key={statusKey} value={statusKey}>
-                {STATUS_LABELS[statusKey] || statusKey}
+                {statusLabels[statusKey] || statusKey}
               </option>
             ))}
           </select>

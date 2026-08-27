@@ -64,7 +64,7 @@ export async function POST(req: Request) {
 
     try {
         const body = await req.json()
-        const { name, shortName, cmSystemType, LineGroupID, status } = body
+        const { name, shortName, cmSystemType, LineGroupID, LineGroupID_CM, status } = body
 
         if (!name || !shortName) {
             return NextResponse.json({ success: false, error: "Name and shortName are required" }, { status: 400 })
@@ -86,6 +86,8 @@ export async function POST(req: Request) {
             cmSystemType: cmSystemType || 'INTERNAL',
             status: status || 'ACTIVE',
             LineGroupID: LineGroupID || '',
+            // CM notifications route here (INTERNAL projects only); empty = skip CM push.
+            LineGroupID_CM: LineGroupID_CM || '',
             createdAt: FieldValue.serverTimestamp(),
             createdBy: uid,
             members: [] // for compatibility
