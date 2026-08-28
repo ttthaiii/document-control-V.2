@@ -4,15 +4,48 @@
 import React, { useEffect, useRef, useState, useCallback, useLayoutEffect } from 'react';
 import { RFAFile } from '@/types/rfa';
 import {
-  X, Edit3, Undo, Trash2, Menu, Plus, Minus, Save,
+  X, Edit3, Undo, Redo, Trash2, Menu, Plus, Minus, Save,
   MousePointer2, Hand, Square, Circle, Eraser, Monitor, Type, XCircle,
-  Loader2, ChevronLeft, ChevronRight, Download, Layers, ChevronUp, ChevronDown, FilePlus
+  Loader2, ChevronLeft, ChevronRight, Download, Layers, ChevronUp, ChevronDown, FilePlus,
+  MessageSquare, FileSpreadsheet
 } from 'lucide-react';
 
 import * as fabric from 'fabric';
-import { PDFDocument, degrees } from 'pdf-lib';
+import { PDFDocument, degrees, PDFName, PDFDict, PDFArray, PDFHexString, PDFStream, PDFRawStream, decodePDFRawStream } from 'pdf-lib';
 import { useNotification } from '@/lib/context/NotificationContext';
+import { useAuth } from '@/lib/auth/useAuth';
 import { resolveViewUrl } from '@/lib/utils/storage';
+import { exportMarkupListToExcel } from '@/lib/utils/markupExport';
+
+// Fabric v6 silently drops any object field not declared here when doing toJSON()/loadFromJSON().
+fabric.FabricObject.customProperties = ['id', 'author', 'createdAt', 'kind', 'linkedTo', 'pageNumber'];
+
+// Reads back the hidden `annotations.json` attachment pdf-lib's own `.attach()` writes into the
+// saved PDF (see handleSave). pdf-lib 1.17.1 has no public "getAttachments" API, so this walks the
+// PDF's Names/EmbeddedFiles tree by hand, using the exact structure PDFEmbeddedFile.embed() builds.
+async function extractAnnotationsFromPdfBytes(bytes: ArrayBuffer): Promise<{ [page: number]: any } | null> {
+  try {
+    const pdfDoc = await PDFDocument.load(bytes);
+    const namesDict = pdfDoc.catalog.lookupMaybe(PDFName.of('Names'), PDFDict);
+    const embeddedFilesDict = namesDict?.lookupMaybe(PDFName.of('EmbeddedFiles'), PDFDict);
+    const efNames = embeddedFilesDict?.lookupMaybe(PDFName.of('Names'), PDFArray);
+    if (!efNames) return null;
+    for (let i = 0; i < efNames.size(); i += 2) {
+      const nameObj = efNames.lookupMaybe(i, PDFHexString);
+      if (!nameObj || nameObj.decodeText() !== 'annotations.json') continue;
+      const fileSpecDict = efNames.lookup(i + 1, PDFDict);
+      const efDict = fileSpecDict.lookupMaybe(PDFName.of('EF'), PDFDict);
+      const streamObj = efDict?.lookupMaybe(PDFName.of('F'), PDFStream);
+      if (!streamObj || !(streamObj instanceof PDFRawStream)) return null;
+      const decoded = decodePDFRawStream(streamObj).decode();
+      return JSON.parse(new TextDecoder('utf-8').decode(decoded));
+    }
+    return null;
+  } catch (e) {
+    console.warn('[PDFPreviewModal] failed to read embedded annotations:', e);
+    return null;
+  }
+}
 
 interface PDFPreviewModalProps {
   isOpen: boolean;
@@ -34,6 +67,7 @@ export default function PDFPreviewModal({
   isOpen, file, onClose, onSave, allowEdit = true, onDownload
 }: PDFPreviewModalProps) {
   const { showNotification } = useNotification();
+  const { user } = useAuth();
 
   // --- Refs ---
   const containerRef = useRef<HTMLDivElement>(null);
@@ -43,6 +77,18 @@ export default function PDFPreviewModal({
 
   const canvasDataRef = useRef<{ [key: number]: any }>({});
   const pageCanvasCacheRef = useRef<{ [page: number]: { canvas: HTMLCanvasElement, scale: number } }>({});
+
+  // --- Undo/Redo history (per current page's canvas — reset whenever the canvas is (re)created) ---
+  const undoHistoryRef = useRef<any[]>([]);
+  const undoHistoryIndexRef = useRef<number>(-1);
+  const isRestoringHistoryRef = useRef(false);
+
+  // Flipped by real canvas mutations (including undo/redo — unlike recordHistorySnapshot this is
+  // NOT gated by isRestoringHistoryRef, since undoing/redoing away from the last-saved state is
+  // itself an unsaved change); cleared only after a successful handleSave.
+  const isDirtyRef = useRef(false);
+  // Holds a cloned Fabric object for Ctrl+C / Ctrl+V copy-paste of markups.
+  const clipboardRef = useRef<any>(null);
 
   const pendingScrollRef = useRef<{ left: number, top: number } | null>(null);
 
@@ -56,6 +102,11 @@ export default function PDFPreviewModal({
   // --- States ---
   const [isEditing, setIsEditing] = useState(false);
   const [currentTool, setCurrentTool] = useState<'select' | 'draw' | 'rect' | 'circle' | 'eraser' | 'hand' | 'text'>('hand');
+  const [hasSelection, setHasSelection] = useState(false);
+
+  // --- Markup List (Bluebeam-style comment summary — S8/S9) ---
+  const [isMarkupListOpen, setIsMarkupListOpen] = useState(false);
+  const [markupEntries, setMarkupEntries] = useState<{ page: number; author: string; text: string; createdAt: string; id: string }[]>([]);
   const [drawColor, setDrawColor] = useState('#DC2626');
   const [brushWidth, setBrushWidth] = useState(3);
 
@@ -78,6 +129,7 @@ export default function PDFPreviewModal({
   const [isPageManagementMode, setIsPageManagementMode] = useState(false);
   const [draggedPage, setDraggedPage] = useState<number | null>(null);
   const [pendingDeletePage, setPendingDeletePage] = useState<number | null>(null); // H4: inline confirm
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false); // in-app close-warning modal (replaces window.confirm)
 
   const isPinchingRef = useRef(false);
   const startPinchDistRef = useRef<number>(0);
@@ -99,6 +151,35 @@ export default function PDFPreviewModal({
     const pageToSave = activePageRef.current;
     canvasDataRef.current[pageToSave] = canvas.toJSON();
   }, [allowEdit]);
+
+  // Rebuilds the Markup List from canvasDataRef across ALL pages — only `kind === 'comment'`
+  // (typed text) annotations are included; freehand markup has no text to summarize, per the
+  // user's own confirmed choice (no separate caption-prompt UI for drawings).
+  const refreshMarkupEntries = useCallback(() => {
+    saveCurrentPageData();
+    const entries: typeof markupEntries = [];
+    for (let p = 1; p <= totalPages; p++) {
+      const pageData = canvasDataRef.current[p];
+      if (!pageData?.objects) continue;
+      for (const obj of pageData.objects) {
+        if (obj.kind === 'comment' && typeof obj.text === 'string' && obj.text.trim() && obj.text !== 'ข้อความ') {
+          entries.push({
+            page: p,
+            author: obj.author || 'Unknown User',
+            text: obj.text,
+            createdAt: obj.createdAt || '',
+            id: obj.id || `p${p}-${entries.length}`,
+          });
+        }
+      }
+    }
+    setMarkupEntries(entries);
+  }, [totalPages, saveCurrentPageData]);
+
+  const handleExportMarkupList = useCallback(() => {
+    const baseName = (file?.fileName || 'document').replace(/\.pdf$/i, '');
+    exportMarkupListToExcel(markupEntries, `markup_list_${baseName}.xlsx`);
+  }, [markupEntries, file]);
 
   // --- Zoom Handler (Exponential & Dynamic Limit) ---
   const handleZoom = useCallback((newScale: number, clientX?: number, clientY?: number) => {
@@ -261,6 +342,15 @@ export default function PDFPreviewModal({
         pdfDocRef.current = pdf;
         setTotalPages(pdf.numPages);
         activePageRef.current = 1;
+
+        // Restore annotations from a previous save (complete or draft) before the first page renders,
+        // so canvasDataRef is already populated once `isLoading` flips false (2026-08-28 draft-save requirement).
+        try {
+          const bytes = await fetch(urlToLoad).then(res => res.arrayBuffer());
+          const restored = await extractAnnotationsFromPdfBytes(bytes);
+          if (restored) canvasDataRef.current = restored;
+        } catch (e) { console.warn('Annotation restore skipped:', e); }
+
         setIsLoading(false);
       } catch (error) { console.error(error); setIsLoading(false); }
     };
@@ -347,11 +437,22 @@ export default function PDFPreviewModal({
         }
       }
 
+      // Embed the structured annotation data (ids, authors, kinds) as a hidden attachment inside the
+      // same flattened PDF. onSave's contract/signature to all callers is unchanged; the file just
+      // becomes self-describing so re-opening it restores exact objects instead of a static image,
+      // and any save — finished or not — doubles as a resumable draft.
+      await pdfDoc.attach(
+        new TextEncoder().encode(JSON.stringify(canvasDataRef.current)),
+        'annotations.json',
+        { mimeType: 'application/json', description: 'PDFPreviewModal internal annotation data' }
+      );
+
       const pdfBytes = await pdfDoc.save();
       const blob = new Blob([pdfBytes as any], { type: 'application/pdf' }); // Cast 'as any' แก้ Error TypeScript
 
       const editedFile = new File([blob], `edited_${file.fileName}`, { type: 'application/pdf' });
       await onSave(editedFile);
+      isDirtyRef.current = false;
 
     } catch (error) {
       console.error('Save error:', error);
@@ -632,6 +733,36 @@ export default function PDFPreviewModal({
           canvas.requestRenderAll();
         }
 
+        // --- Undo/Redo history init ---
+        // Registered AFTER the initial loadFromJSON above so restoring a saved page never counts as
+        // a history step; the freshly-loaded state becomes history[0] (the undo floor for this page).
+        undoHistoryRef.current = [canvas.toJSON()];
+        undoHistoryIndexRef.current = 0;
+        const recordHistorySnapshot = () => {
+          if (isRestoringHistoryRef.current) return;
+          undoHistoryRef.current = undoHistoryRef.current.slice(0, undoHistoryIndexRef.current + 1);
+          undoHistoryRef.current.push(canvas.toJSON());
+          undoHistoryIndexRef.current = undoHistoryRef.current.length - 1;
+        };
+        canvas.on('object:added', recordHistorySnapshot);
+        canvas.on('object:removed', recordHistorySnapshot);
+        canvas.on('object:modified', recordHistorySnapshot);
+
+        // Registered alongside (same timing as) the history listeners above so the initial page
+        // restore never counts as dirty — but unlike recordHistorySnapshot, this fires unconditionally
+        // (including during undo/redo replay).
+        const markDirty = () => { isDirtyRef.current = true; };
+        canvas.on('object:added', markDirty);
+        canvas.on('object:removed', markDirty);
+        canvas.on('object:modified', markDirty);
+
+        // Trash2 should only read as "delete selection", not "clear everything" (disambiguated
+        // from Undo/Redo by disabling it when there is nothing to delete).
+        setHasSelection(canvas.getActiveObjects().length > 0);
+        canvas.on('selection:created', () => setHasSelection(true));
+        canvas.on('selection:updated', () => setHasSelection(true));
+        canvas.on('selection:cleared', () => setHasSelection(false));
+
         currentCanvasRef.current = canvas;
         setupTool(canvas);
         activePageRef.current = currentPage;
@@ -796,6 +927,16 @@ export default function PDFPreviewModal({
     handleZoom(newScale);
   };
 
+  const stampMetadata = useCallback((obj: any, kind: 'comment' | 'markup') => {
+    obj.set({
+      id: `ann_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+      author: user?.email || 'Unknown User',
+      createdAt: new Date().toISOString(),
+      kind,
+      pageNumber: activePageRef.current,
+    });
+  }, [user]);
+
   const setupTool = useCallback((canvas: fabric.Canvas) => {
     if (!canvas) return;
     canvas.off('mouse:down');
@@ -814,9 +955,8 @@ export default function PDFPreviewModal({
     }
 
     canvas.on('path:created', (e: any) => {
-      if (e.path && e.path.globalCompositeOperation === 'destination-out') {
-        e.path.set({ selectable: false, evented: false });
-        canvas.discardActiveObject();
+      if (e.path) {
+        stampMetadata(e.path, 'markup');
       }
       canvas.requestRenderAll();
     });
@@ -920,18 +1060,22 @@ export default function PDFPreviewModal({
         canvas.freeDrawingBrush = brush;
       }
       else if (activeTool === 'eraser') {
-        canvas.isDrawingMode = true;
-        const brush = new fabric.PencilBrush(canvas);
-        brush.width = brushWidth * 5;
-        brush.color = 'white';
-        // @ts-ignore
-        brush.createPath = function (pathData) {
-          // @ts-ignore
-          const path = fabric.PencilBrush.prototype.createPath.call(this, pathData);
-          path.globalCompositeOperation = 'destination-out';
-          return path;
-        }
-        canvas.freeDrawingBrush = brush;
+        // Object-targeted eraser: hit-tests the markup object under the pointer while dragging and
+        // removes it directly. Replaces the old compositing-based PencilBrush hack, which punched a
+        // transparent hole through every layer (including the PDF page render) instead of removing
+        // just the markup, and left a stray "eraser stroke" object behind on the canvas.
+        canvas.defaultCursor = 'crosshair';
+        let isErasing = false;
+        const eraseAtPointer = (opt: any) => {
+          const target = canvas.findTarget(opt.e) as any;
+          if (target) {
+            canvas.remove(target);
+            canvas.requestRenderAll();
+          }
+        };
+        canvas.on('mouse:down', (opt: any) => { isErasing = true; eraseAtPointer(opt); });
+        canvas.on('mouse:move', (opt: any) => { if (isErasing) eraseAtPointer(opt); });
+        canvas.on('mouse:up', () => { isErasing = false; });
       }
       else if (activeTool === 'text') {
         canvas.defaultCursor = 'text';
@@ -943,11 +1087,29 @@ export default function PDFPreviewModal({
             top: pointer.y,
             fontFamily: 'Arial',
             fill: drawColor,
-            fontSize: 24 / renderedScale
+            // Fixed logical size — Fabric's canvas-level viewport zoom already handles visual
+            // scaling, so baking the creation-time zoom in here made the same "16pt" text render
+            // at different sizes depending on when it was drawn.
+            fontSize: 16
           });
+          stampMetadata(text, 'comment');
           canvas.add(text);
           canvas.setActiveObject(text);
           text.enterEditing();
+          // Pre-select the whole placeholder so the FIRST keystroke replaces "ข้อความ"
+          // instead of appending to it (otherwise typed text mixes with the placeholder).
+          text.selectAll();
+          // Placeholder cleanup: leaving "ข้อความ" untouched (or an empty box) removes the
+          // object; discardActiveObject + renderAll flush the caret in a SINGLE click so no
+          // stray line is left behind.
+          text.on('editing:exited', () => {
+            const t = (text.text || '').trim();
+            if (t === '' || t === 'ข้อความ') {
+              canvas.remove(text);
+            }
+            canvas.discardActiveObject();
+            canvas.renderAll();
+          });
           setCurrentTool('select');
           canvas.requestRenderAll();
         });
@@ -983,6 +1145,7 @@ export default function PDFPreviewModal({
               originY: 'center'
             });
           }
+          stampMetadata(shape, 'markup');
           canvas.add(shape);
         });
         canvas.on('mouse:move', (o: any) => {
@@ -1017,7 +1180,7 @@ export default function PDFPreviewModal({
         });
       }
     }
-  }, [currentTool, drawColor, brushWidth, renderedScale, isEditing]);
+  }, [currentTool, drawColor, brushWidth, renderedScale, isEditing, stampMetadata]);
 
   useEffect(() => {
     if (currentCanvasRef.current) setupTool(currentCanvasRef.current);
@@ -1025,12 +1188,24 @@ export default function PDFPreviewModal({
 
   const handleUndo = () => {
     const c = currentCanvasRef.current;
-    if (!c) return;
-    const objs = c.getObjects();
-    if (objs.length) {
-      c.remove(objs[objs.length - 1]);
+    if (!c || undoHistoryIndexRef.current <= 0) return;
+    isRestoringHistoryRef.current = true;
+    undoHistoryIndexRef.current -= 1;
+    c.loadFromJSON(undoHistoryRef.current[undoHistoryIndexRef.current]).then(() => {
       c.requestRenderAll();
-    }
+      isRestoringHistoryRef.current = false;
+    });
+  };
+
+  const handleRedo = () => {
+    const c = currentCanvasRef.current;
+    if (!c || undoHistoryIndexRef.current >= undoHistoryRef.current.length - 1) return;
+    isRestoringHistoryRef.current = true;
+    undoHistoryIndexRef.current += 1;
+    c.loadFromJSON(undoHistoryRef.current[undoHistoryIndexRef.current]).then(() => {
+      c.requestRenderAll();
+      isRestoringHistoryRef.current = false;
+    });
   };
 
   const handleDelete = () => {
@@ -1041,10 +1216,104 @@ export default function PDFPreviewModal({
     c.requestRenderAll();
   };
 
+  // Keyboard shortcuts: Ctrl/Cmd+Z = undo · Ctrl/Cmd+Shift+Z or Ctrl+Y = redo ·
+  // Ctrl/Cmd+C = copy selection · Ctrl/Cmd+V = paste. Reads state via refs so
+  // [isOpen] is the only dep. Attached in the CAPTURE phase on document so an
+  // ancestor's bubble-phase stopPropagation can't swallow it first (that was why
+  // the earlier window/bubble listener never fired). Skipped while a text markup
+  // is being edited so Ctrl+Z/C/V inside the textbox stay native.
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const c = currentCanvasRef.current;
+      if (!c) return;
+      if ((c.getActiveObject() as any)?.isEditing) return;
+      // Match on the PHYSICAL key position (e.code), not the produced character
+      // (e.key) — otherwise a Thai (or any non-Latin) keyboard layout sends "ผ"
+      // instead of "z" and the shortcut never matches.
+      const code = e.code;
+      if (code === 'KeyZ') {
+        e.preventDefault();
+        if (e.shiftKey) handleRedo(); else handleUndo();
+      } else if (code === 'KeyY') {
+        e.preventDefault();
+        handleRedo();
+      } else if (code === 'KeyC') {
+        const active = c.getActiveObject();
+        if (!active) return;
+        e.preventDefault();
+        active.clone().then((cloned: any) => { clipboardRef.current = cloned; });
+      } else if (code === 'KeyV') {
+        if (!clipboardRef.current) return;
+        e.preventDefault();
+        clipboardRef.current.clone().then((cloned: any) => {
+          c.discardActiveObject();
+          cloned.set({
+            left: (cloned.left || 0) + 20,
+            top: (cloned.top || 0) + 20,
+            evented: true,
+          });
+          // Give each pasted markup a fresh id/timestamp so it does not collide with
+          // the original in the Markup List (kind/author are kept).
+          const refreshId = (o: any) => o.set({
+            id: `ann_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+            createdAt: new Date().toISOString(),
+          });
+          if (cloned.type === 'activeselection') {
+            cloned.canvas = c;
+            cloned.forEachObject((o: any) => { refreshId(o); c.add(o); });
+            cloned.setCoords();
+          } else {
+            refreshId(cloned);
+            c.add(cloned);
+          }
+          c.setActiveObject(cloned);
+          c.requestRenderAll();
+        });
+      }
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => document.removeEventListener('keydown', onKeyDown, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  const handleRequestClose = () => {
+    if (isDirtyRef.current) {
+      setShowCloseConfirm(true);
+      return;
+    }
+    onClose();
+  };
+
   if (!isOpen || !file) return null;
 
   return (
     <div className="fixed inset-0 z-[100] bg-gray-900/95 flex flex-col h-full w-full touch-none">
+
+      {/* Close-confirm modal (in-app · replaces the native window.confirm) */}
+      {showCloseConfirm && (
+        <div className="absolute inset-0 z-[120] bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-5">
+            <h3 className="text-base font-semibold text-gray-800 mb-1">ยังไม่ได้บันทึก</h3>
+            <p className="text-sm text-gray-600 mb-5">มีการเปลี่ยนแปลงที่ยังไม่ได้บันทึก ต้องการปิดหน้าต่างนี้หรือไม่?</p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowCloseConfirm(false)}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
+              >
+                ยกเลิก
+              </button>
+              <button
+                onClick={() => { setShowCloseConfirm(false); onClose(); }}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-red-600 hover:bg-red-700 transition-colors"
+              >
+                ปิดโดยไม่บันทึก
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Loading Overlay */}
       {isSaving && (
@@ -1111,6 +1380,18 @@ export default function PDFPreviewModal({
           )}
 
           <button
+            onClick={() => {
+              const next = !isMarkupListOpen;
+              setIsMarkupListOpen(next);
+              if (next) refreshMarkupEntries();
+            }}
+            className={`p-2 rounded-lg border transition-colors ${isMarkupListOpen ? 'bg-blue-100 text-blue-600 border-blue-200' : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border-gray-200'}`}
+            title="รายการคอมเมนต์"
+          >
+            <MessageSquare size={20} />
+          </button>
+
+          <button
             onClick={handleDownload}
             className="p-2 bg-gray-50 text-gray-600 rounded-lg hover:bg-gray-100 border border-gray-200"
             title="ดาวน์โหลดไฟล์ต้นฉบับ"
@@ -1119,7 +1400,7 @@ export default function PDFPreviewModal({
           </button>
 
           <button
-            onClick={onClose}
+            onClick={handleRequestClose}
             className="p-2 bg-red-50 text-red-500 rounded-lg hover:bg-red-100"
           >
             <X size={20} />
@@ -1197,8 +1478,16 @@ export default function PDFPreviewModal({
                 <Undo />
               </button>
               <button
+                onClick={handleRedo}
+                className="p-2 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+              >
+                <Redo />
+              </button>
+              <button
                 onClick={handleDelete}
-                className="p-2 hover:bg-red-50 rounded text-red-500 transition-colors"
+                disabled={!hasSelection}
+                title="ลบวัตถุที่เลือก"
+                className="p-2 hover:bg-red-50 rounded text-red-500 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
               >
                 <Trash2 />
               </button>
@@ -1331,6 +1620,51 @@ export default function PDFPreviewModal({
                   <span>แทรก PDF ด้านหลังสุด</span>
                 </label>
                 <p className="text-[10px] text-gray-500 text-center mt-2 leading-tight">การเพิ่มไฟล์อาจใช้เวลาสักครู่ ขึ้นอยู่กับขนาดไฟล์</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Markup List panel (S8) */}
+        {isMarkupListOpen && (
+          <div className="absolute inset-y-0 right-0 w-[280px] bg-white shadow-xl z-30 flex flex-col border-l">
+            <div className="p-3 border-b bg-gray-50 font-medium text-sm text-gray-600 flex items-center justify-between shrink-0">
+              <span>รายการคอมเมนต์ ({markupEntries.length})</span>
+              <button onClick={() => setIsMarkupListOpen(false)} className="text-gray-400 hover:text-gray-600">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+              {markupEntries.length === 0 ? (
+                <p className="text-xs text-gray-400 text-center mt-4">ยังไม่มีคอมเมนต์ที่เป็นข้อความ</p>
+              ) : (
+                markupEntries.map(entry => (
+                  <div
+                    key={entry.id}
+                    onClick={() => {
+                      handlePageChange(entry.page);
+                      if (isMobile) setIsMarkupListOpen(false);
+                    }}
+                    className="p-2 rounded border border-gray-200 hover:border-blue-300 hover:bg-blue-50 cursor-pointer transition-colors"
+                  >
+                    <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+                      <span className="font-medium text-blue-600">หน้า {entry.page}</span>
+                      <span className="truncate max-w-[120px]">{entry.author}</span>
+                    </div>
+                    <p className="text-sm text-gray-700 break-words">{entry.text}</p>
+                  </div>
+                ))
+              )}
+            </div>
+            {markupEntries.length > 0 && (
+              <div className="p-3 border-t shrink-0">
+                <button
+                  onClick={() => handleExportMarkupList()}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                >
+                  <FileSpreadsheet size={16} />
+                  ส่งออก Excel
+                </button>
               </div>
             )}
           </div>
