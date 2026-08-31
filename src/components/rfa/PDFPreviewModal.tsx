@@ -7,7 +7,7 @@ import {
   X, Edit3, Undo, Redo, Trash2, Menu, Plus, Minus, Save,
   MousePointer2, Hand, Square, Circle, Eraser, Monitor, Type, XCircle,
   Loader2, ChevronLeft, ChevronRight, Download, Layers, ChevronUp, ChevronDown, FilePlus,
-  MessageSquare, FileSpreadsheet
+  MessageSquare, FileSpreadsheet, MoveUpRight, MessageSquareText
 } from 'lucide-react';
 
 import * as fabric from 'fabric';
@@ -18,7 +18,27 @@ import { resolveViewUrl } from '@/lib/utils/storage';
 import { exportMarkupListToExcel } from '@/lib/utils/markupExport';
 
 // Fabric v6 silently drops any object field not declared here when doing toJSON()/loadFromJSON().
-fabric.FabricObject.customProperties = ['id', 'author', 'createdAt', 'kind', 'linkedTo', 'pageNumber'];
+fabric.FabricObject.customProperties = ['id', 'author', 'createdAt', 'kind', 'linkedTo', 'pageNumber', 'text', 'calloutGeo'];
+
+// Builds a directional arrow (shaft Line + filled Triangle head) as ONE Fabric Group, so it moves,
+// scales, erases, undoes, and serializes as a single markup object. The head is rotated to the drag angle.
+function buildArrow(x1: number, y1: number, x2: number, y2: number, color: string, width: number) {
+  const angleDeg = (Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI;
+  const headSize = Math.max(14, width * 4);
+  const line = new fabric.Line([x1, y1, x2, y2], { stroke: color, strokeWidth: width });
+  const head = new fabric.Triangle({
+    left: x2,
+    top: y2,
+    originX: 'center',
+    originY: 'center',
+    width: headSize,
+    height: headSize,
+    fill: color,
+    // Fabric's Triangle apex points up (north); +90deg aligns it with the shaft direction.
+    angle: angleDeg + 90,
+  });
+  return new fabric.Group([line, head]);
+}
 
 // Reads back the hidden `annotations.json` attachment pdf-lib's own `.attach()` writes into the
 // saved PDF (see handleSave). pdf-lib 1.17.1 has no public "getAttachments" API, so this walks the
@@ -101,7 +121,7 @@ export default function PDFPreviewModal({
 
   // --- States ---
   const [isEditing, setIsEditing] = useState(false);
-  const [currentTool, setCurrentTool] = useState<'select' | 'draw' | 'rect' | 'circle' | 'eraser' | 'hand' | 'text'>('hand');
+  const [currentTool, setCurrentTool] = useState<'select' | 'draw' | 'rect' | 'circle' | 'eraser' | 'hand' | 'text' | 'arrow' | 'callout'>('hand');
   const [hasSelection, setHasSelection] = useState(false);
 
   // --- Markup List (Bluebeam-style comment summary — S8/S9) ---
@@ -961,6 +981,112 @@ export default function PDFPreviewModal({
       canvas.requestRenderAll();
     });
 
+    // --- Callout editor (shared by "draw new" and "double-click to re-edit") ---
+    // Builds an editable leader+box+textbox, lets the user type, then on exit either discards an empty
+    // one or (re)groups the three into ONE callout object. The box grows to wrap the text, and Thai text
+    // (which has no spaces) wraps by character via splitByGrapheme so it never overflows the box.
+    const C_PAD = 8, C_BOX_W = 180, C_MIN_H = 40;
+    const openCalloutEditor = (
+      targetX: number, targetY: number, boxLeft: number, boxTop: number,
+      initialText: string, isNew: boolean, preserveMeta?: any,
+    ) => {
+      // Suspend undo history across the whole build+edit; the finished Group is the single recorded step.
+      isRestoringHistoryRef.current = true;
+      const leader = new fabric.Line([targetX, targetY, boxLeft, boxTop], {
+        stroke: drawColor, strokeWidth: Math.max(1, brushWidth - 1), selectable: false, evented: false,
+      });
+      const box = new fabric.Rect({
+        left: boxLeft, top: boxTop, width: C_BOX_W, height: C_MIN_H,
+        fill: '#ffffff', stroke: drawColor, strokeWidth: 2, rx: 6, ry: 6,
+        selectable: false, evented: false,
+      });
+      const textbox = new fabric.Textbox(initialText, {
+        left: boxLeft + C_PAD, top: boxTop + C_PAD, width: C_BOX_W - C_PAD * 2,
+        fontSize: 16, fill: '#111827', splitByGrapheme: true,
+        // Interactive during editing so a click inside positions the caret instead of exiting editing.
+        // It is removed and replaced by the grouped copy on exit, so being selectable here is temporary.
+        editable: true,
+      });
+      // Grow the box height to wrap the text as the user types.
+      const fitBox = () => {
+        box.set('height', Math.max(C_MIN_H, textbox.height + C_PAD * 2));
+        canvas.requestRenderAll();
+      };
+      textbox.on('changed', fitBox);
+      canvas.add(leader, box, textbox);
+      fitBox();
+      canvas.setActiveObject(textbox);
+      textbox.enterEditing();
+      if (isNew) {
+        textbox.selectAll(); // first keystroke replaces the placeholder
+      } else {
+        // Re-edit: drop the caret at the end. The textbox is evented, so the user can then click
+        // anywhere in the text to reposition the caret — that click no longer exits editing.
+        const end = (textbox.text || '').length;
+        textbox.setSelectionStart(end);
+        textbox.setSelectionEnd(end);
+      }
+
+      textbox.on('editing:exited', () => {
+        const typed = (textbox.text || '').trim();
+        canvas.remove(leader); canvas.remove(box); canvas.remove(textbox);
+        if (typed === '' || typed === 'ข้อความ') {
+          // Empty callout: keep nothing. Resume history; no object added = no undo entry.
+          isRestoringHistoryRef.current = false;
+          canvas.discardActiveObject();
+          canvas.requestRenderAll();
+          setCurrentTool('select');
+          return;
+        }
+        const finalH = Math.max(C_MIN_H, textbox.height + C_PAD * 2);
+        const gLeader = new fabric.Line([targetX, targetY, boxLeft, boxTop], {
+          stroke: drawColor, strokeWidth: Math.max(1, brushWidth - 1),
+        });
+        const gBox = new fabric.Rect({
+          left: boxLeft, top: boxTop, width: C_BOX_W, height: finalH,
+          fill: '#ffffff', stroke: drawColor, strokeWidth: 2, rx: 6, ry: 6,
+        });
+        const gText = new fabric.Textbox(typed, {
+          left: boxLeft + C_PAD, top: boxTop + C_PAD, width: C_BOX_W - C_PAD * 2,
+          fontSize: 16, fill: '#111827', splitByGrapheme: true,
+        });
+        const group = new fabric.Group([gLeader, gBox, gText]);
+        // Carry the text on the Group so the Markup List (which reads obj.text on kind:'comment'
+        // objects) picks it up; the inner Textbox is nested and not seen by that top-level scan.
+        group.set('text', typed);
+        // Geometry for re-edit: absolute build coords + the group's origin at creation, so a later
+        // double-click rebuilds the editable pieces translated by however far the group has moved.
+        group.set('calloutGeo', { tx: targetX, ty: targetY, bl: boxLeft, bt: boxTop, ol: group.left, ot: group.top });
+        if (preserveMeta) {
+          // Re-edit: keep the original identity so the Markup List entry stays stable.
+          group.set({ id: preserveMeta.id, author: preserveMeta.author, createdAt: preserveMeta.createdAt, pageNumber: preserveMeta.pageNumber, kind: 'comment' });
+        } else {
+          stampMetadata(group, 'comment');
+        }
+        // Resume history so this single add is the one recorded undo step.
+        isRestoringHistoryRef.current = false;
+        canvas.add(group);
+        canvas.setActiveObject(group);
+        setCurrentTool('select');
+        canvas.requestRenderAll();
+      });
+    };
+
+    // Double-click a finished callout (in any tool) to edit its text again. Fabric cannot edit a Textbox
+    // nested in a Group, so we disband the group back into editable pieces, translated by however far the
+    // group was moved since it was built (dx/dy from the recorded origin), then let openCalloutEditor regroup.
+    canvas.off('mouse:dblclick');
+    canvas.on('mouse:dblclick', (o: any) => {
+      const g = o.target;
+      const geo = g && typeof g.get === 'function' ? g.get('calloutGeo') : null;
+      if (!geo) return;
+      const dx = (g.left || 0) - geo.ol;
+      const dy = (g.top || 0) - geo.ot;
+      const meta = { id: g.get('id'), author: g.get('author'), createdAt: g.get('createdAt'), pageNumber: g.get('pageNumber') };
+      canvas.remove(g);
+      openCalloutEditor(geo.tx + dx, geo.ty + dy, geo.bl + dx, geo.bt + dy, g.get('text') || '', false, meta);
+    });
+
     const activeTool = isEditing ? currentTool : 'hand';
 
     if (activeTool === 'hand') {
@@ -1047,7 +1173,7 @@ export default function PDFPreviewModal({
         }
       });
 
-    } else if (['select', 'draw', 'eraser', 'text', 'rect', 'circle'].includes(activeTool)) {
+    } else if (['select', 'draw', 'eraser', 'text', 'rect', 'circle', 'arrow', 'callout'].includes(activeTool)) {
       if (activeTool === 'select') {
         canvas.selection = true;
         canvas.defaultCursor = 'default';
@@ -1179,6 +1305,69 @@ export default function PDFPreviewModal({
           canvas.requestRenderAll();
         });
       }
+      else if (activeTool === 'arrow') {
+        canvas.defaultCursor = 'crosshair';
+        let preview: any = null;
+        let isDown = false;
+        let startX = 0, startY = 0;
+        canvas.on('mouse:down', (o: any) => {
+          if (o.target) return;
+          isDown = true;
+          const p = canvas.getScenePoint(o.e);
+          startX = p.x; startY = p.y;
+          // Suspend history for the whole gesture so the throwaway preview line never lands in
+          // undo; the final arrow is added AFTER resuming = exactly one clean undo step.
+          isRestoringHistoryRef.current = true;
+          preview = new fabric.Line([startX, startY, startX, startY], {
+            stroke: drawColor, strokeWidth: brushWidth, selectable: false, evented: false,
+          });
+          canvas.add(preview);
+        });
+        canvas.on('mouse:move', (o: any) => {
+          if (!isDown || !preview) return;
+          const p = canvas.getScenePoint(o.e);
+          preview.set({ x2: p.x, y2: p.y });
+          canvas.requestRenderAll();
+        });
+        canvas.on('mouse:up', (o: any) => {
+          if (!isDown) return;
+          isDown = false;
+          const p = canvas.getScenePoint(o.e);
+          if (preview) { canvas.remove(preview); preview = null; }
+          const endX = p.x, endY = p.y;
+          isRestoringHistoryRef.current = false;
+          // Ignore an accidental click / near-zero drag (no arrow worth drawing).
+          if (Math.hypot(endX - startX, endY - startY) < 5) {
+            setCurrentTool('select');
+            canvas.requestRenderAll();
+            return;
+          }
+          const arrow = buildArrow(startX, startY, endX, endY, drawColor, brushWidth);
+          stampMetadata(arrow, 'markup');
+          canvas.add(arrow);
+          canvas.setActiveObject(arrow);
+          setCurrentTool('select');
+          canvas.requestRenderAll();
+        });
+      }
+      else if (activeTool === 'callout') {
+        canvas.defaultCursor = 'crosshair';
+        let isDown = false;
+        let targetX = 0, targetY = 0;
+        canvas.on('mouse:down', (o: any) => {
+          if (o.target) return;
+          isDown = true;
+          const p = canvas.getScenePoint(o.e);
+          targetX = p.x; targetY = p.y;
+        });
+        canvas.on('mouse:up', (o: any) => {
+          if (!isDown) return;
+          isDown = false;
+          const p = canvas.getScenePoint(o.e);
+          // targetX/targetY = where the leader points; p = where the box is dropped.
+          openCalloutEditor(targetX, targetY, p.x, p.y, 'ข้อความ', true);
+        });
+      }
     }
   }, [currentTool, drawColor, brushWidth, renderedScale, isEditing, stampMetadata]);
 
@@ -1225,9 +1414,23 @@ export default function PDFPreviewModal({
   useEffect(() => {
     if (!isOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
       const c = currentCanvasRef.current;
       if (!c) return;
+
+      // Delete / Backspace removes the selected markup — but never while a text markup is being
+      // edited (there the key must delete a character) or while focus sits in a form field.
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if ((c.getActiveObject() as any)?.isEditing) return;
+        const el = document.activeElement as any;
+        const tag = (el?.tagName || '').toUpperCase();
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || el?.isContentEditable) return;
+        if (!c.getActiveObject()) return;
+        e.preventDefault();
+        handleDelete();
+        return;
+      }
+
+      if (!(e.ctrlKey || e.metaKey)) return;
       if ((c.getActiveObject() as any)?.isEditing) return;
       // Match on the PHYSICAL key position (e.code), not the produced character
       // (e.key) — otherwise a Thai (or any non-Latin) keyboard layout sends "ผ"
@@ -1433,7 +1636,9 @@ export default function PDFPreviewModal({
             <div className="flex bg-gray-100 p-1 rounded-lg gap-1">
               {[
                 { id: 'rect', icon: Square },
-                { id: 'circle', icon: Circle }
+                { id: 'circle', icon: Circle },
+                { id: 'arrow', icon: MoveUpRight },
+                { id: 'callout', icon: MessageSquareText }
               ].map(tool => (
                 <button
                   key={tool.id}
