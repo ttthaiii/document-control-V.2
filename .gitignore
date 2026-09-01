@@ -67,19 +67,28 @@ migrate/
 # Logs
 *.log
 
-# Harness/agent scaffolding (not part of the app)
+# Harness/agent FRAMEWORK — comes from the harness plugin, reinstalled per machine (not committed)
 /.agents/
-/.sessions/
 /AGENTS.md
 /CLAUDE.md
-/CODING_FAILURE_PATTERNS.md
-/INVARIANTS.md
-/REPO_MAP.md
-/VERSION
-/docs/
 /domain/
+/VERSION
 /error_index.md
-/knowledge/
+
+# Harness/agent WORK BRAIN — committed so another machine can continue the work seamlessly.
+# .sessions/: keep ONLY the durable handoff docs; ignore all the churny scratch
+#   (cycle_*.json, session_0NN.json, token/ledger files, gather/compact scratch, trace files).
+/.sessions/*
+!/.sessions/active_thread.md
+!/.sessions/session_handoff.md
+!/.sessions/mece_plan.md
+!/.sessions/reflections.md
+# knowledge/: keep the spec/reference docs (.md); ignore the auto-regenerated JSON indexes.
+/knowledge/*
+!/knowledge/*.md
+# NOTE: /docs/ (master_roadmap + design), /CODING_FAILURE_PATTERNS.md, /REPO_MAP.md,
+# /INVARIANTS.md are intentionally NO LONGER ignored — they are the deliberate work brain
+# and now travel with git push/pull.
 
 # One-off investigation/data-fix scratch (not app code)
 /rfa-034-merge-backup.json

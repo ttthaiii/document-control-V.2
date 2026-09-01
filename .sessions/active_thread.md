@@ -1,0 +1,20 @@
+task: T-018 P1 roles foundation — central role registry + requiresSiteReview flag
+phase: in_progress
+next: P1 FOLLOW-UP (found during emulator test 2026-09-01) — the initial CREATE path is NOT covered by P1. resolveSubmitRevisionStatus (revision resubmit, workflow.ts) now uses roleRequiresSiteReview, but a NEW RFA doc's FIRST status is set in a SEPARATE place: src/app/api/rfa/create/route.ts:204-220. That block still hardcodes `rfaType === 'RFA-SHOP' && isEngineer` (Case 1), so ME/SN creating RFA-GEN/RFA-MAT still route to Site (PENDING_REVIEW) on first create. FIX (agreed shape, ~3 lines): replace Case 1's `if (rfaType === 'RFA-SHOP' && isEngineer)` with `if (!roleRequiresSiteReview(userRole as Role))` + import roleRequiresSiteReview from '@/lib/config/roleRegistry' (or via workflow.ts re-export). Case 2 (Reviewer branch) stays as-is — mirrors workflow.ts exactly. Then re-test emulator: ME creates RFA-GEN → must go to CM, not Site. NOT a deploy issue. User has NOT given final go on the edit yet (was mid-discussion about single-source design — see below).
+  DESIGN NOTE for P2: user asked whether the create-path status logic should live in ONE place. Agreed 2-step answer: (1) NOW = the flag swap above → makes the POLICY single-source (roleRegistry) even though the if/else shell is still duplicated across create/route.ts + workflow.ts. (2) P2 = extract a shared resolveInitialStatus(ctx) in workflow.ts that BOTH create + resubmit call (fold the duplicated branch shell). Not done now because the create path has creation-only concerns (seedChainFromTemplate, action labels CREATE_AND_SUBMIT, externalChain) that need a deliberate P2 plan.
+  After follow-up verified → P2 (T-018 core: runtime follows the configured line template instead of hardcoded RFA_TRANSITIONS).
+
+## Cross-machine handoff (set up 2026-09-01)
+Purpose: continue this work on another computer seamlessly. The literal Claude chat transcript is machine-local and does NOT travel — but it is not needed: these .sessions handoff docs + docs/master_roadmap.md + docs/design/ + CODING_FAILURE_PATTERNS.md are the durable "save game" and now travel via git.
+- .gitignore was changed so the WORK BRAIN travels: .sessions/{active_thread,session_handoff,mece_plan,reflections}.md, docs/ (roadmap+design), knowledge/*.md, CODING_FAILURE_PATTERNS.md, REPO_MAP.md, INVARIANTS.md. Churny scratch (cycle_*, session_0NN.json, token/index JSON, gather/compact) stays ignored.
+- Machine 2 setup: (1) git pull  (2) install the harness plugin via /plugin (framework/hooks/gates come from the plugin, not git)  (3) recreate .env  (4) open Claude Code → it boots, reads this file + session_handoff.md → resumes here.
+- Discipline: work ONE machine at a time. Before switching: close the session (harness writes handoff) → commit → push. On arrival: git pull FIRST.
+- NOT carried by git (accept or mirror later): the memory dir (~/.claude/projects/D--ttsdoc-v2/memory/ — user prefs like "reply in Thai", "don't start my dev server") and the framework root files (CLAUDE.md/AGENTS.md, .agents/, domain/ — reinstalled per machine via the plugin).
+
+## P1 result (2026-09-01)
+- NEW src/lib/config/roleRegistry.ts = leaf: owns ROLES + Role + ROLE_REGISTRY (role→behaviour groups) + accessors rolesInGroup/isInGroup/roleRequiresSiteReview.
+- workflow.ts re-exports ROLES/Role and derives CREATOR/REVIEWER/APPROVER/EXTERNAL_APPROVER_ROLES via rolesInGroup() (backward-compat; ~40 consumer imports unchanged).
+- resolveSubmitRevisionStatus now routes on roleRequiresSiteReview(userRole) instead of hardcoded RFA-SHOP&&(ME|SN). Option B: ME/SN (requiresSiteReview:false) skip Site for ALL rfa types — an intentional change for MAT/GEN. BIM + other creators = true (parity). Reviewer branch unchanged.
+- SE/FM/PD = groups:[] (SE/FM are approved-doc observers; future observer group likely in P3).
+- Verify: `npx tsc --noEmit` clean; `npx tsx scripts/test-role-registry.ts` green.
+- Deviation from plan: test lives at scripts/test-role-registry.ts (tsx pattern) — no vitest/jest installed; ROLES moved to registry leaf (API-preserving re-export).
