@@ -67,9 +67,14 @@ service cloud.firestore {
     match /rfaDocuments/{docId} {
       allow read: if isUserActive() && (
         getUserData().get('role', '') != 'CM' ||
-        resource.data.status in [
+        resource.data.get('status', '') in [
           'PENDING_CM_APPROVAL', 'PENDING_FINAL_APPROVAL',
-          'APPROVED', 'APPROVED_WITH_COMMENTS', 'APPROVED_REVISION_REQUIRED', 'REJECTED'
+          'APPROVED', 'APPROVED_WITH_COMMENTS', 'APPROVED_REVISION_REQUIRED', 'REJECTED',
+          // External approval chain — CM owns these (configures + finalizes). MUST match
+          // RFA_CM_VISIBLE_STATUSES in workflow.ts AND the dashboard's where('status','in',...)
+          // query (rfa/page.tsx); the client asks for these 8, so the rule must allow all 8
+          // or Firestore rejects the whole CM list query.
+          'PENDING_EXTERNAL_APPROVAL', 'PENDING_CM_FINAL'
         ]
       );
       allow create, update: if isUserActive();
@@ -127,6 +132,15 @@ service cloud.firestore {
       allow write: if false; 
     }
     
+    // Collaborative PDF markup (T-025): 1 Fabric object = 1 doc, queried by filePath.
+    // Any active user can see markup on documents they access; only the author (authorUid)
+    // — or an admin — may create/edit/delete their own objects.
+    match /markup/{markupId} {
+      allow read: if isUserActive();
+      allow create: if isUserActive() && request.resource.data.authorUid == request.auth.uid;
+      allow update, delete: if isUserActive() && (isAdmin() || resource.data.authorUid == request.auth.uid);
+    }
+
     // ❌ บรรทัดนี้ควรอยู่ล่างสุดเสมอ
     match /{document=**} {
       allow read, write: if false;

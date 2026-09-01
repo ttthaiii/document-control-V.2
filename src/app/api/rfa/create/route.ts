@@ -2,7 +2,8 @@
 import { NextResponse } from "next/server";
 import { adminDb, adminBucket, adminAuth } from "@/lib/firebase/admin";
 import { FieldValue } from 'firebase-admin/firestore';
-import { ROLES, REVIEWER_ROLES, STATUSES, Role } from '@/lib/config/workflow';
+import { ROLES, REVIEWER_ROLES, STATUSES, Role, ExternalChain, seedChainFromTemplate } from '@/lib/config/workflow';
+import { getTemplateForDoc } from '@/lib/utils/lineTemplateResolver';
 import { getFileUrl } from '@/lib/utils/storage';
 import { logActivity, buildDescription } from '@/lib/utils/activityLogger';
 
@@ -179,6 +180,27 @@ export async function POST(req: Request) {
       });
     }
 
+    // T-018: resolve the site's cmSystemType once, up front — needed both to decide the
+    // initial status branches below and to seed the approval line for INTERNAL sites.
+    const siteDoc = await adminDb.collection('sites').doc(siteId).get();
+    const siteData = siteDoc.data();
+    const siteName = siteData?.name || '';
+    const cmSystemType: 'INTERNAL' | 'EXTERNAL' = siteData?.cmSystemType === 'EXTERNAL' ? 'EXTERNAL' : 'INTERNAL';
+
+    // T-018: seed the approval line at CREATION time for every INTERNAL document (not just the
+    // ones that skip straight to CM below) — getTemplateForDoc always resolves a real template
+    // for INTERNAL (built-in floor), so this is unconditional for INTERNAL, never for EXTERNAL.
+    let externalChain: ExternalChain | undefined;
+    if (cmSystemType === 'INTERNAL') {
+      const resolved = await getTemplateForDoc('RFA', { siteId, cmSystemType: 'INTERNAL' });
+      if (resolved.template) {
+        externalChain = seedChainFromTemplate(resolved.template, uid);
+      }
+    }
+    // "Reached CM" now means entering the seeded chain directly (mirrors workflow.ts's
+    // resolveReachedCmStatus) — a doc with no chain (EXTERNAL site) keeps the old status.
+    const reachedCmStatus = externalChain ? STATUSES.PENDING_EXTERNAL_APPROVAL : STATUSES.PENDING_CM_APPROVAL;
+
     let initialStatus = STATUSES.PENDING_REVIEW;
     let initialAction = "CREATE";
 
@@ -188,12 +210,12 @@ export async function POST(req: Request) {
 
     // Case 1: Engineer สร้าง RFA-SHOP, จะถูกส่งไป CM เลย
     if (rfaType === 'RFA-SHOP' && isEngineer) {
-      initialStatus = STATUSES.PENDING_CM_APPROVAL;
+      initialStatus = reachedCmStatus;
       initialAction = "CREATE_AND_SUBMIT_TO_CM";
     }
     // Case 2: Reviewer (Site Admin, OE, etc.) สร้างเอกสาร, จะถูกส่งไป CM เลย
     else if (isReviewer && ['RFA-MAT', 'RFA-GEN', 'RFA-SHOP'].includes(rfaType)) {
-      initialStatus = STATUSES.PENDING_CM_APPROVAL;
+      initialStatus = reachedCmStatus;
       initialAction = "CREATE_AND_SUBMIT";
     }
 
@@ -216,11 +238,10 @@ export async function POST(req: Request) {
       revisionNumber: parseInt(revisionNumber, 10) || 0,
       isLatest: true,
       isLatestApproved: false,
+      ...(externalChain ? { externalChain } : {}),
     });
 
     // กดเพิ่มใน RFA สำเร็จ => สร้าง Activity Log
-    const siteDoc = await adminDb.collection('sites').doc(siteId).get();
-    const siteName = siteDoc.data()?.name || '';
     logActivity({
       userId: uid,
       userEmail: userData?.email || '',

@@ -74,6 +74,8 @@ export async function GET(request: NextRequest) { // Changed to accept request o
                 stats.responsibleParty.SITE += 1;
                 break;
             case STATUSES.PENDING_CM_APPROVAL:
+            // T-018: primary "at CM/chain" status for new INTERNAL docs (chain starts at CM).
+            case STATUSES.PENDING_EXTERNAL_APPROVAL:
                 stats.responsibleParty.CM += 1;
                 break;
             case STATUSES.REVISION_REQUIRED:

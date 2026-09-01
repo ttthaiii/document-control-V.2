@@ -55,7 +55,8 @@ export interface RFAPermissions {
   // --- ✅ 2. สิทธิ์พิเศษแบบ Override รายบุคคล ---
   canRequestSupersede?: boolean // ขอแก้ไขเอกสารที่อนุมัติแล้ว
   // --- ✅ 3. External approval chain (INTERNAL cmSystemType only) ---
-  canForwardExternal?: boolean    // CM forwards to the Designer/Owner chain at round 1
+  // T-018: canForwardExternal removed — an INTERNAL document's chain is seeded at creation,
+  // there is no separate "forward" dispatch step left to gate.
   canActExternalStep?: boolean    // current role-holder acts on their external step
   canFinalizeExternal?: boolean   // CM's final decision after the chain returns
 }

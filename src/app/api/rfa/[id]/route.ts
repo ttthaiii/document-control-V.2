@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { adminDb, adminAuth, adminBucket } from '@/lib/firebase/admin';
 import { FieldValue } from 'firebase-admin/firestore';
 // 2. เพิ่ม STATUS_LABELS
-import { CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUSES, STATUS_LABELS, ROLES, Role, RFA_CM_VISIBLE_STATUSES, EXTERNAL_STEP_STATUSES, ExternalChain, configureExternalChain, canActOnExternalStep, applyExternalStep, advanceExternalChain, serializeExternalChainForViewer } from '@/lib/config/workflow';
+import { CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUSES, STATUS_LABELS, ROLES, Role, RFA_CM_VISIBLE_STATUSES, EXTERNAL_STEP_STATUSES, ExternalChain, canActOnExternalStep, applyExternalStep, advanceExternalChain, sendBackChain, applyLineOverride, OverrideStepInput, serializeExternalChainForViewer, RfaActionContext, findRfaTransition, checkRfaGuard, resolveRfaStatus } from '@/lib/config/workflow';
 import { RFAFile } from '@/types/rfa';
 import { sendPushNotification } from '@/lib/utils/push-notification';
 import { PERMISSION_KEYS } from '@/lib/config/permissions';
@@ -134,7 +134,6 @@ export async function GET(
         // External approval chain (INTERNAL sites only). CM forwards at round 1; the current
         // role-holder acts while the doc is at PENDING_EXTERNAL_APPROVAL; CM finalizes at
         // PENDING_CM_FINAL. Non-CM viewers get a redacted chain (location only) in the response.
-        const canForwardExternal = cmSystemType === 'INTERNAL' && isCM && status === STATUSES.PENDING_CM_APPROVAL;
         const canActExternalStep = cmSystemType === 'INTERNAL' && status === STATUSES.PENDING_EXTERNAL_APPROVAL
             && canActOnExternalStep(rfaData.externalChain, userRole as Role);
         const canFinalizeExternal = cmSystemType === 'INTERNAL' && isCM && status === STATUSES.PENDING_CM_FINAL;
@@ -151,13 +150,16 @@ export async function GET(
                 APPROVED_STATUSES.includes(rfaData.status) &&
                 rfaData.supersededStatus !== 'SUSPENDED' &&
                 (isCM || canApproveOverride || canRequestSupersedeOverride),
-            canForwardExternal,
             canActExternalStep,
             canFinalizeExternal,
         };
 
+        // T-018: the FORWARD_EXTERNAL dispatch + its read-only lineTemplate preview are gone —
+        // an INTERNAL document's externalChain is seeded at creation, so CM (and every other
+        // stage holder) already sees the real live chain from the start, not a preview of one.
+
         let isFromSupersedeRequest = rfaData.isFromSupersedeRequest || false;
-        
+
         // Backwards compatibility for old documents missing the flag
         if (typeof rfaData.isFromSupersedeRequest === 'undefined' && rfaData.previousRevisionId) {
             const hasSupersedeWorkflow = (rfaData.workflow || []).some(
@@ -228,81 +230,43 @@ export async function PUT(
         const documentTitle = docData?.title || 'ไม่ระบุชื่อเรื่อง';
         const userOverrides = siteData?.userOverrides?.[userId] || {};
 
-        let newStatus = docData.status;
-        let canPerformAction = false;
-
-        // 1. Reviewer Actions (ส่งไป CM / ขอแก้ไข)
+        // --- T-016 · declarative transition gate (Option 2) ---
+        // WHO-may-act + WHAT-status-results both come from RFA_TRANSITIONS (workflow.ts),
+        // replacing the old hand-branched guard block + status switch. Behavior is identical
+        // to the pre-table code — verified by the exhaustive (status, action, role, system)
+        // diff in the T-016 plan (Verify-2). The imperative side-effects (chain build,
+        // EXT_* apply, file moves) stay inline below, keyed off `action` as before.
         const isReviewer = REVIEWER_ROLES.includes(userRole as Role);
-        const canSendToCmOverride = checkPermission(userRole, userOverrides, 'RFA', PERMISSION_KEYS.RFA.CAN_SEND_TO_CM, []);
-        const canRequestRevisionOverride = checkPermission(userRole, userOverrides, 'RFA', PERMISSION_KEYS.RFA.CAN_REQUEST_REVISION, []);
-
-        if (docData.status === STATUSES.PENDING_REVIEW) {
-            if (action === 'SEND_TO_CM' && (isReviewer || canSendToCmOverride)) canPerformAction = true;
-            if (action === 'REQUEST_REVISION' && (isReviewer || canRequestRevisionOverride)) canPerformAction = true;
-        }
-
-        // 2. Creator Actions (แก้ไขงาน)
-        if (CREATOR_ROLES.includes(userRole as Role) && docData.createdBy === userId && docData.status === STATUSES.REVISION_REQUIRED) {
-            if (action === 'SUBMIT_REVISION') {
-                canPerformAction = true;
-            }
-        }
-
-        // 3. Approval Actions
         const isCM = userRole === ROLES.CM || userRole === ROLES.ADMIN;
-        const canApproveOverride = checkPermission(userRole, userOverrides, 'RFA', PERMISSION_KEYS.RFA.APPROVE, APPROVER_ROLES);
-        // Same fix as the GET handler: APPROVER_ROLES defaults CM to "can approve",
-        // which must NOT leak into round 2 / EXTERNAL's Reviewer-only gate below.
-        const canApproveAsReviewerOverride = checkPermission(userRole, userOverrides, 'RFA', PERMISSION_KEYS.RFA.APPROVE, REVIEWER_ROLES);
-        const approvalActions = ['APPROVE', 'APPROVE_WITH_COMMENTS', 'REJECT', 'APPROVE_REVISION_REQUIRED'];
-        // Round 1 (CM, or Reviewer-on-CM's-behalf for EXTERNAL) decides approve/reject/
-        // approve-with-comments. Round 2 (SITE at PENDING_FINAL_APPROVAL) only ever
-        // classifies an already-approved-with-comments doc — it never re-approves or
-        // rejects from scratch, so APPROVE/REJECT must not be valid there.
-        const round1Actions = ['APPROVE', 'APPROVE_WITH_COMMENTS', 'REJECT'];
-        const round2Actions = ['APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED'];
-
-        if (approvalActions.includes(action)) {
-            if (cmSystemType === 'INTERNAL') {
-                // INTERNAL: มี 2 รอบ
-                if (docData.status === STATUSES.PENDING_CM_APPROVAL && round1Actions.includes(action)) {
-                    // รอบ 1: ต้องเป็น CM
-                    if (isCM || canApproveOverride) canPerformAction = true;
-                } else if (docData.status === STATUSES.PENDING_FINAL_APPROVAL && round2Actions.includes(action)) {
-                    // รอบ 2: ต้องเป็น Reviewer (Site Admin/OE/PE) — CM ต้องไม่ผ่านรอบนี้
-                    if (isReviewer || canApproveAsReviewerOverride) canPerformAction = true;
-                }
-            } else {
-                // EXTERNAL: มี 1 รอบ
-                if (docData.status === STATUSES.PENDING_CM_APPROVAL && round1Actions.includes(action)) {
-                    // รอบเดียว: Reviewer อนุมัติได้เลย (ไม่มี CM ในระบบ EXTERNAL อยู่แล้ว)
-                    if (isReviewer || canApproveAsReviewerOverride) canPerformAction = true;
-                }
-            }
-        }
-
-        // 4. External approval chain (INTERNAL only). Runs alongside the 2-round path above:
-        //    CM forwards at round 1 -> current role-holder acts (Designer/Owner) -> when the
-        //    chain completes, CM finalizes. A reject never short-circuits the walk.
+        const isCreatorOwner = CREATOR_ROLES.includes(userRole as Role) && docData.createdBy === userId;
+        // Normalize exactly like the pre-table code: INTERNAL only when === 'INTERNAL',
+        // every other value falls to EXTERNAL (the old `else` branch).
+        const normalizedCmSystemType: 'INTERNAL' | 'EXTERNAL' = cmSystemType === 'INTERNAL' ? 'INTERNAL' : 'EXTERNAL';
         const extStepActions = ['EXT_APPROVE', 'EXT_APPROVE_WITH_COMMENTS', 'EXT_REJECT'];
-        if (cmSystemType === 'INTERNAL') {
-            if (action === 'FORWARD_EXTERNAL' && isCM && docData.status === STATUSES.PENDING_CM_APPROVAL) {
-                canPerformAction = true;
-            } else if (extStepActions.includes(action)
-                && docData.status === STATUSES.PENDING_EXTERNAL_APPROVAL
-                && canActOnExternalStep(docData.externalChain, userRole as Role)) {
-                // Role-based: anyone holding the current step's role in this project may act.
-                canPerformAction = true;
-            } else if (['APPROVE', 'APPROVE_WITH_COMMENTS', 'REJECT'].includes(action)
-                && isCM && docData.status === STATUSES.PENDING_CM_FINAL) {
-                // CM's final decision after weighing every approver's outcome.
-                canPerformAction = true;
-            }
-        }
 
-        if (!canPerformAction) {
+        const actionCtx: RfaActionContext = {
+            userRole: userRole as Role,
+            status: docData.status,
+            cmSystemType: normalizedCmSystemType,
+            rfaType: docData.rfaType,
+            isReviewer,
+            isCM,
+            isCreatorOwner,
+            chain: docData.externalChain,
+            canSendToCm: checkPermission(userRole, userOverrides, 'RFA', PERMISSION_KEYS.RFA.CAN_SEND_TO_CM, []),
+            canRequestRevision: checkPermission(userRole, userOverrides, 'RFA', PERMISSION_KEYS.RFA.CAN_REQUEST_REVISION, []),
+            // Two separate overrides so CM's APPROVER_ROLES default never leaks into the
+            // Reviewer-only round-2 / EXTERNAL gate (same fix as the GET handler).
+            canApprove: checkPermission(userRole, userOverrides, 'RFA', PERMISSION_KEYS.RFA.APPROVE, APPROVER_ROLES),
+            canApproveAsReviewer: checkPermission(userRole, userOverrides, 'RFA', PERMISSION_KEYS.RFA.APPROVE, REVIEWER_ROLES),
+        };
+
+        const transition = findRfaTransition(action, docData.status, normalizedCmSystemType);
+        if (!transition || !checkRfaGuard(transition, actionCtx)) {
             return NextResponse.json({ success: false, error: 'Permission denied or invalid status.' }, { status: 403 });
         }
+
+        const newStatus = resolveRfaStatus(transition, actionCtx);
 
         const actionsRequiringFiles = [
             'SEND_TO_CM',
@@ -333,72 +297,9 @@ export async function PUT(
             }
         }
 
-        // --- Logic การเปลี่ยนสถานะ ---
-        // External chain: FORWARD_EXTERNAL builds it here (no files needed); the EXT_* step
-        // outcome is written AFTER files move (below) so an approver's attachment is captured.
+        // T-018: FORWARD_EXTERNAL removed — an INTERNAL document's externalChain is already
+        // seeded at creation, so there is no separate dispatch step left to build one here.
         let updatedExternalChain: ExternalChain | undefined;
-        switch (action) {
-            case 'FORWARD_EXTERNAL': {
-                const chainConfig = body?.chainConfig;
-                if (!Array.isArray(chainConfig) || chainConfig.length === 0) {
-                    return NextResponse.json({ success: false, error: 'FORWARD_EXTERNAL requires chainConfig with at least one step.' }, { status: 400 });
-                }
-                try {
-                    updatedExternalChain = configureExternalChain(chainConfig, userId);
-                } catch (e: any) {
-                    return NextResponse.json({ success: false, error: e?.message || 'Invalid chain configuration.' }, { status: 400 });
-                }
-                newStatus = STATUSES.PENDING_EXTERNAL_APPROVAL;
-                break;
-            }
-            case 'EXT_APPROVE':
-            case 'EXT_APPROVE_WITH_COMMENTS':
-            case 'EXT_REJECT':
-                // Status resolved below after files move. `done` (chain complete) is
-                // file-independent, so decide the doc status here.
-                newStatus = advanceExternalChain(docData.externalChain).done
-                    ? STATUSES.PENDING_CM_FINAL
-                    : STATUSES.PENDING_EXTERNAL_APPROVAL;
-                break;
-            case 'SEND_TO_CM': newStatus = STATUSES.PENDING_CM_APPROVAL; break;
-            case 'REQUEST_REVISION': newStatus = STATUSES.REVISION_REQUIRED; break;
-            case 'SUBMIT_REVISION':
-                // ตรวจสอบว่าใครเป็นคนส่ง ถ้าเป็น Site (ไม่ใช่ BIM) ให้ข้าม Review ไปรอ CM อนุมัติเลย
-                const isMEorSN = userRole === 'ME' || userRole === 'SN';
-                if (docData.rfaType === 'RFA-SHOP' && isMEorSN) {
-                    newStatus = STATUSES.PENDING_CM_APPROVAL;
-                } else if (isReviewer && ['RFA-MAT', 'RFA-GEN', 'RFA-SHOP'].includes(docData.rfaType)) {
-                    newStatus = STATUSES.PENDING_CM_APPROVAL;
-                } else {
-                    newStatus = STATUSES.PENDING_REVIEW;
-                }
-                break;
-            case 'REJECT': newStatus = STATUSES.REJECTED; break;
-            case 'APPROVE_REVISION_REQUIRED': newStatus = STATUSES.APPROVED_REVISION_REQUIRED; break;
-
-            case 'APPROVE':
-                // Plain approve has nothing ambiguous for SITE to double-check, so it
-                // finalizes immediately at every round — same as REJECT above. Only
-                // APPROVE_WITH_COMMENTS (below) goes through the round-2 SITE loop,
-                // because SITE is the one who decides whether the comment needs a
-                // revision (APPROVE_REVISION_REQUIRED) or not (APPROVE_WITH_COMMENTS).
-                newStatus = STATUSES.APPROVED;
-                break;
-            case 'APPROVE_WITH_COMMENTS':
-                if (cmSystemType === 'INTERNAL'
-                    && (docData.status === STATUSES.PENDING_CM_APPROVAL || docData.status === STATUSES.PENDING_CM_FINAL)) {
-                    // Internal CM approves-with-comments -> SITE must decide revision-required
-                    // or not at round 2 (PENDING_FINAL_APPROVAL). Reachable from round-1
-                    // (PENDING_CM_APPROVAL) and from the external-chain finalize
-                    // (PENDING_CM_FINAL) — both keep today's SITE round-2 behavior.
-                    newStatus = STATUSES.PENDING_FINAL_APPROVAL;
-                } else {
-                    // Internal round 2 (SITE decided no revision needed) OR External
-                    // (single round) -> finalize as approved with comments.
-                    newStatus = STATUSES.APPROVED_WITH_COMMENTS;
-                }
-                break;
-        }
 
         // Default: REPLACE doc.files with the new upload (historical files stay in `workflow`).
         // Exception — SITE's round-2 finalize: when SITE attaches a file at the final step,
@@ -451,6 +352,52 @@ export async function PUT(
             updatedExternalChain = advanceExternalChain(acted).chain;
         }
 
+        // Send-back Rewind (T-016 A2): rewind the chain to `targetOrder`, preserving the
+        // rolled-back acks as audit + locking per-doc override. Status returns to
+        // PENDING_EXTERNAL_APPROVAL (resolved by the table); this only mutates the chain.
+        const sendBackActions = ['EXT_SEND_BACK', 'CM_SEND_BACK'];
+        if (sendBackActions.includes(action)) {
+            const targetOrder = body?.targetOrder;
+            if (typeof targetOrder !== 'number') {
+                return NextResponse.json({ success: false, error: 'Send-back requires a numeric targetOrder.' }, { status: 400 });
+            }
+            if (!comments || !comments.trim()) {
+                return NextResponse.json({ success: false, error: 'Send-back requires a reason (comments).' }, { status: 400 });
+            }
+            if (!docData.externalChain) {
+                return NextResponse.json({ success: false, error: 'No external chain to send back.' }, { status: 400 });
+            }
+            try {
+                updatedExternalChain = sendBackChain(
+                    docData.externalChain,
+                    targetOrder,
+                    { userId, role: userRole as Role },
+                    comments,
+                );
+            } catch (e: any) {
+                return NextResponse.json({ success: false, error: e?.message || 'Invalid send-back target.' }, { status: 400 });
+            }
+        }
+
+        // Per-document line override (T-016 A3): the current step-holder reshapes the FUTURE
+        // tail (add/remove not-yet-reached steps). No status change — the table keeps the doc
+        // in PENDING_EXTERNAL_APPROVAL. applyLineOverride freezes past+active, refuses removing
+        // a mandatory step, and throws when the chain is overrideLocked (a send-back happened).
+        if (action === 'EXT_OVERRIDE_LINE') {
+            const futureSteps = body?.overrideFutureSteps;
+            if (!Array.isArray(futureSteps)) {
+                return NextResponse.json({ success: false, error: 'Override requires overrideFutureSteps[].' }, { status: 400 });
+            }
+            if (!docData.externalChain) {
+                return NextResponse.json({ success: false, error: 'No external chain to override.' }, { status: 400 });
+            }
+            try {
+                updatedExternalChain = applyLineOverride(docData.externalChain, futureSteps as OverrideStepInput[]);
+            } catch (e: any) {
+                return NextResponse.json({ success: false, error: e?.message || 'Invalid line override.' }, { status: 400 });
+            }
+        }
+
         const workflowEntry = {
             action, status: newStatus, userId, userName: userData.email, role: userRole,
             timestamp: new Date().toISOString(), comments: comments || '',
@@ -460,13 +407,22 @@ export async function PUT(
             revisionNumber: docData.revisionNumber || 0,
         };
 
-        const isApprovalAction = ['APPROVE', 'APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED'].includes(action);
-        // Final = this action's resulting status is a terminal one, not the round-2
-        // SITE-review loop. Derived from newStatus (not docData.status) because APPROVE
-        // now finalizes immediately even at round 1 (INTERNAL) — the old formula
-        // checked docData.status === PENDING_FINAL_APPROVAL, which would have wrongly
-        // stayed false for that immediate-approve case.
-        const isFinalApproval = isApprovalAction && newStatus !== STATUSES.PENDING_FINAL_APPROVAL;
+        // T-018 fix: derive "did this action land on a terminal approved status" from
+        // newStatus directly, not from an `action` allowlist. The old allowlist
+        // (['APPROVE', 'APPROVE_WITH_COMMENTS', 'APPROVE_REVISION_REQUIRED']) never
+        // included EXT_APPROVE/EXT_APPROVE_WITH_COMMENTS — so a document that reached
+        // APPROVED by completing the external chain's LAST stage (any role, not just CM)
+        // never got isLatestApproved set and never triggered auto-supersede of the
+        // previous revision (ApprovedDocumentLibrary.tsx queries isLatestApproved==true,
+        // so those documents silently never appeared there). This was already reachable
+        // pre-T-018 via FORWARD_EXTERNAL + a full chain walk; T-018 makes it the primary
+        // path for every new INTERNAL document, so it needed fixing here.
+        const TERMINAL_APPROVED_STATUSES = [
+            STATUSES.APPROVED,
+            STATUSES.APPROVED_WITH_COMMENTS,
+            STATUSES.APPROVED_REVISION_REQUIRED,
+        ];
+        const isFinalApproval = TERMINAL_APPROVED_STATUSES.includes(newStatus);
 
         const updates: { [key: string]: any } = {
             status: newStatus,
@@ -483,7 +439,7 @@ export async function PUT(
         if (updatedExternalChain !== undefined) updates.externalChain = updatedExternalChain;
 
         // Set isLatestApproved if this action completes the workflow
-        if (isApprovalAction && isFinalApproval) {
+        if (isFinalApproval) {
             updates.isLatestApproved = true;
         }
 
@@ -551,7 +507,7 @@ export async function PUT(
 
         // --- Auto-Supersede: ถ้าอนุมัติ Rev.ใหม่ ให้ Mark Rev.เก่าเป็น SUPERSEDED อัตโนมัติ ---
         // (ตามหลัก Document Control: Rev.ใหม่อนุมัติ = Rev.เก่า Obsolete ทันที ไม่ต้องถาม User)
-        if (isApprovalAction && isFinalApproval && docData.previousRevisionId) {
+        if (isFinalApproval && docData.previousRevisionId) {
             try {
                 const prevRef = adminDb.collection('rfaDocuments').doc(docData.previousRevisionId);
                 const prevDoc = await prevRef.get();

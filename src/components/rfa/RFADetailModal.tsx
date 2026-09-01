@@ -7,7 +7,7 @@ import { X, Paperclip, Clock, User, Check, Send, AlertTriangle, FileText, Downlo
 import Spinner from '@/components/shared/Spinner';
 import LoadingOverlay from '@/components/shared/LoadingOverlay';
 import { useAuth } from '@/lib/auth/useAuth'
-import { Role, STATUS_LABELS, STATUSES, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUS_COLORS, ROLES, getRfaStatusLabelForRole, getRfaStatusLabelForDoc, normalizeRfaStatusForRole } from '@/lib/config/workflow'
+import { Role, STATUS_LABELS, STATUSES, CREATOR_ROLES, REVIEWER_ROLES, APPROVER_ROLES, STATUS_COLORS, ROLES, getRfaStatusLabelForRole, getRfaStatusLabelForDoc, normalizeRfaStatusForRole, OverrideStepInput, canActOnExternalStep } from '@/lib/config/workflow'
 import PDFPreviewModal from './PDFPreviewModal'
 import { useNotification } from '@/lib/context/NotificationContext';
 import { useLogActivity } from '@/lib/hooks/useLogActivity';
@@ -15,7 +15,8 @@ import { storage } from '@/lib/firebase/client';
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { getFileUrl, resolveViewUrl } from '@/lib/utils/storage';
 import { useScrollLock } from '@/hooks/useScrollLock';
-import ExternalChainConfig, { ExternalChainStepConfig } from '@/components/shared/ExternalChainConfig';
+import RFAApprovalTimeline from '@/components/rfa/RFAApprovalTimeline';
+import { canEditLineOverride } from '@/lib/config/permissions';
 
 // --- Helper Functions ---
 const formatDate = (dateString: string | undefined): string => {
@@ -262,12 +263,26 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
 
   // Pending Review States (Site Review)
   const [suspendPreviousRevision, setSuspendPreviousRevision] = useState(false);
-  // External chain config the CM picks before forwarding (INTERNAL round 1). Empty = nothing chosen yet.
-  const [chainConfig, setChainConfig] = useState<ExternalChainStepConfig[]>([]);
-  // CM round-1 (INTERNAL) can EITHER approve OR forward to the external chain. Instead of
-  // stacking both panels at once (confusing), show a mode selector first. 'select' = the
-  // two-choice screen; 'approve'/'forward' = that mode's controls (with a back button).
-  const [cmActionMode, setCmActionMode] = useState<'select' | 'approve' | 'forward'>('select');
+  // T-016/T-018: the CM never picks the external line — it's admin-configured and (T-018)
+  // seeded on the document at creation, so there's no chainConfig picker state here at all.
+  // Role-generic display label (T-016: any role may be a stage — no hardcoded Designer/Owner).
+  const roleLabel = (r: string): string =>
+    r === ROLES.CM ? 'CM'
+      : r === ROLES.DESIGNER ? 'ผู้ออกแบบ (Designer)'
+        : r === ROLES.OWNER ? 'เจ้าของโครงการ (Owner)'
+          : r;
+  // T-018: renderResolvedLinePreview removed along with FORWARD_EXTERNAL — an INTERNAL
+  // document's real (non-preview) chain is already seeded at creation.
+  // T-016: editable future steps for the configurable approval-line override.
+  const [lineFuture, setLineFuture] = useState<OverrideStepInput[]>([]);
+  useEffect(() => {
+    const chain = document?.externalChain;
+    if (!chain) { setLineFuture([]); return; }
+    const active = chain.currentStepIndex;
+    setLineFuture(chain.steps.slice(active + 1).map((s) => ({ role: s.role, mandatory: s.mandatory })));
+  }, [document?.externalChain]);
+  // T-018: cmActionMode (the old approve-vs-forward mode selector) removed along with the
+  // CM round-1 fork — CM now acts through the same chain-holder panel as everyone else.
 
   // Advanced CAD Warning Modal States
   const [cadWarningModalData, setCadWarningModalData] = useState<{
@@ -302,12 +317,6 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   isActionActiveRef.current = isSubmitting || isSupersedeSubmitting || isClosing;
 
   // 1. Fetch Full Document Data
-  // Reset the CM round-1 mode selector whenever a different document is opened, so a
-  // previously-chosen 'approve'/'forward' view never carries over to the next doc.
-  useEffect(() => {
-    setCmActionMode('select');
-  }, [initialDoc?.id]);
-
   useEffect(() => {
     if (isActionActiveRef.current) return; // ข้ามการโหลดหน้าใหม่ถ้ากำลังโชว์กล่องเขียว หรือกำลังโหลด Submit อยู่
 
@@ -524,10 +533,12 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const isSiteReviewing = !!(permissions.canSendToCm || permissions.canRequestRevision);
   const isApproving = permissions.canApprove;
   // CM round-1 (INTERNAL, PENDING_CM_APPROVAL) is the ONLY state where both approve and
-  // forward are offered together. In that case render the single mode-selector panel and
-  // suppress the two standalone panels so buttons never stack. Always a CM (canForwardExternal
-  // requires isCM) and CM is file-exempt at round 1, so the shared file field is OPTIONAL.
-  const isCmRound1Choice = isApproving && permissions.canForwardExternal;
+  // forward are offered together — removed in T-018 (see below); CM now always acts through
+  // the chain-holder panel.
+  // T-018: the "act on your external step" panel below is now reached by CM too (a new-model
+  // doc's chain starts at CM, not just Designer/Owner) — label it with whoever actually holds
+  // the current step instead of a hardcoded "external reviewer" so CM's own turn reads right.
+  const currentChainHolderRole = document.externalChain?.steps[document.externalChain.currentStepIndex]?.role;
 
   // Most recent CAD file anywhere in the workflow history — this is what round 2
   // (PENDING_FINAL_APPROVAL) will actually finalize with if Site doesn't attach a
@@ -782,7 +793,7 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   );
 
   // 7. Action Handlers
-  const executeAction = async (action: string, chainConfigArg?: ExternalChainStepConfig[]) => {
+  const executeAction = async (action: string, extra?: Record<string, any>) => {
     setIsSubmitting(true);
     setLoadingAction(action);
     let isSuccess = false;
@@ -795,20 +806,17 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
         documentNumber?: string;
         suspendPreviousRevision?: boolean;
         cadWarningAcknowledged?: boolean;
-        chainConfig?: ExternalChainStepConfig[];
+        [key: string]: any; // T-016 A3: extra fields (targetOrder for send-back, overrideFutureSteps for override)
       } = {
         action,
         comments: comment,
         newFiles: newFiles.filter(f => f.status === 'success').map(f => f.uploadedData),
         suspendPreviousRevision,
         cadWarningAcknowledged: cadWarningModalData.isOpen ? true : false,
+        ...(extra || {}),
       };
       if (needsDocNumber && newDocumentNumberInput.trim()) {
         payload.documentNumber = newDocumentNumberInput.trim();
-      }
-      // FORWARD_EXTERNAL carries the CM-picked Designer/Owner chain (route validates it).
-      if (chainConfigArg && chainConfigArg.length > 0) {
-        payload.chainConfig = chainConfigArg;
       }
       const response = await fetch(`/api/rfa/${document.id}`, {
         method: 'PUT',
@@ -1157,6 +1165,54 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                   </div>
                 )}
               </div>
+
+              {/* T-016: configurable approval-line — stepper + override save + send-back */}
+              {document.externalChain && (
+                <div className="mt-4 space-y-3 rounded-xl border border-border-subtle bg-surface-raised p-4">
+                  <RFAApprovalTimeline
+                    chain={document.externalChain}
+                    documentStatus={document.status}
+                    viewerRole={userRole}
+                    canEdit={canEditLineOverride(document.externalChain, userRole as Role)}
+                    future={lineFuture}
+                    onChangeFuture={setLineFuture}
+                  />
+                  {canEditLineOverride(document.externalChain, userRole as Role) && (
+                    <button
+                      type="button"
+                      disabled={isSubmitting}
+                      onClick={() => executeAction('EXT_OVERRIDE_LINE', { overrideFutureSteps: lineFuture })}
+                      className="inline-flex items-center gap-1 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+                    >
+                      บันทึกการปรับเส้นทาง
+                    </button>
+                  )}
+                  {canActOnExternalStep(document.externalChain, userRole as Role) && !document.externalChain.overrideLocked && (
+                    <div className="border-t border-border-subtle pt-3">
+                      <p className="mb-2 text-sm font-medium text-text-body">ส่งกลับเพื่อแก้ไข (โปรดระบุเหตุผลในช่องความคิดเห็นก่อน)</p>
+                      <div className="flex flex-wrap gap-2">
+                        {document.externalChain.steps
+                          .slice(0, Math.min(document.externalChain.currentStepIndex, document.externalChain.steps.length - 1) + 1)
+                          .map((s) => (
+                            <button
+                              key={`sb-${s.order}`}
+                              type="button"
+                              disabled={isSubmitting}
+                              onClick={() => {
+                                if (!comment.trim()) { showNotification('error', 'กรุณาระบุเหตุผล', 'กรุณาระบุเหตุผลในการส่งกลับ'); return; }
+                                const sbAction = document.status === STATUSES.PENDING_CM_FINAL && userRole === ROLES.CM ? 'CM_SEND_BACK' : 'EXT_SEND_BACK';
+                                executeAction(sbAction, { targetOrder: s.order });
+                              }}
+                              className="inline-flex items-center gap-1 rounded-lg border border-border-subtle px-3 py-1.5 text-xs text-text-body hover:border-amber-500 hover:text-amber-600 disabled:opacity-50"
+                            >
+                              ส่งกลับไปที่ {roleLabel(s.role)}
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {document.status === STATUSES.REJECTED && !document.isLatest && (
                 <div className="p-4 bg-red-50 text-red-800 rounded-lg flex items-center">
@@ -1522,137 +1578,13 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 </div>
               )}
 
-              {/* CM round-1 (INTERNAL) mode selector: one shared file field, then pick a
-                  path — approve directly OR forward to the external chain. Replaces the old
-                  two-panels-at-once layout so the CM never sees 5 buttons at the same time. */}
-              {isCmRound1Choice && (
-                <div className="space-y-6">
-                  <div className="pb-3 border-b border-slate-200">
-                    <h3 className="text-lg font-bold text-slate-800">ดำเนินการ</h3>
-                  </div>
-
-                  {/* Shared file attach — OPTIONAL here (CM round 1). Approve buttons still
-                      gate on a file via isActionDisabled; forward does not. */}
-                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                    <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
-                      <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">1</span>
-                      <h4 className="font-semibold text-slate-800 text-base">แนบไฟล์ประกอบการดำเนินการ</h4>
-                    </div>
-                    <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
-                      <input type="file" multiple onChange={(e) => handleFileUpload(e, 'action')} className="hidden" id="action-file-upload-cmchoice" />
-                      <label htmlFor="action-file-upload-cmchoice" className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center">
-                        <Upload size={16} className="mr-2" />
-                        คลิกเพื่อเลือกไฟล์
-                      </label>
-                    </div>
-                    {renderFileList(newFiles, 'action')}
-                  </div>
-
-                  {/* Step 2: choose a mode, or the chosen mode's controls */}
-                  {cmActionMode === 'select' && (
-                    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                      <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
-                        <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">2</span>
-                        <h4 className="font-semibold text-slate-800 text-base">เลือกการดำเนินการ</h4>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <button
-                          onClick={() => setCmActionMode('approve')}
-                          className="flex flex-col items-start gap-1 p-4 rounded-lg border-2 border-green-200 bg-green-50 hover:border-green-500 hover:bg-green-100 text-left transition-colors focus-visible:ring-2 focus-visible:ring-green-500 outline-none"
-                        >
-                          <span className="flex items-center font-bold text-green-800"><ThumbsUp size={16} className="mr-2" /> ดำเนินการอนุมัติ</span>
-                          <span className="text-xs text-green-700">อนุมัติ / อนุมัติตามคอมเมนต์ / ไม่อนุมัติ เอกสารนี้เอง</span>
-                        </button>
-                        <button
-                          onClick={() => setCmActionMode('forward')}
-                          className="flex flex-col items-start gap-1 p-4 rounded-lg border-2 border-indigo-200 bg-indigo-50 hover:border-indigo-500 hover:bg-indigo-100 text-left transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 outline-none"
-                        >
-                          <span className="flex items-center font-bold text-indigo-800"><Send size={16} className="mr-2" /> ส่งต่อผู้พิจารณาภายนอก</span>
-                          <span className="text-xs text-indigo-700">ส่งให้ผู้ออกแบบ / เจ้าของโครงการ พิจารณาก่อนกลับมาที่ CM</span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {cmActionMode === 'approve' && (
-                    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                        <div className="flex items-center gap-3">
-                          <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">2</span>
-                          <h4 className="font-semibold text-slate-800 text-base">อนุมัติเอกสาร</h4>
-                        </div>
-                        <button onClick={() => setCmActionMode('select')} className="flex items-center text-sm text-slate-500 hover:text-slate-800 transition-colors">
-                          <ArrowLeft size={16} className="mr-1" /> ย้อนกลับ
-                        </button>
-                      </div>
-                      <label className="text-sm font-medium text-gray-700 mb-1.5 block">แสดงความคิดเห็น (Optional)</label>
-                      <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="เพิ่มความคิดเห็น/เหตุผลประกอบ..." className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white text-gray-900 focus:ring-blue-500 focus:border-blue-500 transition-colors" rows={3} />
-                      <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200">
-                        <button
-                          onClick={() => handleAction('REJECT')}
-                          disabled={isActionDisabled}
-                          className="flex items-center px-4 py-2 text-sm font-medium text-red-600 bg-white border-2 border-red-300 rounded-lg hover:bg-red-50 hover:border-red-500 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-red-500 outline-none transition-colors"
-                        >
-                          {loadingAction === 'REJECT' ? <Spinner className="w-4 h-4 mr-2" /> : <ThumbsDown size={16} className="mr-2" />} ไม่อนุมัติ
-                        </button>
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            onClick={() => handleAction('APPROVE_WITH_COMMENTS')}
-                            disabled={isActionDisabled}
-                            className="flex items-center px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-teal-500 outline-none transition-colors"
-                          >
-                            {loadingAction === 'APPROVE_WITH_COMMENTS' ? <Spinner className="w-4 h-4 mr-2" /> : <MessageSquare size={16} className="mr-2" />} อนุมัติตามคอมเมนต์
-                          </button>
-                          <button
-                            onClick={() => handleAction('APPROVE')}
-                            disabled={isActionDisabled}
-                            className="flex items-center px-5 py-2 text-sm font-bold text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-green-500 outline-none transition-colors shadow-sm"
-                          >
-                            {loadingAction === 'APPROVE' ? <Spinner className="w-4 h-4 mr-2" /> : <ThumbsUp size={16} className="mr-2" />} อนุมัติ
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {cmActionMode === 'forward' && (
-                    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                        <div className="flex items-center gap-3">
-                          <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">2</span>
-                          <h4 className="font-semibold text-slate-800 text-base">ส่งต่อผู้พิจารณาภายนอก</h4>
-                        </div>
-                        <button onClick={() => setCmActionMode('select')} className="flex items-center text-sm text-slate-500 hover:text-slate-800 transition-colors">
-                          <ArrowLeft size={16} className="mr-1" /> ย้อนกลับ
-                        </button>
-                      </div>
-                      <div className="flex items-start gap-3 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
-                        <Send size={18} className="text-indigo-600 mt-0.5 flex-shrink-0" />
-                        <p className="text-sm text-indigo-800">
-                          เลือกผู้พิจารณาภายนอก (ผู้ออกแบบ / เจ้าของโครงการ) และลำดับการพิจารณา
-                          เมื่อส่งแล้วเอกสารจะไล่ผ่านทุกลำดับก่อนกลับมาให้ CM สรุปผลขั้นสุดท้าย (แนบไฟล์ได้ ไม่บังคับ)
-                        </p>
-                      </div>
-                      <ExternalChainConfig
-                        value={chainConfig}
-                        onChange={setChainConfig}
-                        disabled={isSubmitting}
-                      />
-                      <div className="flex items-center justify-end pt-2 border-t border-slate-200">
-                        <button
-                          onClick={() => executeAction('FORWARD_EXTERNAL', chainConfig)}
-                          disabled={isSubmitting || chainConfig.length === 0}
-                          className="flex items-center px-5 py-2 text-sm font-bold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-indigo-500 outline-none transition-colors shadow-sm"
-                        >
-                          {loadingAction === 'FORWARD_EXTERNAL' ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />} ส่งออกภายนอก
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {isApproving && !isCmRound1Choice && (
+              {/* T-018: the old CM round-1 mode selector (approve directly OR forward to the
+                  external chain, via isCmRound1Choice/cmActionMode) is removed — an INTERNAL
+                  document's chain is seeded at creation, so CM always acts through the
+                  chain-holder panel below (permissions.canActExternalStep), same as every
+                  other stage. This block is what remains: round-2 SITE classification and
+                  EXTERNAL system's single-round Reviewer approve (both untouched by T-018). */}
+              {isApproving && (
                 <div className="space-y-6">
                   <div className="pb-3 border-b border-slate-200">
                     <h3 className="text-lg font-bold text-slate-800">
@@ -1776,46 +1708,18 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 </div>
               )}
 
-              {/* CM forwards the document to the external Designer/Owner chain (INTERNAL,
-                  round 1). No file needed here — this only configures who reviews and in
-                  what order; the verdict files come at each external step. */}
-              {permissions.canForwardExternal && !isCmRound1Choice && (
-                <div className="space-y-6">
-                  <div className="pb-3 border-b border-slate-200">
-                    <h3 className="text-lg font-bold text-slate-800">ส่งออกให้ผู้พิจารณาภายนอก</h3>
-                  </div>
-                  <div className="flex items-start gap-3 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
-                    <Send size={18} className="text-indigo-600 mt-0.5 flex-shrink-0" />
-                    <p className="text-sm text-indigo-800">
-                      เลือกผู้พิจารณาภายนอก (ผู้ออกแบบ / เจ้าของโครงการ) และลำดับการพิจารณา
-                      เมื่อส่งแล้วเอกสารจะไล่ผ่านทุกลำดับก่อนกลับมาให้ CM สรุปผลขั้นสุดท้าย
-                    </p>
-                  </div>
-                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                    <ExternalChainConfig
-                      value={chainConfig}
-                      onChange={setChainConfig}
-                      disabled={isSubmitting}
-                    />
-                    <div className="flex items-center justify-end pt-2 border-t border-slate-200">
-                      <button
-                        onClick={() => executeAction('FORWARD_EXTERNAL', chainConfig)}
-                        disabled={isSubmitting || chainConfig.length === 0}
-                        className="flex items-center px-5 py-2 text-sm font-bold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-indigo-500 outline-none transition-colors shadow-sm"
-                      >
-                        {loadingAction === 'FORWARD_EXTERNAL' ? <Spinner className="w-4 h-4 mr-2" /> : <Send size={16} className="mr-2" />} ส่งออกภายนอก
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
+              {/* T-018: the FORWARD_EXTERNAL dispatch panel is removed — an INTERNAL document's
+                  chain is seeded at creation, so there is no separate "forward" step left. */}
 
-              {/* External approver (Designer/Owner) verdict — INTERNAL chain step.
-                  File required for every verdict (client block + server enforce). */}
+              {/* Whoever holds the current chain step acts here — Designer/Owner as before, and
+                  (T-018) CM too, when CM is stage 0 of a new-model doc's line. File required
+                  for every verdict (client block + server enforce). */}
               {permissions.canActExternalStep && (
                 <div className="space-y-6">
                   <div className="pb-3 border-b border-slate-200">
-                    <h3 className="text-lg font-bold text-slate-800">ดำเนินการ (ผู้พิจารณาภายนอก)</h3>
+                    <h3 className="text-lg font-bold text-slate-800">
+                      ดำเนินการ ({currentChainHolderRole ? roleLabel(currentChainHolderRole) : 'ผู้พิจารณาภายนอก'})
+                    </h3>
                   </div>
                   <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
                     <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
@@ -1868,8 +1772,9 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                 </div>
               )}
 
-              {/* CM final decision — external chain has returned (PENDING_CM_FINAL).
-                  File required (CM is NOT exempt here, unlike round 1). */}
+              {/* CM final decision — LEGACY (T-016): the new line self-terminates at APPROVED,
+                  so no document reaches PENDING_CM_FINAL and canFinalizeExternal is never true.
+                  Kept (gated-off, unreachable) per the "retire but keep the enum defined" decision. */}
               {permissions.canFinalizeExternal && (
                 <div className="space-y-6">
                   <div className="pb-3 border-b border-slate-200">

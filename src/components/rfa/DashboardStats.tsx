@@ -58,6 +58,8 @@ const STATUS_CHART_COLORS: { [key: string]: string } = {
   // กลุ่มสีเทาอมฟ้า/หิน (รออนุมัติ - สงบ รอคอย)
   [STATUSES.PENDING_REVIEW]: MUTED_PALETTE.slateGrey,           // เทาอมฟ้าตุ่นๆ
   [STATUSES.PENDING_CM_APPROVAL]: MUTED_PALETTE.deepSlate,      // เทาเข้มขึ้นมาหน่อย
+  // T-018: primary "at CM/chain" status for new INTERNAL docs — same tone as PENDING_CM_APPROVAL
+  [STATUSES.PENDING_EXTERNAL_APPROVAL]: MUTED_PALETTE.deepSlate,
   [STATUSES.PENDING_FINAL_APPROVAL]: MUTED_PALETTE.blueGrey,    // เทากลางๆ
 
   // กลุ่มสีเขียวธรรมชาติ (ผ่าน - สำเร็จ)

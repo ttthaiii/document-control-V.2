@@ -184,7 +184,10 @@ function RFAContent() {
     // Helper mapping for syncing Status -> Responsible Party
     const getPartyForStatus = (status: string) => {
         if ([STATUSES.PENDING_REVIEW, STATUSES.PENDING_FINAL_APPROVAL].includes(status)) return 'SITE';
-        if (status === STATUSES.PENDING_CM_APPROVAL) return 'CM';
+        // T-018: PENDING_EXTERNAL_APPROVAL is now the primary "at CM" status for new INTERNAL
+        // documents (the chain starts at CM) — PENDING_CM_APPROVAL only remains for EXTERNAL
+        // cmSystemType sites. Both fold into the same 'CM' bucket here.
+        if (status === STATUSES.PENDING_CM_APPROVAL || status === STATUSES.PENDING_EXTERNAL_APPROVAL) return 'CM';
         if ([STATUSES.REVISION_REQUIRED, STATUSES.APPROVED_REVISION_REQUIRED].includes(status)) return 'BIM';
         if ([STATUSES.APPROVED, STATUSES.APPROVED_WITH_COMMENTS].includes(status)) return 'APPROVED';
         if (status === STATUSES.REJECTED) return 'REJECTED';
@@ -214,7 +217,12 @@ function RFAContent() {
                 if (value === 'ALL') {
                     nextFilters.status = 'ALL';
                 } else if (value === 'CM') {
-                    nextFilters.status = STATUSES.PENDING_CM_APPROVAL;
+                    // T-018: the CM bucket now spans two statuses (PENDING_CM_APPROVAL for
+                    // EXTERNAL sites, PENDING_EXTERNAL_APPROVAL for INTERNAL) — a single exact
+                    // `status` value can't represent both, so leave it 'ALL' and let the
+                    // responsibleParty filter below (which supports a status list) do the
+                    // actual narrowing instead of double-filtering against one exact value.
+                    nextFilters.status = 'ALL';
                 } else if (value === 'REJECTED') {
                     nextFilters.status = STATUSES.REJECTED;
                 } else if (value === 'SITE' && isExternalCM) {
@@ -326,7 +334,7 @@ function RFAContent() {
 
         switch (filters.responsibleParty) {
             case 'SITE': return isExternalCM ? [STATUSES.PENDING_REVIEW] : [STATUSES.PENDING_REVIEW, STATUSES.PENDING_FINAL_APPROVAL];
-            case 'CM': return [STATUSES.PENDING_CM_APPROVAL];
+            case 'CM': return [STATUSES.PENDING_CM_APPROVAL, STATUSES.PENDING_EXTERNAL_APPROVAL];
             case 'BIM': return [STATUSES.REVISION_REQUIRED, STATUSES.APPROVED_REVISION_REQUIRED];
             case 'APPROVED': return [STATUSES.APPROVED, STATUSES.APPROVED_WITH_COMMENTS];
             case 'REJECTED': return [STATUSES.REJECTED];
@@ -341,6 +349,7 @@ function RFAContent() {
             case STATUSES.PENDING_REVIEW:
                 return 'bg-[#78909C]/20 text-[#546E7A]'; // Slate
             case STATUSES.PENDING_CM_APPROVAL:
+            case STATUSES.PENDING_EXTERNAL_APPROVAL:
                 return 'bg-[#546E7A]/20 text-[#37474F]'; // Deep Slate
             case STATUSES.PENDING_FINAL_APPROVAL:
                 return 'bg-[#607D8B]/20 text-[#455A64]'; // Blue Grey
@@ -463,7 +472,7 @@ function RFAContent() {
             docsToShow = docsToShow.filter(doc => {
                 switch (rp) {
                     case 'SITE': return [STATUSES.PENDING_REVIEW, STATUSES.PENDING_FINAL_APPROVAL].includes(doc.status);
-                    case 'CM': return doc.status === STATUSES.PENDING_CM_APPROVAL;
+                    case 'CM': return doc.status === STATUSES.PENDING_CM_APPROVAL || doc.status === STATUSES.PENDING_EXTERNAL_APPROVAL;
                     case 'BIM': return [STATUSES.REVISION_REQUIRED, STATUSES.APPROVED_REVISION_REQUIRED].includes(doc.status);
                     case 'APPROVED': return [STATUSES.APPROVED, STATUSES.APPROVED_WITH_COMMENTS].includes(doc.status);
                     case 'REJECTED': return doc.status === STATUSES.REJECTED;

@@ -334,6 +334,13 @@ export const RFI_ACTIONS = {
   /** The current external chain holder (Designer or Owner) records their outcome. The
    *  chain then advances; a reject never short-circuits. INTERNAL sites only. */
   EXT_STEP_ACT: 'EXT_STEP_ACT',
+  /** The current external chain holder rewinds the line to an earlier stage (send-back /
+   *  Rewind · T-016 A2). Preserves audit + locks per-doc override. INTERNAL sites only. */
+  EXT_SEND_BACK: 'EXT_SEND_BACK',
+  /** The current external chain holder reshapes the FUTURE tail of THIS document's line
+   *  (add/remove not-yet-reached steps · T-016 A3). Past + active steps stay frozen;
+   *  no status change. INTERNAL sites only. */
+  EXT_OVERRIDE_LINE: 'EXT_OVERRIDE_LINE',
   /** BIM accepts the answer and closes the question. */
   ACKNOWLEDGE: 'ACKNOWLEDGE',
   /** BIM accepts but needs more, sending it back to SITE. */
@@ -350,6 +357,8 @@ export const RFI_ACTION_LABELS: Record<RFIAction, string> = {
   [RFI_ACTIONS.CM_REPLY]: 'บันทึกคำตอบจาก CM',
   [RFI_ACTIONS.FORWARD_EXTERNAL]: 'ส่งต่อให้ผู้พิจารณาภายนอก',
   [RFI_ACTIONS.EXT_STEP_ACT]: 'ตอบกลับ RFI',
+  [RFI_ACTIONS.EXT_SEND_BACK]: 'ส่งกลับให้แก้ไข',
+  [RFI_ACTIONS.EXT_OVERRIDE_LINE]: 'ปรับเส้นทางอนุมัติ',
   [RFI_ACTIONS.ACKNOWLEDGE]: 'รับทราบ / ปิดงาน',
   [RFI_ACTIONS.REQUEST_MORE_INFO]: 'ขอข้อมูลเพิ่ม',
 };
@@ -468,6 +477,29 @@ export const RFI_TRANSITIONS: Record<Exclude<RFIAction, 'CREATE'>, RFITransition
     setAwaitingCm: null,
     actor: RFI_PARTIES.DESIGNER,
     requiresFiles: true,
+    requiresCmNumber: false,
+  },
+  [RFI_ACTIONS.EXT_SEND_BACK]: {
+    // Send-back Rewind (T-016 A2). Like EXT_STEP_ACT, `actor` is nominal — the real gate is
+    // canActOnExternalStep in evaluateAction, so whichever role currently holds the step may
+    // rewind. Leaves status + CM track untouched; only the externalChain moves (PUT apply).
+    // A reason is required (enforced in the route), but no reply document — requiresFiles=false.
+    from: null,
+    toStatus: null,
+    setAwaitingCm: null,
+    actor: RFI_PARTIES.DESIGNER,
+    requiresFiles: false,
+    requiresCmNumber: false,
+  },
+  [RFI_ACTIONS.EXT_OVERRIDE_LINE]: {
+    // Per-doc line override (T-016 A3). `actor` nominal — real gate is canActOnExternalStep in
+    // evaluateAction (current step holder). No status/CM change, no files, no CM number; only
+    // the externalChain's future tail is reshaped (PUT apply via applyLineOverride).
+    from: null,
+    toStatus: null,
+    setAwaitingCm: null,
+    actor: RFI_PARTIES.DESIGNER,
+    requiresFiles: false,
     requiresCmNumber: false,
   },
   [RFI_ACTIONS.ACKNOWLEDGE]: {

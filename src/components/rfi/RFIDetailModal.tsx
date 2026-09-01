@@ -26,7 +26,9 @@ import PDFPreviewModal from '@/components/rfa/PDFPreviewModal'
 import ExternalChainConfig, { ExternalChainStepConfig } from '@/components/shared/ExternalChainConfig'
 import { RFAFile } from '@/types/rfa'
 import { useAuth } from '@/lib/auth/useAuth'
-import { ROLES } from '@/lib/config/workflow'
+import { ROLES, Role, OverrideStepInput, canActOnExternalStep } from '@/lib/config/workflow'
+import LineOverrideStepper from '@/components/shared/LineOverrideStepper'
+import { canEditLineOverride } from '@/lib/config/permissions'
 import { useNotification } from '@/lib/context/NotificationContext'
 import { useLogActivity } from '@/lib/hooks/useLogActivity'
 import { useScrollLock } from '@/hooks/useScrollLock'
@@ -211,12 +213,23 @@ type FilesByTarget = Record<RFIUploadTarget, UploadedFile[]>;
 const EMPTY_FILES: FilesByTarget = { action: [], bim: [], cm: [] };
 
 // --- Main component ---
+// T-016 (A2): GET response carries an extra `lineTemplate` for the CM forward-external pre-fill.
+// Optional, so a plain RFIDocument stays assignable (no impact on existing setDocument calls).
+interface FullRFIDocument extends RFIDocument {
+  lineTemplate?: {
+    source: 'project' | 'default' | 'none';
+    steps: { role: Role; order: number }[];
+    templateId: string | null;
+    version: number | null;
+  } | null;
+}
+
 export default function RFIDetailModal({ document: initialDoc, onClose, showOverlay = true }: RFIDetailModalProps) {
   const { user, firebaseUser } = useAuth();
   const { showNotification } = useNotification();
   const { logActivity } = useLogActivity();
 
-  const [document, setDocument] = useState<RFIDocument | null>(initialDoc);
+  const [document, setDocument] = useState<FullRFIDocument | null>(initialDoc);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
@@ -228,6 +241,21 @@ export default function RFIDetailModal({ document: initialDoc, onClose, showOver
   const [docNumberInput, setDocNumberInput] = useState('');
   // External chain the CM picks before forwarding (INTERNAL round 1). Empty = nothing chosen yet.
   const [chainConfig, setChainConfig] = useState<ExternalChainStepConfig[]>([]);
+  // T-016 (A2): pre-fill the editor from the server-resolved line template — only while empty,
+  // so the CM's own edits are never clobbered. Starting point, not a lock. none/no steps → empty.
+  useEffect(() => {
+    const steps = document?.lineTemplate?.steps;
+    if (!steps || steps.length === 0) return;
+    setChainConfig((prev) => (prev.length === 0 ? steps.map((s) => ({ role: s.role, order: s.order })) : prev));
+  }, [document?.lineTemplate]);
+  // T-016: editable future steps for the configurable approval-line override.
+  const [lineFuture, setLineFuture] = useState<OverrideStepInput[]>([]);
+  useEffect(() => {
+    const chain = document?.externalChain;
+    if (!chain) { setLineFuture([]); return; }
+    const active = chain.currentStepIndex;
+    setLineFuture(chain.steps.slice(active + 1).map((s) => ({ role: s.role, mandatory: s.mandatory })));
+  }, [document?.externalChain]);
   // Progressive disclosure for the CM round-1 modal: 'select' shows the two mode buttons,
   // 'reply' shows the record-CM-reply controls, 'forward' shows the external-chain picker.
   const [cmActionMode, setCmActionMode] = useState<'select' | 'reply' | 'forward'>('select');
@@ -506,7 +534,7 @@ export default function RFIDetailModal({ document: initialDoc, onClose, showOver
         .map(f => ({ ...(f.uploadedData as Omit<RFIFile, 'audience'>), audience: RFI_TARGET_TO_AUDIENCE[target] }))
     );
 
-  const executeAction = async (action: string, files: RFIFile[], extra?: { documentNumber?: string; chainConfig?: ExternalChainStepConfig[] }) => {
+  const executeAction = async (action: string, files: RFIFile[], extra?: { documentNumber?: string; chainConfig?: ExternalChainStepConfig[]; [key: string]: any }) => {
     setIsSubmitting(true);
     setLoadingAction(action);
     let ok = false;
@@ -642,6 +670,51 @@ export default function RFIDetailModal({ document: initialDoc, onClose, showOver
                   </div>
                 )}
               </div>
+
+              {/* T-016: configurable approval-line — stepper + override save + send-back */}
+              {document.externalChain && (
+                <div className="mt-4 space-y-3 rounded-xl border border-border-subtle bg-surface-raised p-4">
+                  <LineOverrideStepper
+                    chain={document.externalChain}
+                    canEdit={canEditLineOverride(document.externalChain, user?.role as Role)}
+                    future={lineFuture}
+                    onChangeFuture={setLineFuture}
+                  />
+                  {canEditLineOverride(document.externalChain, user?.role as Role) && (
+                    <button
+                      type="button"
+                      disabled={isSubmitting}
+                      onClick={() => executeAction(RFI_ACTIONS.EXT_OVERRIDE_LINE, [], { overrideFutureSteps: lineFuture })}
+                      className="inline-flex items-center gap-1 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+                    >
+                      บันทึกการปรับเส้นทาง
+                    </button>
+                  )}
+                  {canActOnExternalStep(document.externalChain, user?.role as Role) && !document.externalChain.overrideLocked && (
+                    <div className="border-t border-border-subtle pt-3">
+                      <p className="mb-2 text-sm font-medium text-text-body">ส่งกลับเพื่อแก้ไข (โปรดระบุเหตุผลในช่องความคิดเห็นก่อน)</p>
+                      <div className="flex flex-wrap gap-2">
+                        {document.externalChain.steps
+                          .slice(0, Math.min(document.externalChain.currentStepIndex, document.externalChain.steps.length - 1) + 1)
+                          .map((s) => (
+                            <button
+                              key={`sb-${s.order}`}
+                              type="button"
+                              disabled={isSubmitting}
+                              onClick={() => {
+                                if (!comment.trim()) { showNotification('error', 'กรุณาระบุเหตุผล', 'กรุณาระบุเหตุผลในการส่งกลับ'); return; }
+                                executeAction(RFI_ACTIONS.EXT_SEND_BACK, [], { targetOrder: s.order });
+                              }}
+                              className="inline-flex items-center gap-1 rounded-lg border border-border-subtle px-3 py-1.5 text-xs text-text-body hover:border-amber-500 hover:text-amber-600 disabled:opacity-50"
+                            >
+                              ส่งกลับไปที่ {s.role === ROLES.DESIGNER ? 'ผู้ออกแบบ (Designer)' : s.role === ROLES.OWNER ? 'เจ้าของโครงการ (Owner)' : s.role}
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Current step's files only — older steps' files stay in the "ประวัติ" (history) modal */}
               <div>

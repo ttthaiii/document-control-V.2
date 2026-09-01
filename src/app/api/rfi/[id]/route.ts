@@ -27,8 +27,14 @@ import {
   configureExternalChain,
   applyExternalStep,
   advanceExternalChain,
+  sendBackChain,
+  applyLineOverride,
+  OverrideStepInput,
   serializeExternalChainForViewer,
+  seedChainFromTemplate,
+  externalChainConfigFromTemplate,
 } from '@/lib/config/workflow';
+import { getTemplateForDoc } from '@/lib/utils/lineTemplateResolver';
 import {
   RFI_ACTIONS,
   RFI_ACTION_LABELS,
@@ -63,6 +69,11 @@ const PERMISSION_KEY: Record<WorkflowAction, keyof RFIPermissions> = {
   [RFI_ACTIONS.CM_REPLY]: 'canRecordCmReply',
   [RFI_ACTIONS.FORWARD_EXTERNAL]: 'canForwardExternal',
   [RFI_ACTIONS.EXT_STEP_ACT]: 'canActExternalStep',
+  // Send-back shares EXT_STEP_ACT's gate (current holder), so it reflects the same GET flag —
+  // both become available together for whoever holds the step. A3 refines the button display.
+  [RFI_ACTIONS.EXT_SEND_BACK]: 'canActExternalStep',
+  // Line override shares the same gate (current step holder); A3 refines the button display.
+  [RFI_ACTIONS.EXT_OVERRIDE_LINE]: 'canActExternalStep',
   [RFI_ACTIONS.ACKNOWLEDGE]: 'canAcknowledge',
   [RFI_ACTIONS.REQUEST_MORE_INFO]: 'canRequestMoreInfo',
 };
@@ -79,6 +90,8 @@ const LOG_ACTION: Record<WorkflowAction, LogAction> = {
   [RFI_ACTIONS.CM_REPLY]: 'SUBMIT_DOCUMENT',
   [RFI_ACTIONS.FORWARD_EXTERNAL]: 'SUBMIT_DOCUMENT',
   [RFI_ACTIONS.EXT_STEP_ACT]: 'SUBMIT_DOCUMENT',
+  [RFI_ACTIONS.EXT_SEND_BACK]: 'REQUEST_REVISION',
+  [RFI_ACTIONS.EXT_OVERRIDE_LINE]: 'SUBMIT_DOCUMENT',
   [RFI_ACTIONS.ACKNOWLEDGE]: 'APPROVE_DOCUMENT',
   [RFI_ACTIONS.REQUEST_MORE_INFO]: 'REQUEST_REVISION',
 };
@@ -152,6 +165,24 @@ function evaluateAction(action: WorkflowAction, ctx: ActionContext): Verdict {
     return { allowed: true, reason: '' };
   }
   if (action === RFI_ACTIONS.EXT_STEP_ACT) {
+    if (ctx.cmSystemType !== 'INTERNAL') return { allowed: false, reason: 'ไม่รองรับสายอนุมัติภายนอกในโครงการนี้' };
+    if (!canActOnExternalStep(ctx.externalChain, ctx.role)) {
+      return { allowed: false, reason: 'ไม่ใช่ผู้ที่ต้องดำเนินการในขั้นนี้' };
+    }
+    return { allowed: true, reason: '' };
+  }
+  if (action === RFI_ACTIONS.EXT_SEND_BACK) {
+    // Send-back Rewind (T-016 A2): same gate as EXT_STEP_ACT — the current step holder may
+    // rewind the line to an earlier stage. INTERNAL only; the chain move happens in PUT apply.
+    if (ctx.cmSystemType !== 'INTERNAL') return { allowed: false, reason: 'ไม่รองรับสายอนุมัติภายนอกในโครงการนี้' };
+    if (!canActOnExternalStep(ctx.externalChain, ctx.role)) {
+      return { allowed: false, reason: 'ไม่ใช่ผู้ที่ต้องดำเนินการในขั้นนี้' };
+    }
+    return { allowed: true, reason: '' };
+  }
+  if (action === RFI_ACTIONS.EXT_OVERRIDE_LINE) {
+    // Line override (T-016 A3): same gate — the current step holder reshapes the future tail.
+    // INTERNAL only; applyLineOverride (PUT apply) refuses a locked chain / mandatory removal.
     if (ctx.cmSystemType !== 'INTERNAL') return { allowed: false, reason: 'ไม่รองรับสายอนุมัติภายนอกในโครงการนี้' };
     if (!canActOnExternalStep(ctx.externalChain, ctx.role)) {
       return { allowed: false, reason: 'ไม่ใช่ผู้ที่ต้องดำเนินการในขั้นนี้' };
@@ -326,6 +357,29 @@ export async function GET(
 
     const isCm = userRole === ROLES.CM || userRole === ROLES.ADMIN;
 
+    // T-016 (A2): pre-fill payload for the CM forward-external editor. Only resolve when the CM
+    // can actually forward; EXTERNAL projects never reach here (canForwardExternal is
+    // INTERNAL-gated) and getTemplateForDoc short-circuits them anyway. source:'none' = no
+    // template → CM configures from scratch.
+    let lineTemplate: {
+      source: 'project' | 'default' | 'none';
+      steps: { role: Role; order: number }[];
+      templateId: string | null;
+      version: number | null;
+    } | null = null;
+    if (permissions.canForwardExternal) {
+      const resolved = await getTemplateForDoc(
+        'RFI',
+        { siteId: rfiData.siteId, cmSystemType },
+      );
+      lineTemplate = {
+        source: resolved.source,
+        steps: resolved.template ? externalChainConfigFromTemplate(resolved.template) : [],
+        templateId: resolved.template?.id ?? null,
+        version: resolved.template?.version ?? null,
+      };
+    }
+
     return NextResponse.json({
       success: true,
       document: {
@@ -341,6 +395,7 @@ export async function GET(
           categoryName: rfiData.categoryName || '',
         },
         permissions,
+        lineTemplate,
         currentUser: {
           id: userId,
           role: userRole,
@@ -561,19 +616,36 @@ export async function PUT(
     // never short-circuits). Once the chain completes, CM_REPLY becomes available again.
     if (action === RFI_ACTIONS.FORWARD_EXTERNAL) {
       const chainConfig = (body as { chainConfig?: { role: Role; order: number }[] }).chainConfig;
-      if (!Array.isArray(chainConfig) || chainConfig.length === 0) {
-        return NextResponse.json(
-          { success: false, error: 'กรุณาเลือกผู้พิจารณาภายนอกอย่างน้อย 1 ราย' },
-          { status: 400 }
+      if (Array.isArray(chainConfig) && chainConfig.length > 0) {
+        try {
+          updates.externalChain = configureExternalChain(chainConfig, userId);
+        } catch (e) {
+          return NextResponse.json(
+            { success: false, error: e instanceof Error ? e.message : 'การตั้งค่าสายอนุมัติไม่ถูกต้อง' },
+            { status: 400 }
+          );
+        }
+      } else {
+        // T-016 (A2): no CM-picked chain → fall back to the resolved line template (server-side
+        // safety net). EXTERNAL projects resolve to 'none' and keep the original 400 (no flow).
+        const resolved = await getTemplateForDoc(
+          'RFI',
+          { siteId: docData.siteId, cmSystemType },
         );
-      }
-      try {
-        updates.externalChain = configureExternalChain(chainConfig, userId);
-      } catch (e) {
-        return NextResponse.json(
-          { success: false, error: e instanceof Error ? e.message : 'การตั้งค่าสายอนุมัติไม่ถูกต้อง' },
-          { status: 400 }
-        );
+        if (resolved.source === 'none' || !resolved.template) {
+          return NextResponse.json(
+            { success: false, error: 'กรุณาเลือกผู้พิจารณาภายนอกอย่างน้อย 1 ราย' },
+            { status: 400 }
+          );
+        }
+        try {
+          updates.externalChain = seedChainFromTemplate(resolved.template, userId);
+        } catch (e) {
+          return NextResponse.json(
+            { success: false, error: e instanceof Error ? e.message : 'เทมเพลตสายอนุมัติไม่ถูกต้อง' },
+            { status: 400 }
+          );
+        }
       }
     } else if (action === RFI_ACTIONS.EXT_STEP_ACT) {
       // RFI external step is a REPLY, not a verdict — Designer/Owner answer with an
@@ -588,6 +660,50 @@ export async function PUT(
         actedAt: nowIso,
       });
       updates.externalChain = advanceExternalChain(acted).chain;
+    } else if (action === RFI_ACTIONS.EXT_SEND_BACK) {
+      // Send-back Rewind (T-016 A2): rewind the chain to `targetOrder`, preserving the
+      // rolled-back acks as audit + locking per-doc override. Status + CM track untouched.
+      const targetOrder = (body as { targetOrder?: number }).targetOrder;
+      if (typeof targetOrder !== 'number') {
+        return NextResponse.json({ success: false, error: 'กรุณาระบุขั้นที่ต้องการส่งกลับ' }, { status: 400 });
+      }
+      if (!comments || !comments.trim()) {
+        return NextResponse.json({ success: false, error: 'กรุณาระบุเหตุผลในการส่งกลับ' }, { status: 400 });
+      }
+      if (!docData.externalChain) {
+        return NextResponse.json({ success: false, error: 'ไม่มีสายอนุมัติให้ส่งกลับ' }, { status: 400 });
+      }
+      try {
+        updates.externalChain = sendBackChain(
+          docData.externalChain,
+          targetOrder,
+          { userId, role: userRole as Role },
+          comments,
+        );
+      } catch (e) {
+        return NextResponse.json(
+          { success: false, error: e instanceof Error ? e.message : 'ขั้นที่ส่งกลับไม่ถูกต้อง' },
+          { status: 400 }
+        );
+      }
+    } else if (action === RFI_ACTIONS.EXT_OVERRIDE_LINE) {
+      // Per-doc line override (T-016 A3): reshape the FUTURE tail; no status/CM change.
+      // applyLineOverride freezes past+active, refuses mandatory removal, throws when locked.
+      const futureSteps = (body as { overrideFutureSteps?: unknown }).overrideFutureSteps;
+      if (!Array.isArray(futureSteps)) {
+        return NextResponse.json({ success: false, error: 'กรุณาระบุขั้นตอนที่ต้องการ (overrideFutureSteps)' }, { status: 400 });
+      }
+      if (!docData.externalChain) {
+        return NextResponse.json({ success: false, error: 'ไม่มีสายอนุมัติให้ปรับ' }, { status: 400 });
+      }
+      try {
+        updates.externalChain = applyLineOverride(docData.externalChain, futureSteps as OverrideStepInput[]);
+      } catch (e) {
+        return NextResponse.json(
+          { success: false, error: e instanceof Error ? e.message : 'ปรับเส้นทางไม่ถูกต้อง' },
+          { status: 400 }
+        );
+      }
     }
 
     // First answer wins — answeredAt records when the question was first answered,

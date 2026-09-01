@@ -14,5 +14,11 @@ service firebase.storage {
     match /temp/{userId}/{allPaths=**} {
       allow read, write, delete: if request.auth != null && request.auth.uid == userId;
     }
+
+    // Folder `markupDrafts` (T-023): ฉบับร่างมาร์กอัป PDF ต่อผู้รีวิว — เขียน/อ่าน/ลบได้เฉพาะของตัวเอง
+    // แยกจาก `temp` (ซึ่งเป็นที่พักไฟล์ตอน submit) เพื่อให้ draft อยู่ถาวรจนกว่าจะบันทึก/อนุมัติจริง
+    match /markupDrafts/{userId}/{allPaths=**} {
+      allow read, write, delete: if request.auth != null && request.auth.uid == userId;
+    }
   }
 }

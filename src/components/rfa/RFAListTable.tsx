@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { FileText, Calendar, User, Clock, Building, Tag, ArrowUp, ArrowDown, Lock, AlertTriangle } from 'lucide-react'
 import { RFADocument } from '@/types/rfa'
 
-import { ROLES, STATUSES, getRfaStatusLabelForDoc } from '@/lib/config/workflow'
+import { ROLES, STATUSES, getRfaStatusLabelForDoc, getExternalChainHolder } from '@/lib/config/workflow'
 import Spinner from '@/components/shared/Spinner'
 
 interface RFAListTableProps {
@@ -26,6 +26,7 @@ interface RFAListTableProps {
 const ACTIVE_STATUSES_FOR_PENDING_DAYS = [
   STATUSES.PENDING_REVIEW,
   STATUSES.PENDING_CM_APPROVAL,
+  STATUSES.PENDING_EXTERNAL_APPROVAL, // T-018: primary "at CM/chain" status for new INTERNAL docs
   STATUSES.PENDING_FINAL_APPROVAL,
   STATUSES.REVISION_REQUIRED,
   STATUSES.APPROVED_REVISION_REQUIRED,
@@ -84,6 +85,15 @@ export default function RFAListTable({
 
       case STATUSES.PENDING_CM_APPROVAL:
         return { name: 'CM', role: 'CM' };
+
+      // T-018: a new INTERNAL document's chain starts at CM, so this is now the primary
+      // "at CM" status — but the chain can also be held by Designer/Owner (or wherever the
+      // admin-configured line currently points), so name the ACTUAL current holder rather
+      // than a blanket "CM".
+      case STATUSES.PENDING_EXTERNAL_APPROVAL: {
+        const holder = getExternalChainHolder(doc.externalChain) || 'CM';
+        return { name: holder, role: holder };
+      }
 
       case STATUSES.REVISION_REQUIRED:
       case STATUSES.APPROVED_REVISION_REQUIRED:

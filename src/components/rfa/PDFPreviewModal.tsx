@@ -15,10 +15,52 @@ import { PDFDocument, degrees, PDFName, PDFDict, PDFArray, PDFHexString, PDFStre
 import { useNotification } from '@/lib/context/NotificationContext';
 import { useAuth } from '@/lib/auth/useAuth';
 import { resolveViewUrl } from '@/lib/utils/storage';
+import { storage } from '@/lib/firebase/client';
+import { ref as storageRef, uploadBytes, getBytes, deleteObject } from 'firebase/storage';
 import { exportMarkupListToExcel } from '@/lib/utils/markupExport';
+import { upsertMarkupObject, removeMarkupObject, subscribeMarkup, type MarkupDoc } from '@/lib/rfa/markupSync';
 
 // Fabric v6 silently drops any object field not declared here when doing toJSON()/loadFromJSON().
-fabric.FabricObject.customProperties = ['id', 'author', 'createdAt', 'kind', 'linkedTo', 'pageNumber', 'text', 'calloutGeo'];
+// `authorUid` (T-025) rides alongside `author`(email) so Firestore rules can enforce owner-only edit
+// and the incoming listener can tell my own objects from other reviewers'.
+fabric.FabricObject.customProperties = ['id', 'author', 'authorUid', 'createdAt', 'kind', 'linkedTo', 'pageNumber', 'text', 'calloutGeo'];
+
+// ---- T-023 · Server-side per-reviewer markup draft (Firebase Storage) ----
+// A draft is the reviewer's in-progress markup, saved DECOUPLED from the approval/flatten pipeline.
+// Keyed by the reviewer's uid + the file's stable storage filePath, so it follows the reviewer across
+// devices/browsers and never collides with another reviewer. `storage` auto-targets the emulator or the
+// production bucket depending on client.ts wiring, so the SAME code works in both.
+// Draft applies only to a real, already-uploaded file (skip not-yet-saved 'temp/…' local previews).
+function canDraft(file: RFAFile | null): boolean {
+  return !!file?.filePath && !file.filePath.startsWith('temp/');
+}
+function draftStoragePath(uid: string, filePath: string): string {
+  return `markupDrafts/${uid}/${encodeURIComponent(filePath)}.json`;
+}
+async function saveDraftToServer(uid: string, filePath: string, canvasData: { [page: number]: any }): Promise<void> {
+  const blob = new Blob(
+    [JSON.stringify({ v: 1, savedAt: new Date().toISOString(), canvasData })],
+    { type: 'application/json' }
+  );
+  await uploadBytes(storageRef(storage, draftStoragePath(uid, filePath)), blob);
+}
+async function loadDraftFromServer(uid: string, filePath: string): Promise<{ [page: number]: any } | null> {
+  try {
+    const bytes = await getBytes(storageRef(storage, draftStoragePath(uid, filePath)));
+    const parsed = JSON.parse(new TextDecoder().decode(bytes));
+    return parsed?.canvasData ?? null;
+  } catch {
+    // No draft yet (object-not-found) or a fetch error — fall back to whatever else restores.
+    return null;
+  }
+}
+async function deleteDraftFromServer(uid: string, filePath: string): Promise<void> {
+  try {
+    await deleteObject(storageRef(storage, draftStoragePath(uid, filePath)));
+  } catch {
+    // Best-effort: a missing draft is fine.
+  }
+}
 
 // Builds a directional arrow (shaft Line + filled Triangle head) as ONE Fabric Group, so it moves,
 // scales, erases, undoes, and serializes as a single markup object. The head is rotated to the drag angle.
@@ -38,6 +80,203 @@ function buildArrow(x1: number, y1: number, x2: number, y2: number, color: strin
     angle: angleDeg + 90,
   });
   return new fabric.Group([line, head]);
+}
+
+// A callout is a box Group (Rect + Textbox, kind:'comment') PLUS a separate top-level leader Line and head
+// Triangle (kind:'commentLeader', linkedTo = box id, non-interactive). Keeping the leader OUT of the group is
+// what makes the geometry drift-free: a top-level Line's x1/y1/x2/y2 are absolute scene coords (no parent to
+// offset or clip it), so the tip pins and the leader stretches with ZERO group-local math. The only stored
+// geometry is calloutGeo = { tx, ty } — the arrow-tip absolute point (the pin). The box position/size is
+// always read live from the Group, so nothing else can drift out of sync.
+
+// Redraws a callout's linked leader + head from the pin (geo.tx/ty) and the box's live position. Leader: tip
+// end pinned at (tx,ty), box end at the box top-left corner (centre − half size; callouts never scale/rotate).
+// Head: sits at the tip, rotated to point box → tip. No-op if `box` is not a callout / has no linked pieces.
+function syncCalloutLeader(canvas: any, box: any) {
+  if (!box || typeof box.get !== 'function') return;
+  const g = box.get('calloutGeo');
+  if (!g || !canvas || typeof canvas.getObjects !== 'function') return;
+  const id = box.get('id');
+  const linked = canvas.getObjects().filter((o: any) => o && typeof o.get === 'function' && o.get('linkedTo') === id);
+  const leader = linked.find((o: any) => o instanceof fabric.Line);
+  const head = linked.find((o: any) => o instanceof fabric.Triangle);
+  const c = box.getCenterPoint();
+  const halfW = ((box.width || 0) * (box.scaleX || 1)) / 2;
+  const halfH = ((box.height || 0) * (box.scaleY || 1)) / 2;
+  const boxLeft = c.x - halfW, boxTop = c.y - halfH;
+  if (leader) {
+    leader.set({ x1: g.tx, y1: g.ty, x2: boxLeft, y2: boxTop }); // absolute scene coords (top-level Line)
+    leader.setCoords();
+    leader.set('dirty', true);
+  }
+  if (head) {
+    const ang = (Math.atan2(g.ty - boxTop, g.tx - boxLeft) * 180) / Math.PI;
+    // Re-assert centre origin so left/top place the head's centre (not its corner) on the tip even if a
+    // reload reverted originX/originY to their 'left'/'top' defaults.
+    head.set({ originX: 'center', originY: 'center', left: g.tx, top: g.ty, angle: ang + 90 });
+    head.setCoords();
+    head.set('dirty', true);
+  }
+}
+
+// Rebuilds a callout's leader Line + head Triangle from the stored pin when they are MISSING. The leader/head
+// are DERIVED, never persisted (only calloutGeo = {tx,ty,col,lw} is stored — the box carries an id and syncs,
+// its leader/head do NOT), so every display path must reconstruct them: a collaborator's overlay
+// (enlivenRemote) and the author's own reopen (rehydrateCallouts) both receive only the box. If a linked
+// leader already exists (undo/redo restored it from a JSON snapshot) this just re-syncs — idempotent.
+// `remote` marks the rebuilt pieces as read-only overlay (kept out of the local undo/export) to match the box.
+function ensureCalloutLeader(canvas: any, box: any, remote: boolean) {
+  if (!box || typeof box.get !== 'function') return;
+  const g = box.get('calloutGeo');
+  const id = box.get('id');
+  if (!g || !id || !canvas || typeof canvas.getObjects !== 'function') return;
+  const hasLeader = canvas.getObjects().some((o: any) => o && typeof o.get === 'function' && o.get('linkedTo') === id);
+  if (hasLeader) { syncCalloutLeader(canvas, box); return; }
+  // Colour + width: prefer the values saved on the pin; fall back to the box rect stroke / a sane default so
+  // legacy callouts written before col/lw existed still rebuild a visible leader.
+  const rect = typeof box.item === 'function' ? box.item(0) : (box._objects && box._objects[0]);
+  const col = g.col || (rect && rect.stroke) || '#ef4444';
+  const lw = g.lw || 2;
+  const leader = new fabric.Line([g.tx, g.ty, g.tx, g.ty], {
+    stroke: col, strokeWidth: lw, selectable: false, evented: false, objectCaching: false,
+  });
+  leader.set({ kind: 'commentLeader', linkedTo: id });
+  const headSize = Math.max(12, lw * 4);
+  const head = new fabric.Triangle({
+    left: g.tx, top: g.ty, originX: 'center', originY: 'center',
+    width: headSize, height: headSize, fill: col, angle: 0,
+    selectable: false, evented: false, objectCaching: false,
+  });
+  head.set({ kind: 'commentLeader', linkedTo: id });
+  if (remote) {
+    leader.set({ excludeFromExport: true }); (leader as any)._remote = true;
+    head.set({ excludeFromExport: true }); (head as any)._remote = true;
+  }
+  canvas.add(leader);
+  canvas.add(head);
+  syncCalloutLeader(canvas, box); // position the leader end + head angle from the box's live corner
+}
+
+// Callouts only ever translate — lock scaling/rotation and hide every native resize/rotate handle so the box
+// shows only the custom arrow-tip knob. Movement stays enabled (dragging the body is the G1 pin gesture).
+function lockCalloutBox(box: any) {
+  if (!box || typeof box.set !== 'function') return;
+  box.set({
+    lockScalingX: true, lockScalingY: true, lockRotation: true,
+    lockSkewingX: true, lockSkewingY: true, hasRotatingPoint: false,
+  });
+  if (typeof box.setControlsVisibility === 'function') {
+    box.setControlsVisibility({
+      mt: false, mb: false, ml: false, mr: false,
+      tl: false, tr: false, bl: false, br: false, mtr: false,
+    });
+  }
+}
+
+// Removes a whole callout unit (box + its linked leader/head) given ANY of its members. When histRef is
+// passed, the leader/head are removed while history is suppressed and the box removed last (un-suppressed),
+// so the delete records ONE undo step — symmetric with creation. A non-callout object is just removed.
+function removeCalloutUnit(canvas: any, obj: any, histRef?: any) {
+  if (!canvas || !obj || typeof obj.get !== 'function') return;
+  const id = obj.get('calloutGeo') ? obj.get('id') : obj.get('linkedTo');
+  if (!id) { canvas.remove(obj); return; }
+  const all = canvas.getObjects().filter((o: any) => o && typeof o.get === 'function'
+    && (o.get('id') === id || o.get('linkedTo') === id));
+  const box = all.find((o: any) => o.get('calloutGeo'));
+  const rest = all.filter((o: any) => o !== box);
+  if (histRef) histRef.current = true;
+  rest.forEach((o: any) => canvas.remove(o));
+  if (histRef) histRef.current = false;
+  if (box) canvas.remove(box); // the one un-suppressed removal → single history snapshot
+}
+
+// Re-applies the runtime state that is NOT serialized after an interactive loadFromJSON: linked leader/head
+// are made non-interactive again (selectable/evented/objectCaching default back to true on reload), and each
+// box is re-locked, re-given its tip knob, and its leader re-synced from the authoritative pin. Idempotent.
+function rehydrateCallouts(canvas: any) {
+  if (!canvas || typeof canvas.getObjects !== 'function') return;
+  const objs = canvas.getObjects();
+  objs.forEach((o: any) => {
+    if (o && typeof o.get === 'function' && o.get('linkedTo')) {
+      o.set({ selectable: false, evented: false, objectCaching: false });
+      if (typeof o.setCoords === 'function') o.setCoords();
+    }
+  });
+  objs.forEach((o: any) => {
+    if (o && typeof o.get === 'function' && o.get('calloutGeo')) {
+      lockCalloutBox(o);
+      attachCalloutTipControl(o);
+      // On author reopen the box comes back from Firestore with NO leader (never persisted) — rebuild it;
+      // when undo/redo restored a leader from a JSON snapshot this just re-syncs (idempotent).
+      ensureCalloutLeader(canvas, o, false);
+    }
+  });
+}
+
+// Adds the `calloutTip` custom fabric.Control at the arrow tip — Acrobat's "grab the arrowhead to move the
+// whole comment" gesture (G2). The knob sits at the absolute pin (geo.tx/ty); dragging it translates the box
+// by the pointer delta AND shifts the pin by the same delta, so the leader length + angle stay fixed and the
+// entire callout slides together. The custom actionName ('calloutMove') fires object:calloutMove, NOT
+// object:moving, so the box-drag pin handler never runs here. Idempotent + no-op on non-callout objects.
+function attachCalloutTipControl(group: any) {
+  if (!group || typeof group.get !== 'function') return;
+  if (!group.get('calloutGeo')) return;
+  if (group.controls && group.controls.calloutTip) return; // already attached — re-attached on select/rehydrate
+
+  group.controls = {
+    ...group.controls,
+    calloutTip: new fabric.Control({
+      x: 0, y: 0,
+      sizeX: 12, sizeY: 12, touchSizeX: 22, touchSizeY: 22,
+      cursorStyle: 'move',
+      actionName: 'calloutMove',
+      // Knob screen position = the absolute pin (geo.tx/ty) through the viewport transform.
+      positionHandler: (_dim: any, _finalMatrix: any, fo: any) => {
+        const g = fo.get('calloutGeo');
+        if (!g) return new fabric.Point(0, 0);
+        return new fabric.Point(g.tx, g.ty).transform(fo.getViewportTransform());
+      },
+      // x,y = pointer in SCENE coords. Move the box by (pointer − tip) and shift the pin to the pointer;
+      // both move by the same delta, so syncCalloutLeader redraws an unchanged leader translated in step.
+      actionHandler: (_e: any, transform: any, x: number, y: number) => {
+        const fo = transform.target;
+        const g = fo.get('calloutGeo');
+        if (!g) return false;
+        const mvx = x - g.tx, mvy = y - g.ty;
+        fo.set({ left: (fo.left || 0) + mvx, top: (fo.top || 0) + mvy });
+        fo.set('calloutGeo', { ...g, tx: x, ty: y }); // keep col/lw — only the pin moves
+        fo.setCoords();
+        syncCalloutLeader(fo.canvas, fo);
+        fo.set('dirty', true);
+        return true;
+      },
+      // Small filled circle so the tip knob reads differently from the square resize corners.
+      render: (ctx: CanvasRenderingContext2D, left: number, top: number) => {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(left, top, 5, 0, Math.PI * 2, false);
+        ctx.fillStyle = '#2563eb';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      },
+    }),
+  };
+}
+
+// Dragging the box stretches the leader beyond the group's bounding box; a cached group clips its
+// children to that box, so caching is turned off for callout groups. This also stops a callout that
+// was saved in a stretched state from rendering clipped when its page is reloaded. No-op otherwise.
+function disableCalloutCaching(canvas: any) {
+  if (!canvas || typeof canvas.getObjects !== 'function') return;
+  canvas.getObjects().forEach((o: any) => {
+    if (o && typeof o.get === 'function' && o.get('calloutGeo')) {
+      o.set('objectCaching', false);
+      o.set('dirty', true);
+    }
+  });
 }
 
 // Reads back the hidden `annotations.json` attachment pdf-lib's own `.attach()` writes into the
@@ -119,6 +358,21 @@ export default function PDFPreviewModal({
   const visualScaleRef = useRef(1.0);
   const lastZoomTimeRef = useRef(0);
 
+  // --- T-025 · Collaborative markup sync ---
+  // Outgoing (S2): buffer my own object changes and flush to Firestore debounced (~1s idle / 2s max).
+  // Value is the LIVE Fabric object (serialized at flush time, not queue time) or the 'DELETE' sentinel.
+  const pendingWritesRef = useRef<{ [id: string]: any | 'DELETE' }>({});
+  const syncedIdsRef = useRef<Set<string>>(new Set()); // ids I have pushed to Firestore (for FIX-C reconcile)
+  const flushTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const firstPendingAtRef = useRef<number | null>(null);
+  // Set true while programmatically injecting OTHER reviewers' objects (S3) so those adds never
+  // queue an outgoing write, push an undo snapshot, or mark the page dirty.
+  const isInjectingRemoteRef = useRef(false);
+  // Incoming (S3): other reviewers' objects kept per page as a read-only overlay; the live listener + its unsub.
+  const remoteByPageRef = useRef<{ [page: number]: MarkupDoc[] }>({});
+  const unsubRef = useRef<null | (() => void)>(null);
+  const firstSnapshotRef = useRef(true); // FIX-A: first onSnapshot loads/partitions; later ones are incremental
+
   // --- States ---
   const [isEditing, setIsEditing] = useState(false);
   const [currentTool, setCurrentTool] = useState<'select' | 'draw' | 'rect' | 'circle' | 'eraser' | 'hand' | 'text' | 'arrow' | 'callout'>('hand');
@@ -140,6 +394,7 @@ export default function PDFPreviewModal({
 
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [remoteRenderTick, setRemoteRenderTick] = useState(0); // T-025 · bumped when the first markup snapshot lands, to re-render current page
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [thumbnails, setThumbnails] = useState<{ [key: number]: { src: string, width: number, height: number } }>({});
   const [isMobile, setIsMobile] = useState(false);
@@ -171,6 +426,136 @@ export default function PDFPreviewModal({
     const pageToSave = activePageRef.current;
     canvasDataRef.current[pageToSave] = canvas.toJSON();
   }, [allowEdit]);
+
+  // --- T-025 · Outgoing sync: flush my buffered object changes to Firestore ---
+  // Best-effort: any single failure is swallowed so my local editing is never blocked. Followed by a
+  // reconcile pass (FIX-C) that deletes any id I previously synced but that is no longer on my canvas —
+  // undo/redo replays the page via loadFromJSON and does NOT reliably fire per-object `object:removed`.
+  const flushWrites = useCallback(async () => {
+    if (flushTimerRef.current) { clearTimeout(flushTimerRef.current); flushTimerRef.current = null; }
+    firstPendingAtRef.current = null;
+    const pending = pendingWritesRef.current;
+    pendingWritesRef.current = {};
+    for (const [id, payload] of Object.entries(pending)) {
+      try {
+        if (payload === 'DELETE') {
+          await removeMarkupObject(id);
+          syncedIdsRef.current.delete(id);
+        } else if (file) {
+          // Serialize the live object's CURRENT state (shapes/text are still mutating when queued).
+          const obj: any = payload;
+          await upsertMarkupObject({
+            id,
+            filePath: file.filePath,
+            pageNumber: obj.pageNumber ?? activePageRef.current,
+            author: obj.author || user?.email || 'Unknown User',
+            authorUid: obj.authorUid || user?.id || '',
+            kind: obj.kind || 'markup',
+            obj: obj.toObject(fabric.FabricObject.customProperties),
+          });
+          syncedIdsRef.current.add(id);
+        }
+      } catch { /* best-effort — keep editing */ }
+    }
+    // Reconcile (FIX-C): drop synced ids no longer present locally (undo-deletes the events missed).
+    if (user && canDraft(file)) {
+      try {
+        saveCurrentPageData();
+        const myCurrentIds = new Set<string>();
+        for (const key of Object.keys(canvasDataRef.current)) {
+          const objs = canvasDataRef.current[Number(key)]?.objects;
+          if (!objs) continue;
+          for (const o of objs) {
+            if (o.authorUid === user.id && o.id) myCurrentIds.add(o.id);
+          }
+        }
+        for (const id of Array.from(syncedIdsRef.current)) {
+          if (!myCurrentIds.has(id)) {
+            try { await removeMarkupObject(id); } catch { /* best-effort */ }
+            syncedIdsRef.current.delete(id);
+          }
+        }
+      } catch { /* best-effort */ }
+    }
+  }, [user, file, saveCurrentPageData]);
+
+  // Debounced flush scheduler: fire after ~1s idle, but never wait longer than ~2s from the first
+  // pending change (so a continuous stream of edits still syncs promptly).
+  const scheduleFlush = useCallback(() => {
+    if (firstPendingAtRef.current == null) firstPendingAtRef.current = Date.now();
+    if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
+    const elapsed = Date.now() - firstPendingAtRef.current;
+    const delay = Math.min(1000, Math.max(0, 2000 - elapsed));
+    flushTimerRef.current = setTimeout(() => { void flushWrites(); }, delay);
+  }, [flushWrites]);
+
+  // Buffer one change to MY own object. Only remote-injected objects are excluded: every other object
+  // event reaching here is a NEW local object the user just created — the listeners are registered
+  // AFTER the page's loadFromJSON restore (see the render effect), so a restore never fires them. That
+  // makes an `authorUid === user.id` pre-check both redundant AND harmful: a freehand stroke fires
+  // `object:added` BEFORE `path:created` stamps its authorUid, so the old check silently dropped every
+  // pen stroke. We stamp ownership here instead (idempotent), then buffer the LIVE object reference and
+  // let flushWrites serialize its CURRENT state — a rect/ellipse is 0-size at mouse:down and only
+  // reaches full size on mouse:move/up, so serializing at queue time would persist an invisible dot.
+  const queueWrite = useCallback((obj: any, removed: boolean) => {
+    if (!user || !allowEdit || !canDraft(file) || !obj || obj._remote) return;
+    const id = obj.id;
+    if (!id) return;
+    if (removed) {
+      pendingWritesRef.current[id] = 'DELETE';
+    } else {
+      if (!obj.authorUid) obj.authorUid = user.id;
+      if (!obj.author) obj.author = user.email || 'Unknown User';
+      pendingWritesRef.current[id] = obj;
+    }
+    scheduleFlush();
+  }, [user, file, allowEdit, scheduleFlush]);
+
+  // Stable handle to the latest queueWrite so tool-setup handlers (path:created) can sync without
+  // re-binding on every queueWrite identity change. A freehand stroke fires `object:added` BEFORE
+  // `path:created` stamps its id — so the object:added handler drops it (no id yet); path:created is
+  // where the stroke is fully stamped, so that is where it must be queued.
+  const queueWriteRef = useRef(queueWrite);
+  useEffect(() => { queueWriteRef.current = queueWrite; }, [queueWrite]);
+
+  // --- T-025 · Incoming sync helpers: render OTHER reviewers' objects as a read-only overlay ---
+  // Objects are non-selectable, non-interactive, and excludeFromExport so they never enter my undo
+  // history, my toJSON, or the flattened export. Wrapped in isInjectingRemoteRef so the add events
+  // are ignored by history/dirty/outgoing-sync (FIX-B).
+  const enlivenRemote = useCallback(async (canvas: fabric.Canvas, docs: MarkupDoc[]) => {
+    if (!canvas || !docs.length) return;
+    const datas = docs.map(d => ({ ...d.obj, id: d.id, author: d.author, authorUid: d.authorUid }));
+    let objs: any[] = [];
+    try { objs = await fabric.util.enlivenObjects(datas) as any[]; } catch { return; }
+    isInjectingRemoteRef.current = true;
+    try {
+      for (const o of objs) {
+        o.set({ selectable: false, evented: false, excludeFromExport: true });
+        o._remote = true;
+        canvas.add(o);
+      }
+      // A callout box syncs, but its leader Line + head Triangle are never persisted (no id) — rebuild them
+      // from the stored pin so collaborators see the arrow, not just the comment box.
+      for (const o of objs) {
+        if (o && typeof o.get === 'function' && o.get('calloutGeo')) ensureCalloutLeader(canvas, o, true);
+      }
+      canvas.requestRenderAll();
+    } finally {
+      isInjectingRemoteRef.current = false;
+    }
+  }, []);
+
+  const removeRemoteById = useCallback((canvas: fabric.Canvas, id: string) => {
+    if (!canvas) return;
+    // Remove the remote object AND, for a callout box, its rebuilt leader/head (linkedTo === id) so a remote
+    // modify (remove + re-enliven) never leaves an orphaned or duplicated arrow behind.
+    const victims = canvas.getObjects().filter(
+      (o: any) => o._remote && (o.id === id || (typeof o.get === 'function' && o.get('linkedTo') === id)),
+    );
+    if (!victims.length) return;
+    isInjectingRemoteRef.current = true;
+    try { victims.forEach((o: any) => canvas.remove(o)); canvas.requestRenderAll(); } finally { isInjectingRemoteRef.current = false; }
+  }, []);
 
   // Rebuilds the Markup List from canvasDataRef across ALL pages — only `kind === 'comment'`
   // (typed text) annotations are included; freehand markup has no text to summarize, per the
@@ -368,7 +753,16 @@ export default function PDFPreviewModal({
         try {
           const bytes = await fetch(urlToLoad).then(res => res.arrayBuffer());
           const restored = await extractAnnotationsFromPdfBytes(bytes);
-          if (restored) canvasDataRef.current = restored;
+          // T-025 · Firestore is the source of truth for markup (see the incoming-sync effect). The
+          // embedded-attachment restore is now only a fallback that fills pages Firestore has NO markup
+          // for (legacy documents saved before T-025). Merged per-page (never a wholesale replace) so
+          // the first Firestore snapshot is never clobbered regardless of which async resolves first.
+          if (restored) {
+            for (const key of Object.keys(restored)) {
+              const page = Number(key);
+              if (!canvasDataRef.current[page]) canvasDataRef.current[page] = restored[page];
+            }
+          }
         } catch (e) { console.warn('Annotation restore skipped:', e); }
 
         setIsLoading(false);
@@ -376,6 +770,64 @@ export default function PDFPreviewModal({
     };
     loadPDF();
   }, [isOpen, file, managedFileUrl]);
+
+  // --- T-025 · Incoming markup sync (shared draft + semi-realtime) ---
+  // Subscribe to every markup object on this file. The FIRST snapshot partitions all docs into MINE
+  // (loaded into canvasDataRef as editable) vs OTHERS (kept in remoteByPageRef as a read-only overlay).
+  // Later snapshots apply others' changes live (my own echoes are skipped). Firestore is the source of
+  // truth; the embedded-attachment restore only fills pages Firestore has no markup for (see S5 load effect).
+  useEffect(() => {
+    // T-025 · S6: gate the collaboration layer on edit-permission. `allowEdit` is `canEditPDF`
+    // (role + status + permissions) from RFADetailModal — so markup is visible ONLY to whoever may
+    // edit the PDF at the document's current status. A read-only viewer never subscribes → sees nothing.
+    if (!isOpen || !file || !user || !allowEdit || !canDraft(file)) return;
+    firstSnapshotRef.current = true;
+    remoteByPageRef.current = {};
+    syncedIdsRef.current = new Set();
+    const unsub = subscribeMarkup(file.filePath, (changes) => {
+      if (firstSnapshotRef.current) {
+        const mineByPage: { [page: number]: any[] } = {};
+        for (const ch of changes) {
+          if (ch.type === 'removed') continue;
+          const d = ch.doc;
+          if (d.authorUid === user.id) {
+            (mineByPage[d.pageNumber] ||= []).push({ ...d.obj, id: d.id, author: d.author, authorUid: d.authorUid });
+            syncedIdsRef.current.add(d.id);
+          } else {
+            (remoteByPageRef.current[d.pageNumber] ||= []).push(d);
+          }
+        }
+        // My past objects become editable again (Firestore is authoritative — overwrite those pages).
+        for (const key of Object.keys(mineByPage)) {
+          const page = Number(key);
+          canvasDataRef.current[page] = { version: '6.0.0', objects: mineByPage[page] };
+        }
+        firstSnapshotRef.current = false;
+        setRemoteRenderTick(t => t + 1); // re-render current page so restored + overlay objects appear
+        return;
+      }
+      // Incremental: apply OTHERS' live changes; skip my own echoes (already local).
+      const canvas = currentCanvasRef.current;
+      for (const ch of changes) {
+        const d = ch.doc;
+        if (d.authorUid === user.id) continue;
+        const bucket = (remoteByPageRef.current[d.pageNumber] ||= []);
+        const idx = bucket.findIndex(x => x.id === d.id);
+        if (ch.type === 'removed') { if (idx >= 0) bucket.splice(idx, 1); }
+        else if (idx >= 0) bucket[idx] = d; else bucket.push(d);
+        if (canvas && d.pageNumber === activePageRef.current) {
+          removeRemoteById(canvas, d.id);
+          if (ch.type !== 'removed') void enlivenRemote(canvas, [d]);
+        }
+      }
+    });
+    unsubRef.current = unsub;
+    return () => {
+      void flushWrites();       // push any buffered writes before tearing down
+      unsubRef.current?.();     // stop the listener (prevents a leak across long sessions)
+      unsubRef.current = null;
+    };
+  }, [isOpen, file, user, allowEdit, flushWrites, enlivenRemote, removeRemoteById]);
 
   // --- Generate Thumbnails ---
   useEffect(() => {
@@ -403,6 +855,7 @@ export default function PDFPreviewModal({
   }, [totalPages]);
 
   // --- Save Logic (pdf-lib Overlay) ---
+
   const handleSave = async () => {
     if (!onSave || !file || !allowEdit) return;
     setIsSaving(true);
@@ -430,6 +883,7 @@ export default function PDFPreviewModal({
           // สร้าง Canvas ตามขนาดที่สายตาผู้ใช้มองเห็น ไม่ใช่ขนาด Data ของ PDF ก่อน Rotate
           const fCanvas = new fabric.StaticCanvas(tempCanvas, { width: visualWidth, height: visualHeight });
           await fCanvas.loadFromJSON(pageData);
+          disableCalloutCaching(fCanvas); // so a stretched callout leader isn't clipped in the exported PNG
           // Export เป็น PNG 2x เพื่อความคมชัดตอนแปะลง PDF
           const imgData = fCanvas.toDataURL({ format: 'png', multiplier: 2 });
           const pngImage = await pdfDoc.embedPng(imgData);
@@ -473,6 +927,10 @@ export default function PDFPreviewModal({
       const editedFile = new File([blob], `edited_${file.fileName}`, { type: 'application/pdf' });
       await onSave(editedFile);
       isDirtyRef.current = false;
+
+      // T-025 · Markup now lives in Firestore, not a Storage draft. The approval save above flattened +
+      // embedded the markup into the PDF; the Firestore markup docs are left as-is — a revision creates a
+      // new filePath so there is no collision (cleanup of old docs is a deferred follow-up · roadmap T-025).
 
     } catch (error) {
       console.error('Save error:', error);
@@ -750,6 +1208,7 @@ export default function PDFPreviewModal({
 
         if (canvasDataRef.current[currentPage]) {
           await canvas.loadFromJSON(canvasDataRef.current[currentPage]);
+          rehydrateCallouts(canvas); // restore leader/head non-interactivity + box lock/knob + leader sync
           canvas.requestRenderAll();
         }
 
@@ -760,6 +1219,7 @@ export default function PDFPreviewModal({
         undoHistoryIndexRef.current = 0;
         const recordHistorySnapshot = () => {
           if (isRestoringHistoryRef.current) return;
+          if (isInjectingRemoteRef.current) return; // FIX-B: remote-injected objects (S3) never enter my undo history
           undoHistoryRef.current = undoHistoryRef.current.slice(0, undoHistoryIndexRef.current + 1);
           undoHistoryRef.current.push(canvas.toJSON());
           undoHistoryIndexRef.current = undoHistoryRef.current.length - 1;
@@ -771,20 +1231,58 @@ export default function PDFPreviewModal({
         // Registered alongside (same timing as) the history listeners above so the initial page
         // restore never counts as dirty — but unlike recordHistorySnapshot, this fires unconditionally
         // (including during undo/redo replay).
-        const markDirty = () => { isDirtyRef.current = true; };
+        const markDirty = () => {
+          if (isInjectingRemoteRef.current) return; // remote-injected objects (S3) are not my unsaved work
+          isDirtyRef.current = true;
+        };
         canvas.on('object:added', markDirty);
         canvas.on('object:removed', markDirty);
         canvas.on('object:modified', markDirty);
 
+        // --- T-025 · Outgoing sync (S2): mirror MY object changes to Firestore ---
+        // Guarded so injecting other reviewers' objects (S3) never triggers an outgoing write.
+        canvas.on('object:added', (e: any) => { if (!isInjectingRemoteRef.current) queueWrite(e.target, false); });
+        canvas.on('object:modified', (e: any) => { if (!isInjectingRemoteRef.current) queueWrite(e.target, false); });
+        canvas.on('object:removed', (e: any) => { if (!isInjectingRemoteRef.current) queueWrite(e.target, true); });
+
+        // --- T-025 · Inject OTHER reviewers' objects for this page as a read-only overlay (S3) ---
+        // After the undo-floor capture + listener registration, so it never enters undo/dirty/outgoing-sync
+        // (enlivenRemote guards with isInjectingRemoteRef). excludeFromExport keeps them out of my toJSON/flatten.
+        {
+          const remoteForPage = remoteByPageRef.current[currentPage];
+          if (remoteForPage && remoteForPage.length) {
+            await enlivenRemote(canvas, remoteForPage);
+          }
+        }
+
         // Trash2 should only read as "delete selection", not "clear everything" (disambiguated
         // from Undo/Redo by disabling it when there is nothing to delete).
         setHasSelection(canvas.getActiveObjects().length > 0);
-        canvas.on('selection:created', () => setHasSelection(true));
-        canvas.on('selection:updated', () => setHasSelection(true));
+        // Custom controls are not serialized, so a callout loaded from a saved page (loadFromJSON) has
+        // no tip knob until it is selected — (re)attach it lazily when a single callout becomes active.
+        const attachTipOnSelect = () => {
+          const ao: any = canvas.getActiveObject();
+          if (ao && typeof ao.get === 'function' && ao.get('calloutGeo')) {
+            attachCalloutTipControl(ao);
+          }
+        };
+        canvas.on('selection:created', () => { attachTipOnSelect(); setHasSelection(true); });
+        canvas.on('selection:updated', () => { attachTipOnSelect(); setHasSelection(true); });
         canvas.on('selection:cleared', () => setHasSelection(false));
 
+        // G1 — Acrobat "drag the box, the arrow stays pinned": dragging the box body (native group move)
+        // fires object:moving; the tip stays pinned at its absolute page point (geo.tx/ty) while the box end
+        // follows, so the leader stretches. syncCalloutLeader redraws the linked top-level leader+head from
+        // the pin + the box's live position — pure absolute coords, no group-local math. The tip knob's own
+        // move uses actionName 'calloutMove' (→ object:calloutMove), so it never triggers this handler.
+        canvas.on('object:moving', (e: any) => {
+          const o = e.target;
+          if (!o || typeof o.get !== 'function' || !o.get('calloutGeo')) return;
+          syncCalloutLeader(canvas, o);
+        });
+
         currentCanvasRef.current = canvas;
-        setupTool(canvas);
+        setupToolRef.current(canvas); // latest tool, not this async closure's stale capture (see setupToolRef)
         activePageRef.current = currentPage;
 
       } catch (err) {
@@ -801,7 +1299,7 @@ export default function PDFPreviewModal({
       isCancelled = true;
       // Cleanup ตอน Unmount จริงๆ เท่านั้น
     };
-  }, [currentPage, renderedScale, isLoading, isEditing]);
+  }, [currentPage, renderedScale, isLoading, isEditing, remoteRenderTick]);
 
   // --- Event Listeners (Exponential Zoom & Scroll Pages) ---
   useEffect(() => {
@@ -951,6 +1449,7 @@ export default function PDFPreviewModal({
     obj.set({
       id: `ann_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
       author: user?.email || 'Unknown User',
+      authorUid: user?.id || '',
       createdAt: new Date().toISOString(),
       kind,
       pageNumber: activePageRef.current,
@@ -977,6 +1476,8 @@ export default function PDFPreviewModal({
     canvas.on('path:created', (e: any) => {
       if (e.path) {
         stampMetadata(e.path, 'markup');
+        // Now that the stroke has an id + authorUid, sync it (the earlier object:added saw no id).
+        queueWriteRef.current(e.path, false);
       }
       canvas.requestRenderAll();
     });
@@ -1039,9 +1540,8 @@ export default function PDFPreviewModal({
           return;
         }
         const finalH = Math.max(C_MIN_H, textbox.height + C_PAD * 2);
-        const gLeader = new fabric.Line([targetX, targetY, boxLeft, boxTop], {
-          stroke: drawColor, strokeWidth: Math.max(1, brushWidth - 1),
-        });
+        // The box + text are the callout Group (kind:'comment'). The leader + head are SEPARATE top-level
+        // objects (built below) linked to it — never grouped in — so their coords stay absolute and drift-free.
         const gBox = new fabric.Rect({
           left: boxLeft, top: boxTop, width: C_BOX_W, height: finalH,
           fill: '#ffffff', stroke: drawColor, strokeWidth: 2, rx: 6, ry: 6,
@@ -1050,22 +1550,45 @@ export default function PDFPreviewModal({
           left: boxLeft + C_PAD, top: boxTop + C_PAD, width: C_BOX_W - C_PAD * 2,
           fontSize: 16, fill: '#111827', splitByGrapheme: true,
         });
-        const group = new fabric.Group([gLeader, gBox, gText]);
+        const group = new fabric.Group([gBox, gText]);
         // Carry the text on the Group so the Markup List (which reads obj.text on kind:'comment'
         // objects) picks it up; the inner Textbox is nested and not seen by that top-level scan.
         group.set('text', typed);
-        // Geometry for re-edit: absolute build coords + the group's origin at creation, so a later
-        // double-click rebuilds the editable pieces translated by however far the group has moved.
-        group.set('calloutGeo', { tx: targetX, ty: targetY, bl: boxLeft, bt: boxTop, ol: group.left, ot: group.top });
+        // The ONLY stored geometry is the arrow-tip absolute pin (+ the leader's colour/width so the derived,
+        // never-persisted leader/head can be rebuilt pixel-consistent on any collaborator or on reopen); box
+        // position/size is read live from the Group.
+        group.set('calloutGeo', { tx: targetX, ty: targetY, col: drawColor, lw: Math.max(1, brushWidth - 1) });
         if (preserveMeta) {
           // Re-edit: keep the original identity so the Markup List entry stays stable.
           group.set({ id: preserveMeta.id, author: preserveMeta.author, createdAt: preserveMeta.createdAt, pageNumber: preserveMeta.pageNumber, kind: 'comment' });
         } else {
           stampMetadata(group, 'comment');
         }
-        // Resume history so this single add is the one recorded undo step.
+        const annId = group.get('id');
+        // Leader (box top-left → tip) + filled head at the tip. Non-interactive, linked to the box by id;
+        // objectCaching off so a stretched leader is never rendered clipped.
+        const lw = Math.max(1, brushWidth - 1);
+        const gLeader = new fabric.Line([targetX, targetY, boxLeft, boxTop], {
+          stroke: drawColor, strokeWidth: lw, selectable: false, evented: false, objectCaching: false,
+        });
+        gLeader.set({ kind: 'commentLeader', linkedTo: annId });
+        const headSize = Math.max(12, lw * 4);
+        const headAng = (Math.atan2(targetY - boxTop, targetX - boxLeft) * 180) / Math.PI;
+        const gHead = new fabric.Triangle({
+          left: targetX, top: targetY, originX: 'center', originY: 'center',
+          width: headSize, height: headSize, fill: drawColor, angle: headAng + 90,
+          selectable: false, evented: false, objectCaching: false,
+        });
+        gHead.set({ kind: 'commentLeader', linkedTo: annId });
+        // Add leader + head while history is STILL suppressed, then the box un-suppressed: the single
+        // object:added snapshot that fires on the box captures all three = ONE undo step for the callout.
+        canvas.add(gLeader);
+        canvas.add(gHead);
         isRestoringHistoryRef.current = false;
         canvas.add(group);
+        lockCalloutBox(group);
+        attachCalloutTipControl(group); // arrow-tip knob = move the whole callout (Acrobat-style)
+        syncCalloutLeader(canvas, group);
         canvas.setActiveObject(group);
         setCurrentTool('select');
         canvas.requestRenderAll();
@@ -1080,11 +1603,17 @@ export default function PDFPreviewModal({
       const g = o.target;
       const geo = g && typeof g.get === 'function' ? g.get('calloutGeo') : null;
       if (!geo) return;
-      const dx = (g.left || 0) - geo.ol;
-      const dy = (g.top || 0) - geo.ot;
+      // Box top-left read live from the group (centre − half size; callouts never scale/rotate).
+      const c = g.getCenterPoint();
+      const boxLeft = c.x - ((g.width || 0) * (g.scaleX || 1)) / 2;
+      const boxTop = c.y - ((g.height || 0) * (g.scaleY || 1)) / 2;
       const meta = { id: g.get('id'), author: g.get('author'), createdAt: g.get('createdAt'), pageNumber: g.get('pageNumber') };
-      canvas.remove(g);
-      openCalloutEditor(geo.tx + dx, geo.ty + dy, geo.bl + dx, geo.bt + dy, g.get('text') || '', false, meta);
+      // Suppress history across remove + rebuild so the whole re-edit is ONE undo step; openCalloutEditor
+      // keeps the flag suppressed and re-adds the callout as its single recorded step.
+      isRestoringHistoryRef.current = true;
+      removeCalloutUnit(canvas, g); // remove box + its linked leader/head (flag already suppressed)
+      // Tip is absolute (geo.tx/ty); box top-left is live — no build-origin delta any more.
+      openCalloutEditor(geo.tx, geo.ty, boxLeft, boxTop, g.get('text') || '', false, meta);
     });
 
     const activeTool = isEditing ? currentTool : 'hand';
@@ -1195,7 +1724,7 @@ export default function PDFPreviewModal({
         const eraseAtPointer = (opt: any) => {
           const target = canvas.findTarget(opt.e) as any;
           if (target) {
-            canvas.remove(target);
+            removeCalloutUnit(canvas, target, isRestoringHistoryRef); // erase the whole callout unit as one undo step
             canvas.requestRenderAll();
           }
         };
@@ -1371,6 +1900,13 @@ export default function PDFPreviewModal({
     }
   }, [currentTool, drawColor, brushWidth, renderedScale, isEditing, stampMetadata]);
 
+  // Always-latest setupTool. The async renderCanvas effect (deps exclude currentTool) creates the canvas
+  // AFTER a `hand → select` tool switch may have already settled; calling its captured closure would stamp
+  // the STALE tool onto the fresh canvas (toolbar shows select, canvas still pans). Read the current setup
+  // through this ref at the create site so a newly built canvas always gets the tool that is live NOW.
+  const setupToolRef = useRef(setupTool);
+  useEffect(() => { setupToolRef.current = setupTool; }, [setupTool]);
+
   useEffect(() => {
     if (currentCanvasRef.current) setupTool(currentCanvasRef.current);
   }, [currentTool, drawColor, brushWidth, setupTool]);
@@ -1381,6 +1917,7 @@ export default function PDFPreviewModal({
     isRestoringHistoryRef.current = true;
     undoHistoryIndexRef.current -= 1;
     c.loadFromJSON(undoHistoryRef.current[undoHistoryIndexRef.current]).then(() => {
+      rehydrateCallouts(c); // undo/redo restores from JSON — re-apply non-serialized runtime state (lock/knob/leader)
       c.requestRenderAll();
       isRestoringHistoryRef.current = false;
     });
@@ -1392,6 +1929,7 @@ export default function PDFPreviewModal({
     isRestoringHistoryRef.current = true;
     undoHistoryIndexRef.current += 1;
     c.loadFromJSON(undoHistoryRef.current[undoHistoryIndexRef.current]).then(() => {
+      rehydrateCallouts(c); // undo/redo restores from JSON — re-apply non-serialized runtime state (lock/knob/leader)
       c.requestRenderAll();
       isRestoringHistoryRef.current = false;
     });
@@ -1400,7 +1938,9 @@ export default function PDFPreviewModal({
   const handleDelete = () => {
     const c = currentCanvasRef.current;
     if (!c) return;
-    c.getActiveObjects().forEach((o: any) => c.remove(o));
+    // removeCalloutUnit expands a selected callout box to its linked leader/head and removes them as ONE
+    // undo step; a plain markup is just removed. (Leader/head are evented:false → never in the active set.)
+    c.getActiveObjects().forEach((o: any) => removeCalloutUnit(c, o, isRestoringHistoryRef));
     c.discardActiveObject();
     c.requestRenderAll();
   };
@@ -1498,8 +2038,8 @@ export default function PDFPreviewModal({
       {showCloseConfirm && (
         <div className="absolute inset-0 z-[120] bg-black/50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-5">
-            <h3 className="text-base font-semibold text-gray-800 mb-1">ยังไม่ได้บันทึก</h3>
-            <p className="text-sm text-gray-600 mb-5">มีการเปลี่ยนแปลงที่ยังไม่ได้บันทึก ต้องการปิดหน้าต่างนี้หรือไม่?</p>
+            <h3 className="text-base font-semibold text-gray-800 mb-1">ปิดหน้าต่างนี้ใช่ไหม?</h3>
+            <p className="text-sm text-gray-600 mb-5">การขีดเขียน/มาร์กอัปของคุณถูกบันทึกอัตโนมัติแล้ว</p>
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setShowCloseConfirm(false)}
@@ -1509,9 +2049,9 @@ export default function PDFPreviewModal({
               </button>
               <button
                 onClick={() => { setShowCloseConfirm(false); onClose(); }}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-red-600 hover:bg-red-700 transition-colors"
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 transition-colors"
               >
-                ปิดโดยไม่บันทึก
+                ปิดหน้าต่าง
               </button>
             </div>
           </div>

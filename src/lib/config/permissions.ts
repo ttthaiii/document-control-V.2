@@ -1,6 +1,6 @@
 // src/lib/config/permissions.ts
 
-import { ROLES, Role } from '@/lib/config/workflow';
+import { ROLES, Role, ExternalChain, canActOnExternalStep } from '@/lib/config/workflow';
 import { RFI_CREATOR_ROLES } from '@/lib/config/rfi-workflow';
 
 export const PERMISSION_KEYS = {
@@ -161,3 +161,24 @@ export const PERMISSION_GROUPS = [
     ]
   }
 ];
+
+// ── T-016 (A2) — per-line act checks ────────────────────────────────────────────
+// The line's act gate is role-based on the CURRENT chain step (whoever holds it acts).
+// These wrap that gate so the A3 override UI + any server guard import line-permission
+// logic from ONE place, rather than re-deriving it from the raw chain each call-site.
+
+/** May `role` act on the line's current step? Thin, named re-export of the chain gate. */
+export function canActOnLine(chain: ExternalChain | undefined, role: Role): boolean {
+  return canActOnExternalStep(chain, role);
+}
+
+/**
+ * May `role` EDIT the per-document line override (add/remove FUTURE steps)? Allowed only for
+ * the role currently holding the line AND only while the override is unlocked. The lock is
+ * set on the first send-back (sendBackChain) and is irreversible for the doc's lifetime, so a
+ * locked chain returns false for everyone — the guardrail that stops re-editing after a rewind.
+ */
+export function canEditLineOverride(chain: ExternalChain | undefined, role: Role): boolean {
+  if (!chain || chain.overrideLocked) return false;
+  return canActOnExternalStep(chain, role);
+}

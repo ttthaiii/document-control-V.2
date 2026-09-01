@@ -2,7 +2,8 @@
 import { NextResponse } from "next/server";
 import { adminDb, adminBucket, adminAuth } from "@/lib/firebase/admin";
 import { FieldValue } from 'firebase-admin/firestore';
-import { STATUSES } from '@/lib/config/workflow';
+import { STATUSES, ExternalChain, seedChainFromTemplate } from '@/lib/config/workflow';
+import { getTemplateForDoc } from '@/lib/utils/lineTemplateResolver';
 import { getFileUrl } from '@/lib/utils/storage';
 
 export const dynamic = 'force-dynamic';
@@ -41,6 +42,22 @@ export async function POST(req: Request) {
 
         const originalRfaRef = adminDb.collection("rfaDocuments").doc(originalDocId);
         let newDocId: string = '';
+
+        // T-018: resolve the site + re-seed a FRESH approval line before the transaction (a
+        // revision restarts the approval process — it must not inherit the original doc's own
+        // chain, which the `...copiedOriginalData` spread below would otherwise carry over).
+        const originalSnapPre = await originalRfaRef.get();
+        const originalSiteId = originalSnapPre.data()?.siteId;
+        let externalChain: ExternalChain | undefined;
+        if (originalSiteId) {
+            const siteDoc = await adminDb.collection('sites').doc(originalSiteId).get();
+            const cmSystemType: 'INTERNAL' | 'EXTERNAL' = siteDoc.data()?.cmSystemType === 'EXTERNAL' ? 'EXTERNAL' : 'INTERNAL';
+            if (cmSystemType === 'INTERNAL') {
+                const resolved = await getTemplateForDoc('RFA', { siteId: originalSiteId, cmSystemType: 'INTERNAL' });
+                if (resolved.template) externalChain = seedChainFromTemplate(resolved.template, uid);
+            }
+        }
+        const reachedCmStatus = externalChain ? STATUSES.PENDING_EXTERNAL_APPROVAL : STATUSES.PENDING_CM_APPROVAL;
 
         await adminDb.runTransaction(async (transaction) => {
             const originalDoc = await transaction.get(originalRfaRef);
@@ -100,15 +117,17 @@ export async function POST(req: Request) {
             const isEngineer = userData.role === 'ME' || userData.role === 'SN';
 
             if (originalData.rfaType === 'RFA-SHOP' && isEngineer) {
-                newStatus = STATUSES.PENDING_CM_APPROVAL;
+                newStatus = reachedCmStatus;
                 initialAction = "CREATE_REVISION_AND_SUBMIT_TO_CM";
             } else if (isReviewer && ['RFA-MAT', 'RFA-GEN', 'RFA-SHOP'].includes(originalData.rfaType)) {
-                newStatus = STATUSES.PENDING_CM_APPROVAL;
+                newStatus = reachedCmStatus;
                 initialAction = "CREATE_REVISION_AND_SUBMIT";
             }
 
             // ตัด cadFiles ของเอกสารเก่าออก เพื่อให้ Rev. ใหม่สามารถแตกไฟล์ตั้งต้นใหม่ได้
-            const { cadFiles: _oldCadFiles, ...copiedOriginalData } = originalData;
+            // T-018: also drop the old externalChain — a revision restarts the approval line,
+            // it must not carry over the original doc's (now-stale) chain via the spread below.
+            const { cadFiles: _oldCadFiles, externalChain: _oldExternalChain, ...copiedOriginalData } = originalData;
 
             // สร้างเอกสาร Rev. ใหม่
             transaction.set(newRfaRef, {
@@ -137,6 +156,7 @@ export async function POST(req: Request) {
                 // ✅ track whether the previous revision was already suspended before this revision was created
                 previousRevisionSuspended: originalData.supersededStatus === 'SUSPENDED',
                 isFromSupersedeRequest: !!originalData.supersededRequestedBy,
+                ...(externalChain ? { externalChain } : {}),
                 workflow: [
                     ...((originalData.workflow || []).map((w: any) => ({
                         ...w,
