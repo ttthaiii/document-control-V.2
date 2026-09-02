@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { adminDb, adminBucket, adminAuth } from "@/lib/firebase/admin";
 import { FieldValue } from 'firebase-admin/firestore';
 import { ROLES, REVIEWER_ROLES, STATUSES, Role, ExternalChain, seedChainFromTemplate } from '@/lib/config/workflow';
+import { roleRequiresSiteReview } from '@/lib/config/roleRegistry';
 import { getTemplateForDoc } from '@/lib/utils/lineTemplateResolver';
 import { getFileUrl } from '@/lib/utils/storage';
 import { logActivity, buildDescription } from '@/lib/utils/activityLogger';
@@ -206,10 +207,10 @@ export async function POST(req: Request) {
 
     // ใช้ (userRole as Role) เพื่อยืนยัน Type ให้ TypeScript
     const isReviewer = REVIEWER_ROLES.includes(userRole as Role);
-    const isEngineer = userRole === ROLES.ME || userRole === ROLES.SN;
 
-    // Case 1: Engineer สร้าง RFA-SHOP, จะถูกส่งไป CM เลย
-    if (rfaType === 'RFA-SHOP' && isEngineer) {
+    // Case 1: creator ที่ไม่ต้องผ่าน Site (งานระบบ ME/SN, requiresSiteReview:false) → ส่งเข้าสาย CM เลย ทุก rfaType
+    // ใช้ flag เดียวกับ workflow.ts resolveSubmitRevisionStatus เพื่อให้ "สร้างครั้งแรก" กับ "ตีกลับส่งใหม่" เดินสายเดียวกัน (แหล่งเดียว = roleRegistry)
+    if (!roleRequiresSiteReview(userRole as Role)) {
       initialStatus = reachedCmStatus;
       initialAction = "CREATE_AND_SUBMIT_TO_CM";
     }

@@ -313,6 +313,8 @@ interface PDFPreviewModalProps {
   onSave?: (editedFile: File) => void | Promise<void>;
   allowEdit?: boolean;
   onDownload?: () => void;
+  /** Fired once per open session on the FIRST local markup mutation (T-027 access log). */
+  onMarkupEdit?: () => void;
 }
 
 const PRESET_COLORS = ['#000000', '#DC2626', '#2563EB', '#16A34A', '#EA580C'];
@@ -323,7 +325,7 @@ const PRESET_COLORS = ['#000000', '#DC2626', '#2563EB', '#16A34A', '#EA580C'];
 const MAX_RENDER_DIMENSION = 8192;
 
 export default function PDFPreviewModal({
-  isOpen, file, onClose, onSave, allowEdit = true, onDownload
+  isOpen, file, onClose, onSave, allowEdit = true, onDownload, onMarkupEdit
 }: PDFPreviewModalProps) {
   const { showNotification } = useNotification();
   const { user } = useAuth();
@@ -333,6 +335,8 @@ export default function PDFPreviewModal({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const currentCanvasRef = useRef<fabric.Canvas | null>(null);
   const pdfDocRef = useRef<any>(null);
+  // T-027 access log: guard so onMarkupEdit fires only on the FIRST local markup mutation per open.
+  const markupEditLoggedRef = useRef(false);
 
   const canvasDataRef = useRef<{ [key: number]: any }>({});
   const pageCanvasCacheRef = useRef<{ [page: number]: { canvas: HTMLCanvasElement, scale: number } }>({});
@@ -501,6 +505,10 @@ export default function PDFPreviewModal({
     if (!user || !allowEdit || !canDraft(file) || !obj || obj._remote) return;
     const id = obj.id;
     if (!id) return;
+    if (!markupEditLoggedRef.current) {
+      markupEditLoggedRef.current = true;
+      onMarkupEdit?.();
+    }
     if (removed) {
       pendingWritesRef.current[id] = 'DELETE';
     } else {
@@ -509,7 +517,7 @@ export default function PDFPreviewModal({
       pendingWritesRef.current[id] = obj;
     }
     scheduleFlush();
-  }, [user, file, allowEdit, scheduleFlush]);
+  }, [user, file, allowEdit, scheduleFlush, onMarkupEdit]);
 
   // Stable handle to the latest queueWrite so tool-setup handlers (path:created) can sync without
   // re-binding on every queueWrite identity change. A freehand stroke fires `object:added` BEFORE
@@ -646,6 +654,7 @@ export default function PDFPreviewModal({
   useEffect(() => {
     if (isOpen) {
       setIsEditing(false);
+      markupEditLoggedRef.current = false; // new open session → allow one EDIT_MARKUP log again
       document.body.style.overflow = 'hidden';
       pageCanvasCacheRef.current = {};
     } else {

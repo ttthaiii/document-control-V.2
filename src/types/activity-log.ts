@@ -7,6 +7,7 @@ export type LogAction =
   | 'VIEW_DETAIL'     // เปิดดูรายละเอียดเอกสาร (modal/detail page)
   | 'PREVIEW_FILE'    // เปิด PDF จริง
   | 'DOWNLOAD_FILE'   // ดาวน์โหลดไฟล์
+  | 'EDIT_MARKUP'     // แก้ไข markup ในหน้า PDF preview (log ครั้งแรกต่อรอบการเปิด editor)
   // Document Actions
   | 'CREATE_DOCUMENT'
   | 'SUBMIT_DOCUMENT'

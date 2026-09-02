@@ -51,6 +51,7 @@ export function buildDescription(
     VIEW_DETAIL: `เปิดดูรายละเอียดเอกสาร ${res}`,
     PREVIEW_FILE: `เปิดดูไฟล์เอกสาร ${res}`,
     DOWNLOAD_FILE: `ดาวน์โหลดไฟล์เอกสาร ${res}`,
+    EDIT_MARKUP: `แก้ไข markup เอกสาร ${res}`,
     CREATE_DOCUMENT: `สร้างเอกสาร ${res}`,
     SUBMIT_DOCUMENT: `ส่งเอกสาร ${res} เพื่อขออนุมัติ`,
     APPROVE_DOCUMENT: `อนุมัติเอกสาร ${res}`,

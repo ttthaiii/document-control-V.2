@@ -4,53 +4,30 @@
 // type-only cycle produces no runtime require cycle). T-016 (A2) seeds chains from templates.
 import type { LineTemplate } from './lineTemplate';
 
-export const ROLES = {
-  ADMIN: 'Admin',
-  BIM: 'BIM',
-  SITE_ADMIN: 'Site Admin',
-  CM: 'CM',
-  ME: 'ME',
-  SN: 'SN',
-  OE: 'OE',
-  PE: 'PE',
-  PM: 'PM',
-  PD: 'PD',
-  SE: 'SE',
-  FM: 'FM',
-  ADMIN_SITE_2: 'Adminsite2',
-  // External approval chain roles (M1 foundation): the "external" side beyond CM.
-  // CM forwards a document to these for review; they are NOT internal approvers.
-  DESIGNER: 'Designer',
-  OWNER: 'Owner',
-} as const;
+// ROLES + Role now live in the role registry (P1 leaf) so the registry can own the
+// role -> behaviour-group mapping with no runtime import cycle. Re-exported here so
+// the many modules that import them from workflow.ts keep working unchanged.
+import {
+  ROLES,
+  rolesInGroup,
+  roleRequiresSiteReview,
+} from './roleRegistry';
+import type { Role } from './roleRegistry';
+export { ROLES };
+export type { Role };
 
 type ObjectValues<T> = T[keyof T];
-export type Role = ObjectValues<typeof ROLES>;
 
-// Creators (RFA): BIM, ME, SN, Site Admin, PM, PE, OE, Admin
-export const CREATOR_ROLES: Role[] = [
-  ROLES.BIM, ROLES.ME, ROLES.SN,
-  ROLES.SITE_ADMIN, ROLES.ADMIN,
-  ROLES.PM, ROLES.PE, ROLES.OE
-];
-
-// Reviewers: ยังคงสถานะเดิมไว้สำหรับการตรวจสอบเบื้องต้น (ถ้ามี workflow นี้)
-export const REVIEWER_ROLES: Role[] = [
-  ROLES.SITE_ADMIN, ROLES.ADMIN_SITE_2,
-  ROLES.OE, ROLES.PE, ROLES.ADMIN
-];
-
-// Approvers (RFA Final): CM, Site Admin, PM, PE, OE, Admin
-export const APPROVER_ROLES: Role[] = [
-  ROLES.CM, ROLES.ADMIN,
-  ROLES.SITE_ADMIN, ROLES.PM, ROLES.PE, ROLES.OE
-];
-
-// External approval-chain roles (M1 foundation). Kept as a SEPARATE group and
-// deliberately NOT merged into APPROVER_ROLES: Designer/Owner only ever act inside a
-// CM-configured external chain (per document), never as standalone RFA approvers.
-// Merging them would reopen the same permission-leak class just fixed for CM.
-export const EXTERNAL_APPROVER_ROLES: Role[] = [ROLES.DESIGNER, ROLES.OWNER];
+// Behaviour-group arrays, now DERIVED from the single registry (backward-compat
+// views: same names, same membership, same import path). Set-equality with the
+// pre-P1 hardcoded literals is asserted by the parity test.
+export const CREATOR_ROLES: Role[] = rolesInGroup('creator');
+export const REVIEWER_ROLES: Role[] = rolesInGroup('reviewer');
+export const APPROVER_ROLES: Role[] = rolesInGroup('approver');
+// Kept as a SEPARATE group (registry group 'externalApprover'), deliberately NOT in
+// APPROVER_ROLES: Designer/Owner only ever act inside a CM-configured external chain
+// (per document), never as standalone RFA approvers.
+export const EXTERNAL_APPROVER_ROLES: Role[] = rolesInGroup('externalApprover');
 
 // ── External approval chain data model (M1 foundation) ──────────────────────────
 // Shared here (not in the per-module type files) so RFA types, RFI types, and the
@@ -832,11 +809,12 @@ function resolveSendToCmStatus(ctx: RfaActionContext): string {
   return resolveReachedCmStatus(ctx);
 }
 
-// SUBMIT_REVISION routing (unchanged from the pre-table switch): SHOP + ME/SN, or a
-// Reviewer on MAT/GEN/SHOP, skips the SITE review step and goes straight to CM.
+// SUBMIT_REVISION routing (P1: creator Site-review flag). A creator whose role does
+// NOT require Site review (งานระบบ ME/SN, requiresSiteReview:false) goes straight to
+// CM for ALL rfa types — Option B (2026-09-01), an intentional change from the old
+// SHOP-only skip. A Reviewer forwarding MAT/GEN/SHOP still skips the Site step (unchanged).
 function resolveSubmitRevisionStatus(ctx: RfaActionContext): string {
-  const isMEorSN = ctx.userRole === ROLES.ME || ctx.userRole === ROLES.SN;
-  if (ctx.rfaType === 'RFA-SHOP' && isMEorSN) return resolveReachedCmStatus(ctx);
+  if (!roleRequiresSiteReview(ctx.userRole)) return resolveReachedCmStatus(ctx);
   if (ctx.isReviewer && ['RFA-MAT', 'RFA-GEN', 'RFA-SHOP'].includes(ctx.rfaType || '')) {
     return resolveReachedCmStatus(ctx);
   }

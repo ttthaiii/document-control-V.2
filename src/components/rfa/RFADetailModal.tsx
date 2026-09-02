@@ -1,9 +1,10 @@
 // src/components/rfa/RFADetailModal.tsx
 'use client'
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react'
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { RFADocument, RFAPermissions, RFAWorkflowStep, RFAFile, RFASite } from '@/types/rfa'
-import { X, Paperclip, Clock, User, Check, Send, AlertTriangle, FileText, Download, History, MessageSquare, Edit3, Upload, ThumbsUp, ThumbsDown, Eye, CornerUpLeft, ArrowLeft, RefreshCw, EyeOff, Lock, CheckCircle2, XCircle, RotateCcw, Hourglass } from 'lucide-react'
+import { groupAccessByMilestone, type AccessLogEntry } from '@/lib/rfa/accessLogGrouping'
+import { X, Paperclip, Clock, User, Check, Send, AlertTriangle, FileText, Download, History, MessageSquare, Edit3, Upload, ThumbsUp, ThumbsDown, Eye, CornerUpLeft, ArrowLeft, RefreshCw, EyeOff, Lock, CheckCircle2, XCircle, RotateCcw, Hourglass, ChevronDown, ChevronRight } from 'lucide-react'
 import Spinner from '@/components/shared/Spinner';
 import LoadingOverlay from '@/components/shared/LoadingOverlay';
 import { useAuth } from '@/lib/auth/useAuth'
@@ -47,6 +48,19 @@ const getStatusIcon = (status: string) => {
   }
 };
 
+// Access log (T-027) — labels + icons for the nested per-milestone access list.
+const ACCESS_ACTION_LABEL: Record<string, string> = {
+  VIEW_DETAIL: 'เปิดดูรายละเอียด',
+  PREVIEW_FILE: 'เปิดดูไฟล์',
+  DOWNLOAD_FILE: 'ดาวน์โหลด',
+  EDIT_MARKUP: 'แก้ไข markup',
+};
+const AccessActionIcon = ({ action }: { action: string }) => {
+  if (action === 'DOWNLOAD_FILE') return <Download size={12} className="text-gray-400 flex-shrink-0" aria-hidden="true" />;
+  if (action === 'EDIT_MARKUP') return <Edit3 size={12} className="text-orange-500 flex-shrink-0" aria-hidden="true" />;
+  return <Eye size={12} className="text-blue-500 flex-shrink-0" aria-hidden="true" />;
+};
+
 // --- Component: Workflow History Modal ---
 const WorkflowHistoryModal = ({
   workflow,
@@ -68,6 +82,33 @@ const WorkflowHistoryModal = ({
   siteName?: string
 }) => {
   const { logActivity } = useLogActivity();
+  const { firebaseUser } = useAuth();
+
+  // Access log (T-027): fetch this document's access events, group them under the milestone
+  // that was active when each event happened (grouped by time — see accessLogGrouping).
+  const [accessLogs, setAccessLogs] = useState<AccessLogEntry[]>([]);
+  const [expandedAccess, setExpandedAccess] = useState<Set<number>>(new Set());
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (!docId || !firebaseUser) return;
+      try {
+        const token = await firebaseUser.getIdToken();
+        const res = await fetch(`/api/rfa/${docId}/activity`, { headers: { Authorization: `Bearer ${token}` } });
+        const data = await res.json();
+        if (!cancelled && data?.success) setAccessLogs(data.logs || []);
+      } catch { /* best-effort: the access log is non-critical, never block the history view */ }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [docId, firebaseUser]);
+  const toggleAccess = (i: number) =>
+    setExpandedAccess((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i); else next.add(i);
+      return next;
+    });
+
   const filteredWorkflow = useMemo(() => {
     if (userRole === ROLES.CM && cmSystemType === 'INTERNAL') {
       // Internal loop steps CM must never see: the SITE<->BIM review pass AND the round-2
@@ -87,6 +128,11 @@ const WorkflowHistoryModal = ({
     }
     return workflow;
   }, [workflow, userRole, cmSystemType]);
+
+  const accessBuckets = useMemo(
+    () => groupAccessByMilestone(filteredWorkflow, accessLogs),
+    [filteredWorkflow, accessLogs]
+  );
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 z-[60] flex items-center justify-center p-4">
@@ -150,7 +196,7 @@ const WorkflowHistoryModal = ({
                                   siteId: siteId,
                                   siteName: siteName,
                                   description: `${isPdf ? 'เปิดดูไฟล์' : 'ดาวน์โหลดไฟล์'} "${file.fileName}" (จากประวัติ)`,
-                                  metadata: { revisionNumber: item.revisionNumber }
+                                  metadata: { revisionNumber: item.revisionNumber, fileName: file.fileName }
                                 });
                               }}
                             >
@@ -159,6 +205,48 @@ const WorkflowHistoryModal = ({
                           </li>
                         ))}
                       </ul>
+                    </div>
+                  )}
+                  {accessBuckets[index] && accessBuckets[index].events.length > 0 && (
+                    <div className="mt-2 pl-2 border-l-2 border-blue-100">
+                      <button
+                        type="button"
+                        onClick={() => toggleAccess(index)}
+                        className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 focus-visible:ring-2 focus-visible:ring-blue-500 rounded outline-none"
+                        aria-expanded={expandedAccess.has(index)}
+                      >
+                        {expandedAccess.has(index)
+                          ? <ChevronDown size={14} aria-hidden="true" />
+                          : <ChevronRight size={14} aria-hidden="true" />}
+                        <Eye size={12} aria-hidden="true" />
+                        มีผู้เข้าถึงเอกสาร {accessBuckets[index].events.length} รายการ
+                      </button>
+                      {expandedAccess.has(index) && (
+                        <div className="mt-1 overflow-x-auto">
+                          <div className="min-w-[34rem] text-xs">
+                            {/* Column header — centered over each column (same grid template as the rows) */}
+                            <div className="grid grid-cols-[minmax(6rem,1.4fr)_minmax(4rem,0.8fr)_minmax(6rem,1fr)_minmax(6rem,1.2fr)_auto] gap-x-3 pb-1 mb-1 border-b border-gray-100 text-[10px] font-semibold uppercase tracking-wide text-gray-400 text-center">
+                              <span>ชื่อ-นามสกุล</span>
+                              <span>ตำแหน่ง</span>
+                              <span>การดำเนินการ</span>
+                              <span>ไฟล์</span>
+                              <span>วันที่</span>
+                            </div>
+                            {accessBuckets[index].events.map((ev) => (
+                              <div key={ev.id} className="grid grid-cols-[minmax(6rem,1.4fr)_minmax(4rem,0.8fr)_minmax(6rem,1fr)_minmax(6rem,1.2fr)_auto] gap-x-3 items-center py-0.5 text-gray-600 text-center">
+                                <span className="font-medium text-gray-700 truncate" title={ev.userName || '—'}>{ev.userName || '—'}</span>
+                                <span className="text-gray-500 truncate" title={ev.userRole || ''}>{ev.userRole || '—'}</span>
+                                <span className="flex items-center justify-center gap-1 text-gray-500 min-w-0">
+                                  <AccessActionIcon action={ev.action} />
+                                  <span className="truncate">{ACCESS_ACTION_LABEL[ev.action] || ev.action}</span>
+                                </span>
+                                <span className="text-gray-500 truncate" title={ev.metadata?.fileName || '—'}>{ev.metadata?.fileName || '—'}</span>
+                                <time className="text-gray-400 whitespace-nowrap">{ev.createdAt ? formatDate(ev.createdAt) : '—'}</time>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -213,6 +301,26 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
   const { logActivity } = useLogActivity();
 
   const [document, setDocument] = useState<FullRFADocument | null>(initialDoc as FullRFADocument);
+
+  // Access log (T-027): record VIEW_DETAIL once per modal open, tagged with the document status
+  // active at view time (metadata.documentStatus — a label; access buckets are grouped by time in S4).
+  const viewLoggedRef = useRef(false);
+  useEffect(() => {
+    if (viewLoggedRef.current || !document?.id) return;
+    viewLoggedRef.current = true;
+    logActivity({
+      action: 'VIEW_DETAIL',
+      resourceType: 'RFA',
+      resourceId: document.id,
+      resourceName: document.documentNumber || document.runningNumber,
+      resourceTitle: document.title,
+      siteId: document.site?.id,
+      siteName: document.site?.name,
+      description: `เปิดดูรายละเอียดเอกสาร "${document.documentNumber || document.runningNumber || ''}"`,
+      metadata: { documentStatus: document.status },
+    });
+  }, [document, logActivity]);
+
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
@@ -1264,7 +1372,8 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                                   resourceTitle: document.title,
                                   siteId: document.site.id,
                                   siteName: document.site.name,
-                                  description: `เปิดดูไฟล์เอกสาร "${file.fileName}"`
+                                  description: `เปิดดูไฟล์เอกสาร "${file.fileName}"`,
+                                  metadata: { documentStatus: document.status, fileName: file.fileName }
                                 });
                                 setPreviewFile(file);
                               }}
@@ -1288,7 +1397,8 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                                   resourceTitle: document.title,
                                   siteId: document.site.id,
                                   siteName: document.site.name,
-                                  description: `ดาวน์โหลดไฟล์เอกสาร "${file.fileName}"`
+                                  description: `ดาวน์โหลดไฟล์เอกสาร "${file.fileName}"`,
+                                  metadata: { documentStatus: document.status, fileName: file.fileName }
                                 });
                               }}
                               className="w-full text-left p-2 rounded-md group transition-colors duration-200 flex"
@@ -2047,7 +2157,8 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
                                 resourceName: document?.documentNumber || document?.title,
                                 siteId: document?.site?.id,
                                 siteName: document?.site?.name,
-                                description: `ดาวน์โหลดไฟล์อ้างอิง "${cadWarningModalData.cadMeta?.fileName}" จากหน้าต่างยืนยันความเสี่ยง CAD`
+                                description: `ดาวน์โหลดไฟล์อ้างอิง "${cadWarningModalData.cadMeta?.fileName}" จากหน้าต่างยืนยันความเสี่ยง CAD`,
+                                metadata: { documentStatus: document?.status, fileName: cadWarningModalData.cadMeta?.fileName }
                               });
                             }}
                           >
@@ -2136,6 +2247,20 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
         onClose={() => setPreviewFile(null)}
         allowEdit={canEditPDF}
         onSave={handleAnnotateSave}
+        onMarkupEdit={() => {
+          if (!document) return;
+          logActivity({
+            action: 'EDIT_MARKUP',
+            resourceType: 'RFA',
+            resourceId: document.id,
+            resourceName: document.documentNumber || document.runningNumber,
+            resourceTitle: document.title,
+            siteId: document.site?.id,
+            siteName: document.site?.name,
+            description: `แก้ไข markup เอกสาร "${previewFile?.fileName || document.documentNumber || ''}"`,
+            metadata: { documentStatus: document.status, fileName: previewFile?.fileName },
+          });
+        }}
         onDownload={() => {
           logActivity({
             action: 'DOWNLOAD_FILE',
@@ -2145,7 +2270,8 @@ export default function RFADetailModal({ document: initialDoc, onClose, onUpdate
             resourceTitle: document.title,
             siteId: document.site?.id,
             siteName: document.site?.name,
-            description: `ดาวน์โหลดไฟล์เอกสาร "${previewFile?.fileName}"`
+            description: `ดาวน์โหลดไฟล์เอกสาร "${previewFile?.fileName}"`,
+            metadata: { documentStatus: document.status, fileName: previewFile?.fileName }
           });
         }}
       />

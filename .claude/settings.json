@@ -1,0 +1,329 @@
+{
+  "statusLine": {
+    "type": "command",
+    "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || echo python3)\"; R=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; S=\"\"; for C in \"${CLAUDE_PLUGIN_ROOT:-}\" \"$R\" \"${HARNESS_ENGINE_ROOT:-}\" \"$HOME/.claude\" \"$(ls -td \"$HOME\"/.claude/plugins/cache/*/harness-agent/* 2>/dev/null | head -1)\"; do [ -n \"$C\" ] && [ -f \"$C/scripts/statusline.py\" ] && S=\"$C/scripts/statusline.py\" && break; done; [ -n \"$S\" ] && \"$PY\" \"$S\"",
+    "padding": 0
+  },
+  "permissions": {
+    "allow": [
+      "Read",
+      "Grep",
+      "Glob",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(cd:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(find:*)",
+      "Bash(echo:*)",
+      "Bash(sort:*)",
+      "Bash(uniq:*)",
+      "Bash(diff:*)",
+      "Bash(sha1sum:*)",
+      "Bash(sed:*)",
+      "Bash(python3:*)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)"
+    ],
+    "deny": [
+      "Bash(rm:*)",
+      "Bash(rmdir:*)",
+      "Bash(git push:*)",
+      "Bash(git reset:*)",
+      "Bash(git clean:*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}\" && \"$PY\" \"${HARNESS_ENGINE_ROOT:-$ROOT}/scripts/compact_reset.py\" --trigger=hook 2>/dev/null || true"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}\" && \"$PY\" \"${HARNESS_ENGINE_ROOT:-$ROOT}/scripts/harness_onboard.py\" 2>/dev/null || true",
+            "timeout": 5,
+            "statusMessage": "Harness onboard check (T-323)..."
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}\" && \"$PY\" \"${HARNESS_ENGINE_ROOT:-$ROOT}/scripts/version_check.py\" 2>/dev/null || true",
+            "timeout": 8,
+            "statusMessage": "Checking for harness updates (T-332)..."
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; ROOT=\"${CLAUDE_PROJECT_DIR:-$(git -C \"$(dirname \"${BASH_SOURCE[0]:-$0}\")\" rev-parse --show-toplevel 2>/dev/null || pwd)}\"\nTF=\"$ROOT/.sessions/session_tokens.md\"\nlw=$(grep \"^LOOP_WEIGHT:\" \"$TF\" 2>/dev/null | awk '{print $2}'); lw=${lw:-0}\nst=$(grep \"^SESSION_TOTAL:\" \"$TF\" 2>/dev/null | awk '{print $2}'); st=${st:-0}\nct=$(grep \"^CHAT_TOTAL:\" \"$TF\" 2>/dev/null | awk '{print $2}'); ct=${ct:-0}\nctr=$(\"$PY\" \"${HARNESS_ENGINE_ROOT:-$ROOT}/scripts/real_context.py\" 2>/dev/null); if [ -n \"$ctr\" ]; then ct=$ctr; csrc=real; else csrc=est; fi\ntc=$(grep \"^TURN_COUNT:\" \"$TF\" 2>/dev/null | awk '{print $2}'); tc=${tc:-0}\nfr=$(grep \"^FILES_READ:\" \"$TF\" 2>/dev/null | awk '{print $2}'); fr=${fr:-0}\nlo=$(grep \"^LONG_OUTPUTS:\" \"$TF\" 2>/dev/null | awk '{print $2}'); lo=${lo:-0}\nreset_marker=$(grep \"^session_reset[[:space:]]*[:=]\" \"$ROOT/.sessions/compact_state.md\" 2>/dev/null | sed 's/^session_reset[[:space:]]*[:=][[:space:]]*//' | tr -d ' ')\nif [ \"$reset_marker\" = \"armed\" ]; then\n  lw=0; st=0; tc=0; fr=0; lo=0\n  printf \"SESSION_TOTAL: 0\\nCHAT_TOTAL: %s\\nCACHE_READ: 0\\nCACHE_WRITE: 0\\nTURN_COUNT: 0\\nLOOP_WEIGHT: 0\\nFILES_READ: 0\\nLONG_OUTPUTS: 0\\n\" \"$ct\" > \"$TF.tmp.$$\" && mv -f \"$TF.tmp.$$\" \"$TF\" || rm -f \"$TF.tmp.$$\" 2>/dev/null\n  sed -i '' \"s/^session_reset[[:space:]]*[:=][[:space:]]*armed/session_reset: consumed/\" \"$ROOT/.sessions/compact_state.md\" 2>/dev/null || sed -i \"s/^session_reset[[:space:]]*[:=][[:space:]]*armed/session_reset: consumed/\" \"$ROOT/.sessions/compact_state.md\" 2>/dev/null\nfi\ntc=$((tc+1))\nif [ \"$csrc\" = real ]; then sed -e \"s/^TURN_COUNT:.*/TURN_COUNT: $tc/\" -e \"s/^CHAT_TOTAL:.*/CHAT_TOTAL: $ct/\" \"$TF\" > \"$TF.tmp.$$\" 2>/dev/null && mv -f \"$TF.tmp.$$\" \"$TF\" || rm -f \"$TF.tmp.$$\" 2>/dev/null; else sed \"s/^TURN_COUNT:.*/TURN_COUNT: $tc/\" \"$TF\" > \"$TF.tmp.$$\" 2>/dev/null && mv -f \"$TF.tmp.$$\" \"$TF\" || rm -f \"$TF.tmp.$$\" 2>/dev/null; fi\nsl=$(grep -cE \"^- \\[ \\]|^- \\[/\\]\" \"$ROOT/.sessions/mece_plan.md\" 2>/dev/null); sl=${sl:-0}\nb=0; reasons=\"\"\n[ \"$tc\" -ge 20 ] 2>/dev/null && { b=$((b+1)); reasons=\"${reasons}turns=$tc \"; }\n[ \"$fr\" -ge 5 ] 2>/dev/null && { b=$((b+1)); reasons=\"${reasons}files=$fr \"; }\n[ \"$lo\" -ge 3 ] 2>/dev/null && { b=$((b+1)); reasons=\"${reasons}long_out=$lo \"; }\n[ \"$sl\" -ge 3 ] 2>/dev/null && { b=$((b+1)); reasons=\"${reasons}steps_left=$sl \"; }\necho \"[signal-box] $b/4 (turns=$tc files=$fr long_out=$lo steps_left=$sl) -- PRIMARY compact signal: drift-proof booleans (T-221)\"\nWIN=$(grep \"^token_budget:\" \"${HARNESS_ENGINE_ROOT:-$ROOT}/.agents/platform/detected.md\" 2>/dev/null | awk '{print $2}'); WIN=${WIN:-128000}; if [ \"$csrc\" = real ]; then CF=100; eff=$((ct*CF/100)); else eff=$(\"$PY\" \"${HARNESS_ENGINE_ROOT:-$ROOT}/scripts/token_estimator.py\" --full-context --chat-total=\"$ct\" 2>/dev/null); eff=${eff:-$((ct*175/100))}; fi; pct=$((eff*100/WIN))\nif [ \"$eff\" -ge $((WIN*90/100)) ] 2>/dev/null && [ \"$b\" -ge 2 ] 2>/dev/null; then\n  echo \"[compact-rec] BUDGET-NEAR (estimate) eff=${eff} (~${pct}% of token_budget=${WIN}) CHAT=$ct b=$b/4 -- ADVISORY: LOWER-BOUND estimate (tool I/O only), NOT real context. Check the CLIENT METER (real %) before deciding. Estimate alone does NOT stop the session - token_budget is a spend cap, not the model window. Your call.\"\nelif [ \"$b\" -ge 2 ] 2>/dev/null || [ \"$eff\" -ge $((WIN*70/100)) ] 2>/dev/null; then\n  echo \"[compact-rec] signal-box $b/4 ($reasons)-- PRIMARY trigger: 2+ drift-proof signals fired - surface a /compact RECOMMENDATION per C0.5 BC (Recommend/Why/MUST-vs-SHOULD=SHOULD/Resume brief/Your call). NOT a STOP - user decides\"\nelse\n  [ \"${ct:-0}\" -gt 80000 ] 2>/dev/null && echo \"[compact-note] CHAT_TOTAL=$ct>80k (SECONDARY rough estimate - may be inflated by subagent pollution CFP-041; trust signal-box first)\"\n  [ \"$lw\" -gt 50 ] 2>/dev/null && echo \"[compact-note] LOOP_WEIGHT=$lw>50 (SECONDARY tool-call hint; not a ceiling)\"\nfi\necho \"[token-state] SESSION=${st} LOOP_W=${lw} CHAT=${ct} CHAT_SRC=${csrc:-est} TURN=${tc} FILES=${fr} LONG_OUT=${lo} BOX=${b}/4 -- footer: use these values ONLY (CFP-031). signal-box=PRIMARY; CHAT=real-from-transcript when CHAT_SRC=real (else lower-bound estimate); SESSION=per-task estimate\"\nexit 0",
+            "timeout": 5,
+            "statusMessage": "Checking loop weight..."
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}\" && \"$PY\" \"${HARNESS_ENGINE_ROOT:-$ROOT}/scripts/learning_profile.py\" analyze 2>/dev/null || true",
+            "timeout": 5,
+            "statusMessage": "Reading learning profile..."
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}\" && \"$PY\" \"${HARNESS_ENGINE_ROOT:-$ROOT}/scripts/review_intent.py\" 2>/dev/null || true",
+            "timeout": 5,
+            "statusMessage": "Review-intent check..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; \"$PY\" \"${HARNESS_ENGINE_ROOT:-${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}}/scripts/init_gate.py\"",
+            "timeout": 5,
+            "statusMessage": "Init-gate (project-initialized check · T-323)..."
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; \"$PY\" -c \"\nimport json, sys, os, subprocess\ndata = json.load(sys.stdin)\ntool = data.get('tool_name', '')\nfile_path = data.get('tool_input', {}).get('file_path', '') or data.get('tool_input', {}).get('notebook_path', '')\nrel_path = file_path.replace(os.sep, '/').lstrip('/')\n\nPROHIBITED = [\n    'knowledge/index_variables.json',\n    'knowledge/index_files.json',\n    'CODING_FAILURE_PATTERNS.md',\n    'docs/master_roadmap.md',\n    'INVARIANTS.md',\n    'knowledge/error_index.md',\n]\n\nif tool == 'Read':\n    ti = data.get('tool_input', {})\n    has_range = ti.get('offset') is not None or ti.get('limit') is not None\n    for p in PROHIBITED:\n        if rel_path.endswith(p) or p in rel_path:\n            if has_range:\n                sys.exit(0)\n            print(f'[gate] never-full-load: {p} is prohibited — use grep/offset only', file=sys.stderr)\n            sys.exit(2)\n    if not has_range and not os.environ.get('HARNESS_SKIP_READ_GATE'):\n        try:\n            _head = open(file_path, encoding='utf-8', errors='ignore').read(4000)\n        except Exception:\n            _head = ''\n        if '<!-- DOC-MAP:START' in _head:\n            print(f'[gate] never-full-load: {rel_path} is a nav-mapped long doc - jump-read with python3 scripts/lookup.py <label> or Read with offset/limit (HARNESS_SKIP_READ_GATE=1 to override)', file=sys.stderr)\n            sys.exit(2)\n    sys.exit(0)\n\nif tool not in ('Edit', 'Write', 'NotebookEdit', 'Bash'):\n    sys.exit(0)\n\nif tool == 'Bash':\n    cmd = data.get('tool_input', {}).get('command', '') or ''\n    _root = os.environ.get('CLAUDE_PROJECT_DIR')\n    if not _root:\n        try:\n            _root = subprocess.check_output(['git','rev-parse','--show-toplevel'], stderr=subprocess.DEVNULL, cwd=os.getcwd()).decode().strip()\n        except Exception:\n            _root = os.getcwd()\n    _sd = os.path.join(_root, 'scripts')\n    if _sd not in sys.path:\n        sys.path.insert(0, _sd)\n    _gated = False\n    try:\n        import danger_gate as _dg\n        for _t in _dg.bash_write_targets(cmd):\n            _tt = _t.replace(os.sep, '/')\n            _rr = _root.replace(os.sep, '/').rstrip('/')\n            if _tt.startswith('/') or (len(_tt) > 1 and _tt[1] == ':' and _tt[0].isalpha()):\n                if _rr and _tt.startswith(_rr + '/'):\n                    _rp = _tt[len(_rr)+1:]\n                else:\n                    continue\n            else:\n                while _tt.startswith('./'):\n                    _tt = _tt[2:]\n                if _tt.startswith('../'):\n                    continue\n                _rp = _tt\n            if _rp == '.sessions' or _rp.startswith('.sessions/'):\n                continue\n            _gated = True\n            break\n    except Exception:\n        _gated = False\n    if _gated:\n        import phase_gate as _pg\n        _pg._require_fresh_plan(_root)\n    sys.exit(0)\n\n\n# Close-gate: block phase:done write until .close_checklist_ack exists\nif tool in ('Edit', 'Write') and ('active_thread.md' in rel_path or rel_path.endswith('active_thread.md')):\n    new_string = data.get('tool_input', {}).get('new_string', '') or data.get('tool_input', {}).get('content', '')\n    if 'phase: done' in new_string:\n        root_cg = os.environ.get('CLAUDE_PROJECT_DIR')\n        if not root_cg:\n            try:\n                root_cg = subprocess.check_output(['git','rev-parse','--show-toplevel'], stderr=subprocess.DEVNULL, cwd=os.getcwd()).decode().strip()\n            except Exception:\n                root_cg = os.getcwd()\n        ack = os.path.join(root_cg, '.sessions', '.close_checklist_ack')\n        if not os.path.exists(ack):\n            print('[close-gate] BLOCKED: .close_checklist_ack missing — must Read mece_plan_schema.md §Close Checklist + touch .sessions/.close_checklist_ack before writing phase: done', file=sys.stderr)\n            sys.exit(2)\n        if not os.environ.get('HARNESS_SKIP_INDEX_BLOCK'):\n            try:\n                chk = subprocess.run(['python3', os.path.join(os.environ.get('HARNESS_ENGINE_ROOT') or root_cg,'scripts','index_reconcile.py'),'--check'], capture_output=True, text=True, timeout=40)\n                if chk.returncode == 2:\n                    sys.stderr.write(chk.stderr)\n                    print('[close-gate] BLOCKED: index/doc-ref drift unhealed - run python3 scripts/index_reconcile.py to heal, then retry (or HARNESS_SKIP_INDEX_BLOCK=1 to override).', file=sys.stderr)\n                    sys.exit(2)\n            except Exception:\n                pass\n        try:\n            cfp_touched = os.path.join(root_cg, '.sessions', '.cfp_touched')\n            block_cfp = False\n            if os.path.exists(cfp_touched) and not os.environ.get('HARNESS_SKIP_CFP_BLOCK'):\n                _lp = os.path.join(root_cg, '.sessions', 'self_improve_log.md')\n                _td = __import__('datetime').date.today().isoformat()\n                _logged = (os.path.exists(_lp) and __import__('datetime').date.fromtimestamp(os.path.getmtime(_lp)).isoformat() == _td)\n                block_cfp = not _logged\n        except Exception:\n            block_cfp = False\n        if block_cfp:\n            print('[close-gate] BLOCKED: a CFP status changed this session (.cfp_touched) but self_improve_log.md not updated today - record the solution (loop stage 5) before phase:done, or HARNESS_SKIP_CFP_BLOCK=1 to override.', file=sys.stderr)\n            sys.exit(2)\n\nroot = os.environ.get('CLAUDE_PROJECT_DIR')\nif not root:\n    try:\n        root = subprocess.check_output(['git','rev-parse','--show-toplevel'], stderr=subprocess.DEVNULL, cwd=os.getcwd()).decode().strip()\n    except Exception:\n        root = os.getcwd()\n_t = file_path.replace(os.sep, '/')\n_r = root.replace(os.sep, '/').rstrip('/')\nif _t.startswith('/') or (len(_t) > 1 and _t[1] == ':' and _t[0].isalpha()):\n    if not (_r and _t.startswith(_r + '/')):\n        sys.exit(0)\nelse:\n    _tt = _t\n    while _tt.startswith('./'):\n        _tt = _tt[2:]\n    if _tt.startswith('../'):\n        sys.exit(0)\nif rel_path.startswith('.sessions/'):\n    sys.exit(0)\nif '.sessions/' in rel_path:\n    sys.exit(0)\n_sd2 = os.path.join(root, 'scripts')\nif _sd2 not in sys.path:\n    sys.path.insert(0, _sd2)\nimport phase_gate as _pg\n_pg._require_fresh_plan(root)\nsys.exit(0)\n\"",
+            "timeout": 8,
+            "statusMessage": "Phase gate check..."
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; \"$PY\" \"${HARNESS_ENGINE_ROOT:-${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}}/scripts/skill_gate.py\"",
+            "timeout": 8,
+            "statusMessage": "Skill gate check..."
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; \"$PY\" \"${HARNESS_ENGINE_ROOT:-${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}}/scripts/cfp_fix_plan_gate.py\"",
+            "timeout": 8,
+            "statusMessage": "CFP-fix plan gate check..."
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; \"$PY\" \"${HARNESS_ENGINE_ROOT:-${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}}/scripts/spawn_gate.py\"",
+            "timeout": 5,
+            "statusMessage": "Spawn-gate (parallel-cycle proof)..."
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; \"$PY\" \"${HARNESS_ENGINE_ROOT:-${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}}/scripts/boot_gate.py\"",
+            "timeout": 5,
+            "statusMessage": "Boot-gate (Boot ran this session? · T-380)..."
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; \"$PY\" \"${HARNESS_ENGINE_ROOT:-${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}}/scripts/danger_gate.py\"",
+            "timeout": 8,
+            "statusMessage": "Danger gate (headless block)..."
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit|Bash|Read|Grep|Glob|Task|WebFetch|WebSearch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; \"$PY\" \"${HARNESS_ENGINE_ROOT:-${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}}/scripts/context_ceiling_gate.py\"",
+            "timeout": 8,
+            "statusMessage": "Context-ceiling gate (real-token hard block · T-391)..."
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; \"$PY\" \"${HARNESS_ENGINE_ROOT:-${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}}/scripts/headroom_gate.py\"",
+            "timeout": 8,
+            "statusMessage": "Headroom gate (force safe_run/ranged read on big files · T-392)..."
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; \"$PY\" \"${HARNESS_ENGINE_ROOT:-${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}}/scripts/git_guard.py\"",
+            "timeout": 5,
+            "statusMessage": "git-guard check..."
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; \"$PY\" \"${HARNESS_ENGINE_ROOT:-${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}}/scripts/bash_autoapprove.py\"",
+            "timeout": 5,
+            "statusMessage": "bash auto-approve (safe compounds)..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; \"$PY\" \"${HARNESS_ENGINE_ROOT:-${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}}/scripts/posttool_track.py\"",
+            "timeout": 5,
+            "statusMessage": "Tracking loop weight..."
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; \"$PY\" \"${HARNESS_ENGINE_ROOT:-${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}}/scripts/cache_guard_hook.py\"",
+            "timeout": 5,
+            "statusMessage": "Cache-anchor guard..."
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "HARNESS_MUTATION_SYNC_ENFORCE=1 python3 \"${HARNESS_ENGINE_ROOT:-${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}}/scripts/mutation_sync.py\"",
+            "timeout": 5,
+            "statusMessage": "Per-event index sync (T-322)..."
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; \"$PY\" \"${HARNESS_ENGINE_ROOT:-${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}}/scripts/plan_lint.py\" --hook",
+            "timeout": 10,
+            "statusMessage": "Tier-lint mece plan..."
+          },
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; \"$PY\" \"${HARNESS_ENGINE_ROOT:-${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}}/scripts/roadmap_lint.py\" --hook",
+            "timeout": 10,
+            "statusMessage": "§6.2-lint roadmap (T-374)..."
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; \"$PY\" \"${HARNESS_ENGINE_ROOT:-${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}}/scripts/headroom_hook.py\"",
+            "timeout": 5,
+            "statusMessage": "Headroom auto-nudge (T-344)..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}\"; ctr=$(\"$PY\" \"${HARNESS_ENGINE_ROOT:-$ROOT}/scripts/real_context.py\" 2>/dev/null); [ -n \"$ctr\" ] && { sed \"s/^CHAT_TOTAL:.*/CHAT_TOTAL: $ctr/\" \"$ROOT/.sessions/session_tokens.md\" > \"$ROOT/.sessions/session_tokens.md.tmp.$$\" 2>/dev/null && mv -f \"$ROOT/.sessions/session_tokens.md.tmp.$$\" \"$ROOT/.sessions/session_tokens.md\" || rm -f \"$ROOT/.sessions/session_tokens.md.tmp.$$\" 2>/dev/null; }; true"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}\" && bash \"${HARNESS_ENGINE_ROOT:-$ROOT}/scripts/write_context_cache.sh\" 2>/dev/null || true",
+            "timeout": 10,
+            "statusMessage": "Saving context cache..."
+          },
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}\" && \"$PY\" \"${HARNESS_ENGINE_ROOT:-$ROOT}/scripts/index_reconcile.py\" 2>/dev/null; \"$PY\" \"${HARNESS_ENGINE_ROOT:-$ROOT}/scripts/cfp_fix_probe.py\" 2>/dev/null || true",
+            "timeout": 20,
+            "statusMessage": "Reconciling index drift..."
+          },
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}\" && \"$PY\" \"${HARNESS_ENGINE_ROOT:-$ROOT}/scripts/flow_freshness.py\" 2>/dev/null || true",
+            "timeout": 15,
+            "statusMessage": "Checking flow-doc freshness..."
+          },
+          {
+            "type": "command",
+            "command": "export PYTHONUTF8=1; PY=\"$(command -v python3 || command -v python || command -v py || echo python3)\"; ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}\" && \"$PY\" \"${HARNESS_ENGINE_ROOT:-$ROOT}/scripts/share_close.py\" 2>/dev/null || true",
+            "timeout": 15,
+            "statusMessage": "Sharing learnings (opt-in)..."
+          }
+        ]
+      }
+    ]
+  }
+}
