@@ -326,7 +326,7 @@ _Auto-generated structure snapshot — repo_map_check.py --sync (2026-09-02). Do
 | `.firebase/ttsdocumentcontrol/hosting/rfa/material/` | 1 | 0 |
 | `.firebase/ttsdocumentcontrol/hosting/rfa/shop/` | 1 | 0 |
 | `.firebase/ttsdocumentcontrol/hosting/work-request/` | 1 | 0 |
-| `.sessions/` | 64 | 0 |
+| `.sessions/` | 65 | 0 |
 | `backend/` | 0 | 1 |
 | `backend/init-scripts/` | 0 | 0 |
 | `docs/` | 1 | 1 |
